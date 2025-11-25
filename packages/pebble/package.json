@@ -1,6 +1,6 @@
 {
   "name": "@harmoniclabs/pebble",
-  "version": "0.1.2",
+  "version": "0.1.3-dev0",
   "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
