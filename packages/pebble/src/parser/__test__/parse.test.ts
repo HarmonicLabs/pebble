@@ -1,3 +1,4 @@
+import { Source } from "../../ast/Source/Source";
 import { parseFile } from "../parseFile";
 
 describe("parseFile", () => {
@@ -5,9 +6,9 @@ describe("parseFile", () => {
     function testParse( src: string, log: boolean = false )
     {
         test(src, () => {
-            let result: any;
+            let result: Source;
             expect(() => result = parseFile( "test.pebble", src )).not.toThrow();
-            log && console.log( result );
+            log && console.dir( result!.statements, { depth: Infinity } );
         });
     }
 
@@ -22,7 +23,7 @@ describe("parseFile", () => {
 
     describe("simple var decls", () => {
         testParse( "const a = 1;" );
-        testParseFailure( "const const = 1;", true );
+        testParseFailure( "const const = 1;" );
         testParse( "let a = 1;" );
         testParse( "var a = 1;" );
     });

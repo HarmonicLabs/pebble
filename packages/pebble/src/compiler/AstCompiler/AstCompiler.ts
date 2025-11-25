@@ -567,6 +567,10 @@ export class AstCompiler extends DiagnosticEmitter
             tirFuncName,
             funcExpr
         );
+        this.program.functions.set(
+            astFuncName,
+            funcExpr
+        );
 
         if( topLevelScope.functions.has( astFuncName ) )
         return this.error(
@@ -579,6 +583,11 @@ export class AstCompiler extends DiagnosticEmitter
             astFuncName,
             tirFuncName
         );
+        topLevelScope.defineValue({
+            isConstant: true,
+            name: astFuncName,
+            type: funcExpr.type,
+        });
 
         if( exportRange && srcExports )
         {

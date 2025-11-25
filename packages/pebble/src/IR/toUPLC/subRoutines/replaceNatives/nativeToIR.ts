@@ -18,6 +18,7 @@ import { _ir_lazyChooseList } from "../../../tree_utils/_ir_lazyChooseList";
 import { _ir_lazyIfThenElse } from "../../../tree_utils/_ir_lazyIfThenElse";
 import { hoisted_drop4, hoisted_drop2, hoisted_drop3 } from "../_comptimeDropN";
 import { IRCase, IRConstr } from "../../../IRNodes";
+import { _ir_and, _ir_or } from "../../../../compiler/tir/expressions/binary/TirBinaryExpr";
 
 function _ir_strictAnd( left: IRTerm, right: IRTerm ): IRTerm
 {
@@ -90,6 +91,11 @@ export const hoisted_subOne = new IRHoisted(
 );
 hoisted_subOne.hash;
 
+export const hoisted_negateInteger = new IRHoisted(
+    new IRApp( IRNative.subtractInteger, IRConst.int( 0 ) )
+);
+hoisted_negateInteger.hash;
+
 export const hoisted_isPositive = new IRHoisted(
     new IRApp( IRNative.lessThanInteger, IRConst.int( 0 ) )
 );
@@ -129,6 +135,7 @@ export const hoisted_matchList = new IRHoisted(
 hoisted_matchList.hash;
 
 
+//*
 // hoisted_recursiveList (needed by hoisted_foldr)
 const recList_matchNil = Symbol("matchNil");
 const recList_matchCons = Symbol("matchCons");
@@ -152,9 +159,10 @@ export const hoisted_recursiveList = new IRHoisted(
     )
 );
 hoisted_recursiveList.hash;
+//*/
 
 // hoisted_foldr
-const foldr_reduce = Symbol("reduceFunc");
+const foldr_reducer = Symbol("reduceFunc");
 const foldr_acc = Symbol("accumulator");
 const foldr__dummy = Symbol("_self");
 const foldr_self = Symbol("self");
@@ -162,7 +170,7 @@ const foldr_head = Symbol("head");
 const foldr_tail = Symbol("tail");
 export const hoisted_foldr = new IRHoisted(
     new IRFunc(
-        [ foldr_reduce, foldr_acc ],
+        [ foldr_reducer, foldr_acc ],
         _ir_apps(
             hoisted_recursiveList.clone(),
             new IRFunc(
@@ -172,7 +180,7 @@ export const hoisted_foldr = new IRHoisted(
             new IRFunc(
                 [ foldr_self, foldr_head, foldr_tail ],
                 _ir_apps(
-                    new IRVar( foldr_reduce ),
+                    new IRVar( foldr_reducer ),
                     new IRVar( foldr_head ),
                     new IRApp(
                         new IRVar( foldr_self ),
@@ -505,28 +513,37 @@ hoisted_strictOr.hash;
 
 // hoisted _some
 const some_pred = Symbol("predicate");
-const some_dummy = Symbol("_self");
+const some_lst = Symbol("lst");
 const some_self = Symbol("self");
-const some_head = Symbol("head");
-const some_tail = Symbol("tail");
 export const hoisted_some = new IRHoisted(
     new IRFunc(
         [ some_pred ],
-        _ir_apps(
-            hoisted_recursiveList.clone(),
-            new IRFunc( [ some_dummy ], new IRDelayed( IRConst.bool( false ) ) ),
+        new IRRecursive(
+            some_self,
             new IRFunc(
-                [ some_self, some_head, some_tail ],
-                new IRForced(_ir_apps(
-                    hoisted_strictOr.clone(),
-                    new IRDelayed( new IRApp( new IRVar( some_pred ), new IRVar( some_head ) ) ),
-                    new IRDelayed(
-                        new IRApp(
-                            new IRVar( some_self ),
-                            new IRVar( some_tail )
+                [ some_lst ],
+                _ir_lazyChooseList(
+                    new IRVar( some_lst ),
+                    IRConst.bool( false ), // case nil => false
+                    _ir_or(
+                        // either predicate(head) is true
+                        _ir_apps(
+                            new IRVar( some_pred ),
+                            new IRApp(
+                                IRNative.headList,
+                                new IRVar( some_lst )
+                            )
+                        ),
+                        // or self(tail) is true
+                        _ir_apps(
+                            new IRSelfCall( some_self ),
+                            new IRApp(
+                                IRNative.tailList,
+                                new IRVar( some_lst )
+                            )
                         )
                     )
-                ))
+                )
             )
         )
     )
@@ -535,28 +552,37 @@ hoisted_some.hash;
 
 // hoisted _every
 const every_pred = Symbol("predicate");
-const every_dummy = Symbol("_self");
 const every_self = Symbol("self");
-const every_head = Symbol("head");
-const every_tail = Symbol("tail");
+const every_lst = Symbol("lst");
 export const hoisted_every = new IRHoisted(
     new IRFunc(
         [ every_pred ],
-        _ir_apps(
-            hoisted_recursiveList.clone(),
-            new IRFunc( [ every_dummy ], new IRDelayed( IRConst.bool( true ) ) ),
+        new IRRecursive(
+            every_self,
             new IRFunc(
-                [ every_self, every_head, every_tail ],
-                new IRForced( _ir_apps(
-                    hoisted_strictAnd.clone(),
-                    new IRDelayed( new IRApp( new IRVar( every_pred ), new IRVar( every_head ) ) ),
-                    new IRDelayed(
-                        new IRApp(
-                            new IRVar( every_self ),
-                            new IRVar( every_tail )
+                [ every_lst ],
+                _ir_lazyChooseList(
+                    new IRVar( every_lst ),
+                    IRConst.bool( true ), // case nil => true
+                    _ir_and(
+                        // both predicate(head) is true
+                        _ir_apps(
+                            new IRVar( every_pred ),
+                            new IRApp(
+                                IRNative.headList,
+                                new IRVar( every_lst )
+                            )
+                        ),
+                        // AND self(tail) is true
+                        _ir_apps(
+                            new IRSelfCall( every_self ),
+                            new IRApp(
+                                IRNative.tailList,
+                                new IRVar( every_lst )
+                            )
                         )
                     )
-                ))
+                )
             )
         )
     )
@@ -905,6 +931,11 @@ export function nativeToIR( native: IRNative ): IRTerm
         case IRNativeTag._mkMapList: return hoisted_mkMapList.clone();
         case IRNativeTag._increment: return hoisted_addOne.clone();
         case IRNativeTag._decrement: return hoisted_subOne.clone();
+        // case IRNativeTag._bytesToIntBE: ;
+        // case IRNativeTag._equalBoolean: ;
+        // case IRNativeTag._equalPairData: ;
+        case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
+        case IRNativeTag._negateInt: return hoisted_negateInteger.clone();
         // case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         default:
         throw new Error(

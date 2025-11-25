@@ -72,12 +72,18 @@ export class ExpressifyCtx
         this.hoisted = (
             hoisted
             ?? this.parent?.hoisted
-            ?? new Map(
-                [ ...program.constants.entries() ].map(([ name, decl ]) => {
+            ?? new Map<string, TirHoistedExpr>(
+                [ ...program.constants.entries() ]
+                .map(([ name, decl ]) => {
                     if( !decl.initExpr ) throw new Error(`expected init expr in hoisted constant '${name}'`);
                     const expr = decl.initExpr instanceof TirHoistedExpr ? decl.initExpr : new TirHoistedExpr( name, decl.initExpr );
                     return [ name, expr ];
                 })
+                .concat(
+                    [ ...program.functions.entries() ].map( ([ name, func ]) => {
+                        return [ name, new TirHoistedExpr( name, func ) ];
+                    }) as [string, TirHoistedExpr][]
+                ) as [string, TirHoistedExpr][]
             )
         );
     }
@@ -171,7 +177,7 @@ export class ExpressifyCtx
             ?? this.hoisted.get( name )
         );
         if( !result ) {
-            console.log( "[error log]: allVariables", this.allVariables() );
+            console.log( "[error log]: allVariables", this.allVariables(), "; get:", name );
             throw new Error(`variable '${name}' not found in the context`);
         }
         return result;

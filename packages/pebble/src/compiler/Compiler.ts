@@ -9,6 +9,7 @@ import { toHex } from "@harmoniclabs/uint8array-utils";
 import { __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from "../IR/IRHash";
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
 import { config } from "process";
+import { TypedProgram } from "./tir/program/TypedProgram";
 
 export class Compiler
     extends DiagnosticEmitter
@@ -43,26 +44,7 @@ export class Compiler
             }
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
-        // backend starts here
-        const ir = compileTypedProgram(
-            cfg,
-            program
-        );
-        const uplc = compileIRToUPLC( ir );
-        const serialized = compileUPLC(
-            new UPLCProgram(
-                cfg.targetUplcVersion,
-                uplc
-            )
-        ).toBuffer().buffer;
-
-        const outDir = cfg.outDir;
-        const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
-        this.io.writeFile( outPath, serialized, cfg.root );
-        this.io.stdout.write( `compiled program written to ${outPath}\n` );
-
-        __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION();
-        return serialized;
+        return this._compileBackend( cfg, program );
     }
 
     async export( config: Partial<ExportOptions> & HasFuncitonName ): Promise<Uint8Array>
@@ -89,6 +71,14 @@ export class Compiler
             }
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
+        return this._compileBackend( cfg, program );
+    }
+
+    private _compileBackend(
+        cfg: CompilerOptions,
+        program: TypedProgram
+    ): Uint8Array 
+    {
         // backend starts here
         const ir = compileTypedProgram(
             cfg,

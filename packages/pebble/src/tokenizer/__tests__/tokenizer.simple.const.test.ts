@@ -14,7 +14,7 @@ test("const thing = 2;", () => {
     const tn = new Tokenizer( src );
 
     const tokens = getAllTokens( tn );
-    console.log( tokens );
+    // console.log( tokens );
     expect( tokens ).toEqual([
         Token[Token.Const],
         Token[Token.Identifier], "thing",

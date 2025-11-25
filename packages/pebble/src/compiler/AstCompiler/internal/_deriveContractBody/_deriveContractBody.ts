@@ -661,8 +661,9 @@ function _getMatchedRedeemerBlockStatements(
     const result = stmts.slice();
 
     for( let i = 0; i < result.length; i++ ) {
-        const stmt = result[i];
+        let stmt = result[i];
 
+        if( isVarDecl( stmt ) ) stmt = new VarStmt([ stmt ], stmt.range );
         if( stmt instanceof VarStmt ) {
             if( stmt.declarations.length !== 1 ) {
                 for( const varDecl of stmt.declarations ) {
@@ -1022,6 +1023,7 @@ function _getMatchedRedeemerBlockStatements(
         }
 
         const tsEnsureExhaustiveCheck: never = stmt;
+        console.error( stmt );
         throw new Error("unreachable::_getMatchedRedeemerBlockStatements::stmt::"); 
     }
 
