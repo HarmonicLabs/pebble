@@ -20,7 +20,7 @@ import { performUplcOptimizationsAndReturnRoot } from "./subRoutines/performUplc
 import { rewriteNativesAppliedToConstantsAndReturnRoot } from "./subRoutines/rewriteNativesAppliedToConstantsAndReturnRoot";
 import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
-import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
+import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusedVarsAndReturnRoot/removeUnusedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
 
 export function compileIRToUPLC(
