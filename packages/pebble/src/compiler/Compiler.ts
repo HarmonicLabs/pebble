@@ -90,7 +90,7 @@ export class Compiler
                 cfg.targetUplcVersion,
                 uplc
             )
-        ).toBuffer().buffer;
+        );
 
         const outDir = cfg.outDir;
         const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";

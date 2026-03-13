@@ -163,7 +163,7 @@ export class TirNativeFunc
         );
     }
 
-    // ByteString operations
+    // bytes operations
     static get appendByteString(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.appendByteString,
@@ -687,7 +687,7 @@ export class TirNativeFunc
         );
     }
 
-    // ByteString manipulation
+    // bytes manipulation
     static get integerToByteString(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.integerToByteString,
@@ -785,7 +785,7 @@ export class TirNativeFunc
         );
     }
 
-    // Additional ByteString operations
+    // Additional bytes operations
     static get replicateByte(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.replicateByte,

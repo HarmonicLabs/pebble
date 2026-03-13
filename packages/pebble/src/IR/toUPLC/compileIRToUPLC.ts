@@ -22,6 +22,7 @@ import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr 
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
+import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/ensureProperlyForcedBuiltinsAndReturnRoot";
 
 export function compileIRToUPLC(
     term: IRTerm,
@@ -191,6 +192,7 @@ export function compileIRToUPLC(
 
     term = removeUnusedVarsAndReturnRoot( term );
     term = performUplcOptimizationsAndReturnRoot( term, options );
+    term = ensureProperlyForcedBuiltinsAndReturnRoot( term );
 
     if(
         options.addMarker &&

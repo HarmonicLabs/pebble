@@ -1,5 +1,4 @@
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
-import { Pair } from "@harmoniclabs/pair";
 import { Data, isData, dataToCbor } from "@harmoniclabs/plutus-data";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
 import { BasePlutsError } from "../../utils/BasePlutsError";
@@ -17,7 +16,7 @@ import { TirAliasType } from "../../compiler/tir/types/TirAliasType";
 import { TirDataStructType, TirSoPStructType } from "../../compiler/tir/types/TirStructType";
 import { getListTypeArg } from "../../compiler/tir/types/utils/getListTypeArg";
 import { TirTypeParam } from "../../compiler/tir/types/TirTypeParam";
-import { constT, ConstType, UPLCConst } from "@harmoniclabs/uplc";
+import { constT, ConstType, isPair, UPLCConst } from "@harmoniclabs/uplc";
 import { TirPairDataT, TirUnConstrDataResultT } from "../../compiler/tir/types/TirNativeType";
 import { TirBoolT } from "../../compiler/tir/types/TirNativeType/native/bool";
 import { TirBytesT } from "../../compiler/tir/types/TirNativeType/native/bytes";
@@ -32,7 +31,6 @@ import { TirStringT } from "../../compiler/tir/types/TirNativeType/native/string
 import { TirVoidT } from "../../compiler/tir/types/TirNativeType/native/void";
 import { IIRTerm, IRTerm } from "../IRTerm";
 import { hashIrData, IRHash, isIRHash } from "../IRHash";
-import { ByteString } from "@harmoniclabs/bytestring";
 import { UPLCFlatUtils } from "../../utils/UPLCFlatUtils";
 
 export interface IRConstPair {
@@ -43,7 +41,7 @@ export interface IRConstPair {
 export function isIRConstPair( value: any ): value is IRConstPair
 {
     return (
-        value instanceof Pair &&
+        isPair( value ) &&
         isIRConstValue( value.fst ) &&
         isIRConstValue( value.snd )
     );
@@ -117,7 +115,7 @@ export class IRConst
             // make a copy to prevent external mutation
             return new UPLCConst(
                 tirTypeToUplcType( type ),
-                new ByteString( this.value )
+                this.value
             );
         }
         return new UPLCConst(
@@ -339,7 +337,7 @@ function serializeIRConstValue( value: any, type: TirType ): Uint8Array
         type instanceof TirDataT
         || type instanceof TirDataOptT
         || type instanceof TirDataStructType
-    ) return dataToCbor( value ).toBuffer();
+    ) return dataToCbor( value );
 
     if(
         type instanceof TirFuncT
