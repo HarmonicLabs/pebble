@@ -129,6 +129,11 @@ function groupIndependentApplications( root: IRTerm ): { newRoot: IRTerm | undef
 
     const params: symbol[] = func.params.slice();
 
+    // Separate excess outer args: getApplicationTerms may return more args
+    // than func.params (e.g. `(λp. body)(arg1)(arg2)` → 2 args, 1 param).
+    // Excess args are trailing applications applied after all param bindings.
+    const trailingArgs: IRTerm[] = args.splice(params.length);
+
     while( true )
     {
         applicaitonTerms = getApplicationTerms( func.body );
@@ -136,15 +141,22 @@ function groupIndependentApplications( root: IRTerm ): { newRoot: IRTerm | undef
         if(!( applicaitonTerms.func instanceof IRFunc ) ) break;
         func = applicaitonTerms.func;
 
+        const nNewParams = func.params.length;
+        const innerArgs = applicaitonTerms.args;
+
         params.push( ...func.params );
-        args.push( ...applicaitonTerms.args );
+        args.push( ...innerArgs.slice( 0, nNewParams ) );
+        // Inner excess args are applied before outer excess args
+        if( innerArgs.length > nNewParams ) {
+            trailingArgs.unshift( ...innerArgs.slice( nNewParams ) );
+        }
 
         if( params.length !== args.length ) break;
     }
 
     const len = Math.min( params.length, args.length );
     const finalParams = params.slice( len );
-    const finalArgs = args.slice( len );
+    const finalArgs = [ ...args.slice( len ), ...trailingArgs ];
     params.length = len;
     args.length = len;
 
