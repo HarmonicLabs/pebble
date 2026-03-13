@@ -11,6 +11,7 @@ import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirBreakStmt } from "../../tir/statements/TirBreakStmt";
 import { TirContinueStmt } from "../../tir/statements/TirContinueStmt";
 import { TirFailStmt } from "../../tir/statements/TirFailStmt";
+import { TirTraceStmt } from "../../tir/statements/TirTraceStmt";
 import { TirForOfStmt } from "../../tir/statements/TirForOfStmt";
 import { TirForStmt } from "../../tir/statements/TirForStmt";
 import { TirIfStmt } from "../../tir/statements/TirIfStmt";
@@ -107,6 +108,7 @@ export function determineReassignedVariablesAndReturn(
     {
         if(
             stmt instanceof TirFailStmt
+            || stmt instanceof TirTraceStmt
             || isTirVarDecl( stmt )
             || stmt instanceof TirBreakStmt
             || stmt instanceof TirContinueStmt
@@ -182,9 +184,8 @@ export function determineReassignedVariablesAndFlowInfos(
     {
         if(
             stmt instanceof TirFailStmt
+            || stmt instanceof TirTraceStmt
             || isTirVarDecl( stmt )
-            || stmt instanceof TirBreakStmt
-            || stmt instanceof TirContinueStmt
             || stmt instanceof TirAssertStmt
         ) continue;
 
@@ -207,7 +208,7 @@ export function determineReassignedVariablesAndFlowInfos(
             reassignedSet.add( stmt.varIdentifier.varName );
             continue;
         }
-        
+
         if( stmt instanceof TirBlockStmt ) {
             stack.push( ...stmt.stmts );
             continue;
@@ -305,6 +306,7 @@ export function definitelyFails( stmt: TirStmt | TirBlockStmt ): boolean
             || stmt instanceof TirContinueStmt
             || stmt instanceof TirAssertStmt
             || stmt instanceof TirAssignmentStmt
+            || stmt instanceof TirTraceStmt
         ) continue;
 
         // const tsEnsureExsaustiveCheck: never = stmt;

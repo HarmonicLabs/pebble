@@ -27,6 +27,7 @@ import { FuncDecl } from "./declarations/FuncDecl";
 import { ExportStmt } from "./ExportStmt";
 import { InterfaceDecl } from "./declarations/InterfaceDecl";
 import { ContractDecl } from "./declarations/ContractDecl";
+import { TraceStmt } from "./TraceStmt";
 
 /* *
  * An expression is a piece of code
@@ -158,6 +159,7 @@ export type BodyStmt
     | EmptyStmt
     | FailStmt
     | AssertStmt
+    | TraceStmt
     | MatchStmt
     | AssignmentStmt
     // | ExprStmt // function calls with native side effects (error and/or traces)
@@ -180,6 +182,7 @@ export function isBodyStmt( stmt: any ): stmt is BodyStmt
         || stmt instanceof EmptyStmt
         || stmt instanceof FailStmt
         || stmt instanceof AssertStmt
+        || stmt instanceof TraceStmt
         || stmt instanceof MatchStmt
         || isAssignmentStmt( stmt )
         // || stmt instanceof ExprStmt

@@ -164,6 +164,7 @@ export function tokenFromKeyword(text: string): Token {
                 if (text === "type") return Token.Type;
                 break;
             }
+            if (text === "trace") return Token.Trace;
             // if (text === "try") return Token.Try;
             // if (text === "throw") return Token.Throw;
             // if (text === "typeof") return Token.TypeOf;

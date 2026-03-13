@@ -1,4 +1,5 @@
-import { compileUPLC, prettyUPLC, UPLCProgram } from "@harmoniclabs/uplc";
+import { compileUPLC, parseUPLC, prettyUPLC, UPLCProgram } from "@harmoniclabs/uplc";
+import { Machine } from "@harmoniclabs/plutus-machine";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
 import { CompilerOptions, defaultOptions } from "../IR/toUPLC/CompilerOptions";
@@ -72,6 +73,31 @@ export class Compiler
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
         return this._compileBackend( cfg, program );
+    }
+
+    async run( config?: Partial<CompilerOptions> )
+    {
+        const cfg = {
+            ...this.cfg,
+            ...config,
+            // NEVER generate markers when running
+            addMarker: false,
+        };
+        const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
+        const program = await astCompiler.run();
+        if( this.diagnostics.length > 0 ) {
+            let msg: DiagnosticMessage;
+            globalThis.console && console.log( this.diagnostics );
+            const fstErrorMsg = this.diagnostics[0].toString();
+            const nDiags = this.diagnostics.length;
+            while( msg = this.diagnostics.shift()! ) {
+                this.io.stdout.write( msg.toString() + "\n" );
+            }
+            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+        }
+        const serialized = this._compileBackend( cfg, program );
+        const uplcProgram = parseUPLC( serialized );
+        return Machine.eval( uplcProgram.body );
     }
 
     private _compileBackend(

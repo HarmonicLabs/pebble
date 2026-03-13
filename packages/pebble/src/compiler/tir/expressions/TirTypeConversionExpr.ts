@@ -7,6 +7,7 @@ import { TirBytesT } from "../types/TirNativeType/native/bytes";
 import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
+import { TirStringT } from "../types/TirNativeType/native/string";
 import { TirDataStructType } from "../types/TirStructType";
 import { TirType } from "../types/TirType";
 import { getUnaliased } from "../types/utils/getUnaliased";
@@ -99,6 +100,15 @@ export class TirTypeConversionExpr
             if( from_t instanceof TirBoolT ) return exprIR;
             if( from_t instanceof TirIntT ) return _ir_apps(
                 IRNative._intToBool,
+                exprIR
+            );
+            throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
+        }
+
+        if( to_t instanceof TirStringT )
+        {
+            if( from_t instanceof TirBytesT ) return _ir_apps(
+                IRNative.decodeUtf8,
                 exprIR
             );
             throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);

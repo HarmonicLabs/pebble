@@ -27,6 +27,23 @@ export function keepSortedStrArrInplace( target: string[], source: string[] ): s
             continue; // element is in source, check next without removing this
         }
 
+        // elem > fstSrc: source has elements not in target, advance source
+        if( elem > fstSrc )
+        {
+            while( source.length > 0 && fstSrc < elem ) {
+                fstSrc = source.shift()!;
+            }
+            if( fstSrc === elem ) {
+                fstSrc = source.shift()!;
+                if( !fstSrc ) {
+                    target.length = i + 1;
+                    return target;
+                }
+                continue;
+            }
+            // fstSrc > elem or source exhausted: elem not in source, fall through to remove
+        }
+
         // not equal, remove the element
         target.splice(i, 1);
         i--; // adjust index since we removed an element

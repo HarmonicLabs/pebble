@@ -9,6 +9,7 @@ import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirBreakStmt } from "../../tir/statements/TirBreakStmt";
 import { TirContinueStmt } from "../../tir/statements/TirContinueStmt";
 import { TirFailStmt } from "../../tir/statements/TirFailStmt";
+import { TirTraceStmt } from "../../tir/statements/TirTraceStmt";
 import { TirForOfStmt } from "../../tir/statements/TirForOfStmt";
 import { TirForStmt } from "../../tir/statements/TirForStmt";
 import { TirIfStmt } from "../../tir/statements/TirIfStmt";
@@ -117,6 +118,7 @@ function replaceReturnStatements(
             || stmt instanceof TirBreakStmt
             || stmt instanceof TirContinueStmt
             || stmt instanceof TirFailStmt
+            || stmt instanceof TirTraceStmt
             || stmt instanceof TirAssertStmt
             || stmt instanceof TirAssignmentStmt
         ) continue;

@@ -4,6 +4,7 @@ import { TirLitVoidExpr } from "../../tir/expressions/litteral/TirLitVoidExpr";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../tir/expressions/TirCaseExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
 import { TirFailExpr } from "../../tir/expressions/TirFailExpr";
+import { TirTraceExpr } from "../../tir/expressions/TirTraceExpr";
 import { TirFuncExpr } from "../../tir/expressions/TirFuncExpr";
 import { TirLettedExpr } from "../../tir/expressions/TirLettedExpr";
 import { TirVariableAccessExpr } from "../../tir/expressions/TirVariableAccessExpr";
@@ -13,6 +14,7 @@ import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirBreakStmt } from "../../tir/statements/TirBreakStmt";
 import { TirContinueStmt } from "../../tir/statements/TirContinueStmt";
 import { TirFailStmt } from "../../tir/statements/TirFailStmt";
+import { TirTraceStmt } from "../../tir/statements/TirTraceStmt";
 import { TirForOfStmt } from "../../tir/statements/TirForOfStmt";
 import { TirForStmt } from "../../tir/statements/TirForStmt";
 import { TirIfStmt } from "../../tir/statements/TirIfStmt";
@@ -391,6 +393,17 @@ export function expressifyFuncBody(
                 );
             }
         }
+        else if( stmt instanceof TirTraceStmt ) {
+            const modifiedExpr = expressifyVars( ctx, stmt.expr );
+            stmt.expr = modifiedExpr;
+
+            const continuation = expressifyFuncBody( ctx, bodyStmts, loopReplacements );
+
+            return TirAssertAndContinueExpr.fromStmtsAndContinuation(
+                assertions,
+                new TirTraceExpr( modifiedExpr, continuation, stmt.range )
+            );
+        }
         else if( stmt instanceof TirAssertStmt ) {
             const condition = expressifyVars( ctx, stmt.condition );
             stmt.condition = condition;
@@ -650,7 +663,6 @@ export function expressifyFuncBody(
         )
         {
             const definitelyTerminates = stmt.definitelyTerminates();
-
             const reassignedAndFlow = determineReassignedVariablesAndFlowInfos( stmt );
             const returnTypeAndInvalidInit = getBranchStmtReturnType( reassignedAndFlow, ctx, stmt.range );
             const forStmt = loopToForStmt( stmt );

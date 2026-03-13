@@ -45,6 +45,7 @@ import { IfStmt } from "../../../../ast/nodes/statements/IfStmt";
 import { MatchStmtCase, MatchStmt, MatchStmtElseCase } from "../../../../ast/nodes/statements/MatchStmt";
 import { BodyStmt } from "../../../../ast/nodes/statements/PebbleStmt";
 import { ReturnStmt } from "../../../../ast/nodes/statements/ReturnStmt";
+import { TraceStmt } from "../../../../ast/nodes/statements/TraceStmt";
 import { UsingStmt } from "../../../../ast/nodes/statements/UsingStmt";
 import { VarStmt } from "../../../../ast/nodes/statements/VarStmt";
 import { WhileStmt } from "../../../../ast/nodes/statements/WhileStmt";
@@ -1022,9 +1023,21 @@ function _getMatchedRedeemerBlockStatements(
             continue;
         }
 
+        if( stmt instanceof TraceStmt ) {
+            const newExpr = _exprReplaceParamsAndAssertNoLitContext(
+                compiler,
+                stmt.expr,
+                paramsInternalNamesMap,
+                renamedVariables
+            );
+            if( !newExpr ) return undefined;
+            stmt.expr = newExpr;
+            continue;
+        }
+
         const tsEnsureExhaustiveCheck: never = stmt;
         console.error( stmt );
-        throw new Error("unreachable::_getMatchedRedeemerBlockStatements::stmt::"); 
+        throw new Error("unreachable::_getMatchedRedeemerBlockStatements::stmt::");
     }
 
     return result;

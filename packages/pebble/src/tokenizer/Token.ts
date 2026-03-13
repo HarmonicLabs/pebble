@@ -84,6 +84,7 @@ export enum Token {
 
     Fail,       // fail ("message")?
     Assert,     // assert (condition) (else "message")?
+    Trace,      // trace <expr>;
 
     // contract keywords
     Contract,       // contract Name { ... }

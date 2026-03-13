@@ -135,8 +135,49 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     /**
+     * Parses the entry file, wraps all top-level statements
+     * (except functions, contracts, type declarations, imports, and exports)
+     * into a synthetic function, then compiles via export.
+     *
+     * The wrapping is done at the source text level (before parsing)
+     * so that statements which are not parseable at the top level
+     * (e.g. for loops, assignments, trace calls) become valid
+     * inside a function body.
+     */
+    async run(): Promise<TypedProgram>
+    {
+        const RUN_FUNC_NAME = "__pebble_run__";
+        this._isExporting = true;
+        this.program.contractTirFuncName = RUN_FUNC_NAME;
+
+        const filePath = this.cfg.entry;
+        if( !filePath )
+        {
+            this.error(
+                DiagnosticCode.File_0_not_found,
+                undefined, this.cfg.entry
+            );
+            throw new Error("entry file not found");
+        }
+        if( !this.io.exsistSync( filePath ) )
+            throw new Error("AstCompiler.run: entry file does not exist: " + filePath );
+
+        const src = await this.getAbsoulteProjPathSource( filePath );
+        if( !src ) throw new Error("AstCompiler.run: could not read source: " + filePath );
+
+        // 1) Rewrite the source text: wrap non-declaration statements in a function
+        src.text = _wrapSourceTextForRun( src.text, RUN_FUNC_NAME );
+        // update range to match the new text length
+        src.range.end = src.text.length;
+
+        // 2) Use the normal compilation pipeline (parse + semantic analysis)
+        //    which now sees the entry source as having a top-level function
+        return await this.compile();
+    }
+
+    /**
      * compiles the entry file specified in the config
-     * 
+     *
      * the result is store in `this.program`
      */
     async compile(): Promise<TypedProgram>
@@ -1214,4 +1255,181 @@ function isImportStmtLike( stmt: any ): stmt is ImportStmtLike
         || stmt instanceof ImportStarStmt
         || stmt instanceof ExportStarStmt
     );
+}
+
+/** Keywords that start a top-level declaration (kept outside the run wrapper). */
+const _declKeywords = new Set([
+    "import",
+    "export",
+    "function",
+    "struct",
+    "enum",
+    "type",
+    "interface",
+    "contract",
+    "data",
+    "runtime",
+]);
+
+/**
+ * Splits source text into declaration blocks and body blocks
+ * using a simple character scanner, then wraps body blocks
+ * in a `function <funcName>(): void { ... }`.
+ *
+ * Declaration keywords (import, export, function, struct, enum, type, interface,
+ * contract, data, runtime) are recognized at the start of each top-level statement
+ * and kept outside the wrapper. Everything else goes inside the wrapper function.
+ */
+function _wrapSourceTextForRun( text: string, funcName: string ): string
+{
+    const len = text.length;
+    const ranges: { start: number; end: number; isDecl: boolean }[] = [];
+
+    let pos = 0;
+
+    while( pos < len )
+    {
+        // skip whitespace
+        while( pos < len && _isWhitespace( text.charCodeAt( pos ) ) ) pos++;
+        if( pos >= len ) break;
+
+        const stmtStart = pos;
+
+        // read the first word to determine if this is a declaration
+        const word = _readWord( text, pos );
+        const isDecl = _declKeywords.has( word );
+
+        // find the end of this statement:
+        // track brace/paren depth, respect strings and comments
+        let braceDepth = 0;
+        let parenDepth = 0;
+        let ended = false;
+
+        while( pos < len && !ended )
+        {
+            const ch = text.charCodeAt( pos );
+
+            // single-line comment
+            if( ch === 0x2F /* / */ && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F /* / */ )
+            {
+                pos += 2;
+                while( pos < len && text.charCodeAt( pos ) !== 0x0A /* \n */ ) pos++;
+                continue;
+            }
+            // multi-line comment
+            if( ch === 0x2F /* / */ && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2A /* * */ )
+            {
+                pos += 2;
+                while( pos < len && !( text.charCodeAt( pos ) === 0x2A && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F ) ) pos++;
+                pos += 2; // skip */
+                continue;
+            }
+            // string literals
+            if( ch === 0x22 /* " */ || ch === 0x27 /* ' */ || ch === 0x60 /* ` */ )
+            {
+                pos++;
+                while( pos < len )
+                {
+                    const sc = text.charCodeAt( pos );
+                    if( sc === 0x5C /* \ */ ) { pos += 2; continue; } // escaped char
+                    if( sc === ch ) { pos++; break; }
+                    pos++;
+                }
+                continue;
+            }
+
+            if( ch === 0x28 /* ( */ )
+            {
+                parenDepth++;
+                pos++;
+            }
+            else if( ch === 0x29 /* ) */ )
+            {
+                parenDepth--;
+                pos++;
+            }
+            else if( ch === 0x7B /* { */ )
+            {
+                braceDepth++;
+                pos++;
+            }
+            else if( ch === 0x7D /* } */ )
+            {
+                braceDepth--;
+                pos++;
+                if( braceDepth <= 0 && parenDepth <= 0 )
+                {
+                    // consume optional trailing semicolon
+                    let p2 = pos;
+                    while( p2 < len && _isWhitespace( text.charCodeAt( p2 ) ) ) p2++;
+                    if( p2 < len && text.charCodeAt( p2 ) === 0x3B /* ; */ ) pos = p2 + 1;
+                    ended = true;
+                }
+            }
+            else if( ch === 0x3B /* ; */ && braceDepth === 0 && parenDepth === 0 )
+            {
+                pos++;
+                ended = true;
+            }
+            else
+            {
+                pos++;
+            }
+        }
+
+        const stmtEnd = pos;
+        // skip empty ranges
+        if( stmtEnd > stmtStart )
+        {
+            ranges.push({ start: stmtStart, end: stmtEnd, isDecl });
+        }
+    }
+
+    // If there are no body ranges, nothing to wrap
+    if( ranges.every( r => r.isDecl ) )
+    {
+        return text;
+    }
+
+    // Build the new source text
+    const declarations: string[] = [];
+    const bodyParts: string[] = [];
+
+    for( const r of ranges )
+    {
+        const slice = text.substring( r.start, r.end );
+        if( r.isDecl ) declarations.push( slice );
+        else bodyParts.push( slice );
+    }
+
+    return (
+        declarations.join( "\n" ) +
+        ( declarations.length > 0 ? "\n" : "" ) +
+        "function " + funcName + "(): void {\n" +
+        bodyParts.join( "\n" ) + "\n" +
+        "}\n"
+    );
+}
+
+function _isWhitespace( ch: number ): boolean
+{
+    return ch === 0x20 || ch === 0x09 || ch === 0x0A || ch === 0x0D;
+}
+
+function _readWord( text: string, pos: number ): string
+{
+    const start = pos;
+    const len = text.length;
+    while( pos < len )
+    {
+        const ch = text.charCodeAt( pos );
+        if(
+            ( ch >= 0x61 && ch <= 0x7A ) || // a-z
+            ( ch >= 0x41 && ch <= 0x5A ) || // A-Z
+            ( ch >= 0x30 && ch <= 0x39 ) || // 0-9
+            ch === 0x5F // _
+        ) pos++;
+        else break;
+    }
+    return text.substring( start, pos );
 }

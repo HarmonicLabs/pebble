@@ -31,6 +31,7 @@ import { TirPropAccessExpr } from "../../tir/expressions/TirPropAccessExpr";
 import { TirTernaryExpr } from "../../tir/expressions/TirTernaryExpr";
 import { TirToDataExpr } from "../../tir/expressions/TirToDataExpr";
 import { TirTraceIfFalseExpr } from "../../tir/expressions/TirTraceIfFalseExpr";
+import { TirTraceExpr } from "../../tir/expressions/TirTraceExpr";
 import { TirTypeConversionExpr } from "../../tir/expressions/TirTypeConversionExpr";
 import { TirVariableAccessExpr } from "../../tir/expressions/TirVariableAccessExpr";
 import { TirUnaryExclamation } from "../../tir/expressions/unary/TirUnaryExclamation";
@@ -247,6 +248,14 @@ export function expressifyVars(
         return expr;
     }
 
+    if( expr instanceof TirTraceExpr ) {
+        const modifiedTraceExpr = expressifyVars( ctx, expr.traceExpr );
+        const modifiedContinuation = expressifyVars( ctx, expr.continuation );
+        expr.traceExpr = modifiedTraceExpr;
+        expr.continuation = modifiedContinuation;
+        return expr;
+    }
+
     if( expr instanceof TirInlineClosedIR ) return expr;
 
     const tsEnsureExhautstiveCheck: never = expr;
@@ -285,9 +294,10 @@ function expressifyPropAccess(
         || expr instanceof TirFuncExpr // functions have no properties
         || expr instanceof TirParentesizedExpr // typescript being stupid
         || isTirBinaryExpr( expr ) // all of these return either int, bytes or boolean
-        // TirAssertAndContinueExpr | TirTraceIfFalseExpr | TirInlineClosedIR
+        // TirAssertAndContinueExpr | TirTraceIfFalseExpr | TirTraceExpr | TirInlineClosedIR
         || expr instanceof TirAssertAndContinueExpr
         || expr instanceof TirTraceIfFalseExpr
+        || expr instanceof TirTraceExpr
         || expr instanceof TirInlineClosedIR
     ) throw new Error( "Invalid property access expression" );
 

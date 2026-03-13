@@ -5,6 +5,7 @@ import { TirBlockStmt } from "./TirBlockStmt";
 import { TirBreakStmt } from "./TirBreakStmt";
 import { TirContinueStmt } from "./TirContinueStmt";
 import { TirFailStmt } from "./TirFailStmt";
+import { TirTraceStmt } from "./TirTraceStmt";
 import { TirForOfStmt } from "./TirForOfStmt";
 import { TirForStmt } from "./TirForStmt";
 import { TirIfStmt } from "./TirIfStmt";
@@ -59,6 +60,7 @@ export type TirStmt
     | TirContinueStmt
     | TirFailStmt
     | TirAssertStmt
+    | TirTraceStmt
     // | TirTestStmt
     | TirMatchStmt
     | TirAssignmentStmt
@@ -79,6 +81,7 @@ export function isTirStmt( thing: any ): thing is TirStmt
         || thing instanceof TirContinueStmt
         || thing instanceof TirFailStmt
         || thing instanceof TirAssertStmt
+        || thing instanceof TirTraceStmt
         // || thing instanceof TirTestStmt
         || thing instanceof TirMatchStmt
         || thing instanceof TirAssignmentStmt

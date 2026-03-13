@@ -46,6 +46,7 @@ import { EmptyStmt } from "../ast/nodes/statements/EmptyStmt";
 import { FuncDecl } from "../ast/nodes/statements/declarations/FuncDecl";
 import { CharCode } from "../utils/CharCode";
 import { FailStmt } from "../ast/nodes/statements/FailStmt";
+import { TraceStmt } from "../ast/nodes/statements/TraceStmt";
 import { AssertStmt } from "../ast/nodes/statements/AssertStmt";
 import { TestStmt } from "../ast/nodes/statements/TestStmt";
 import { MatchStmt, MatchStmtCase, MatchStmtElseCase } from "../ast/nodes/statements/MatchStmt";
@@ -3051,6 +3052,10 @@ export class Parser extends DiagnosticEmitter
                 statement = this.parseAssertStatement();
                 break;
             };
+            case Token.Trace: {
+                statement = this.parseTraceStatement();
+                break;
+            };
             // case Token.Try: {
             //     statement = this.parseTryStatement();
             //     break;
@@ -3678,6 +3683,21 @@ export class Parser extends DiagnosticEmitter
         if( !expr ) return undefined;
         
         return new FailStmt( expr, tn.range() );
+    }
+
+    parseTraceStatement(): TraceStmt | undefined
+    {
+        const tn = this.tn;
+        // at 'trace': Expression ';'?
+
+        const expr = this.parseExpr();
+        if( !expr )
+        return this.error(
+            DiagnosticCode.Expression_expected,
+            tn.range()
+        );
+
+        return new TraceStmt( expr, tn.range() );
     }
 
     parseAssertStatement(): AssertStmt | undefined
