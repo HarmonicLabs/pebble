@@ -18,6 +18,12 @@ export class TirNamedDeconstructVarDecl
         public initExpr: TirExpr | undefined,
         public isConst: boolean,
         readonly range: SourceRange,
+        /** range of just the constructor name identifier (for LSP) */
+        readonly constrNameRange?: SourceRange,
+        /** source ranges and constructor-definition types of field label identifiers (for LSP hover) */
+        readonly fieldLabelRanges?: Map<string, { range: SourceRange, type: TirType }>,
+        /** range of explicit type annotation (e.g., `MyDatum` in `as MyDatum`) for LSP */
+        readonly typeAnnotationRange?: SourceRange,
     ) {}
 
     toString(): string

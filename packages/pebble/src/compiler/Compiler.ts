@@ -11,6 +11,9 @@ import { __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from 
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
+import { CheckResult } from "./SourceTypeMap";
+
+export { CheckResult, SourceTypeMap, TypeEntry, MemberInfo } from "./SourceTypeMap";
 
 export class Compiler
     extends DiagnosticEmitter
@@ -27,6 +30,17 @@ export class Compiler
         }
     }
     
+    async check( config?: Partial<CompilerOptions> ): Promise<CheckResult>
+    {
+        const cfg = {
+            ...this.cfg,
+            ...config,
+            silent: true,
+        };
+        const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
+        return await astCompiler.check();
+    }
+
     async compile( config?: Partial<CompilerOptions> ): Promise<Uint8Array>
     {
         const cfg = {
@@ -40,9 +54,10 @@ export class Compiler
             globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
-            while( msg = this.diagnostics.shift()! ) {
+            for( msg of this.diagnostics ) {
                 this.io.stdout.write( msg.toString() + "\n" );
             }
+            // return new Uint8Array();
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
         return this._compileBackend( cfg, program );
@@ -85,6 +100,30 @@ export class Compiler
         };
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.run();
+        if( this.diagnostics.length > 0 ) {
+            let msg: DiagnosticMessage;
+            globalThis.console && console.log( this.diagnostics );
+            const fstErrorMsg = this.diagnostics[0].toString();
+            const nDiags = this.diagnostics.length;
+            while( msg = this.diagnostics.shift()! ) {
+                this.io.stdout.write( msg.toString() + "\n" );
+            }
+            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+        }
+        const serialized = this._compileBackend( cfg, program );
+        const uplcProgram = parseUPLC( serialized );
+        return Machine.eval( uplcProgram.body );
+    }
+
+    async runRepl( config?: Partial<CompilerOptions> )
+    {
+        const cfg = {
+            ...this.cfg,
+            ...config,
+            addMarker: false,
+        };
+        const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
+        const program = await astCompiler.runRepl();
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
             globalThis.console && console.log( this.diagnostics );

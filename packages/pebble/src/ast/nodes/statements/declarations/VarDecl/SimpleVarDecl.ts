@@ -15,6 +15,8 @@ export class SimpleVarDecl
         public initExpr: PebbleExpr | undefined,
         public flags: CommonFlags,
         readonly range: SourceRange,
+        /** original source name when the identifier was renamed internally (for LSP) */
+        readonly sourceName?: string,
     ) {}
 
     isConst(): boolean

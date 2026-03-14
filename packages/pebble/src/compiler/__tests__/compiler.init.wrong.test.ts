@@ -16,7 +16,12 @@ contract MyContract {
     param owner: PubKeyHash;
 
     spend ownerAllowsIt() {
-        const { tx } = context;
+        const {
+            tx,
+            redeemer // redeemerData is the correct name
+        } = context;
+
+        assert (redeemer as int) === 42;
 
         assert tx.requiredSigners.includes( this.owner );
     }
@@ -49,20 +54,18 @@ contract MyContract {
             ]),
             useConsoleAsOutput: true,
         });
-        const complier = new Compiler( ioApi, testOptions );
-    
-        await complier.compile({ entry: fileName, root: "/" });
+        const complier = new Compiler( ioApi, { ...testOptions, silent: true } );
+
+        await expect(
+            complier.compile({ entry: fileName, root: "/" })
+        ).rejects.toThrow();
         const diagnostics = complier.diagnostics;
 
         // console.log( diagnostics );
         // console.log( diagnostics.map( d => d.toString() ) );
-        expect( diagnostics.length ).toBe( 0 );
+        expect( diagnostics.length ).toBe( 1 );
+        // console.log( diagnostics[0].toString() );
 
-        const output = ioApi.outputs.get("out/out.flat")!;
-        expect( output instanceof Uint8Array ).toBe( true );
-
-        // console.log( output.length, toHex( output ) );
-        // console.log( prettyUPLC( parseUPLC( output ).body, 2 ) )
     });
     
 });

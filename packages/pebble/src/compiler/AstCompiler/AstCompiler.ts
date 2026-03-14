@@ -48,6 +48,7 @@ import { _deriveContractBody } from "./internal/_deriveContractBody/_deriveContr
 import { DiagnosticCategory } from "../../diagnostics/DiagnosticCategory";
 import { VarStmt } from "../../ast/nodes/statements/VarStmt";
 import { _compileSimpleVarDecl } from "./internal/statements/_compileVarStmt";
+import { SourceTypeMap, CheckResult } from "../SourceTypeMap";
 import { isIdentifier } from "../../utils/text";
 
 export interface AstTypeDefCompilationResult {
@@ -146,10 +147,6 @@ export class AstCompiler extends DiagnosticEmitter
      */
     async run(): Promise<TypedProgram>
     {
-        const RUN_FUNC_NAME = "__pebble_run__";
-        this._isExporting = true;
-        this.program.contractTirFuncName = RUN_FUNC_NAME;
-
         const filePath = this.cfg.entry;
         if( !filePath )
         {
@@ -165,14 +162,101 @@ export class AstCompiler extends DiagnosticEmitter
         const src = await this.getAbsoulteProjPathSource( filePath );
         if( !src ) throw new Error("AstCompiler.run: could not read source: " + filePath );
 
+        const funcName = _uniqueFuncName( "__pebble_run__", src.text );
+        this._isExporting = true;
+        this.program.contractTirFuncName = funcName;
+
         // 1) Rewrite the source text: wrap non-declaration statements in a function
-        src.text = _wrapSourceTextForRun( src.text, RUN_FUNC_NAME );
+        src.text = _wrapSourceTextForRun( src.text, funcName );
         // update range to match the new text length
         src.range.end = src.text.length;
 
         // 2) Use the normal compilation pipeline (parse + semantic analysis)
         //    which now sees the entry source as having a top-level function
         return await this.compile();
+    }
+
+    /**
+     * like `run()` but omits the return type annotation on the wrapping function
+     * and turns the last non-declaration statement into a `return` expression,
+     * allowing the type to be inferred from the expression.
+     */
+    async runRepl(): Promise<TypedProgram>
+    {
+        const filePath = this.cfg.entry;
+        if( !filePath )
+        {
+            this.error(
+                DiagnosticCode.File_0_not_found,
+                undefined, this.cfg.entry
+            );
+            throw new Error("entry file not found");
+        }
+        if( !this.io.exsistSync( filePath ) )
+            throw new Error("AstCompiler.runRepl: entry file does not exist: " + filePath );
+
+        const src = await this.getAbsoulteProjPathSource( filePath );
+        if( !src ) throw new Error("AstCompiler.runRepl: could not read source: " + filePath );
+
+        const funcName = _uniqueFuncName( "__pebble_repl__", src.text );
+        this._isExporting = true;
+        this.program.contractTirFuncName = funcName;
+
+        // 1) Rewrite the source text: wrap non-declaration statements in a function
+        //    with no return type annotation, and turn the last statement into a return
+        src.text = _wrapSourceTextForRepl( src.text, funcName );
+        // update range to match the new text length
+        src.range.end = src.text.length;
+
+        // 2) Use the normal compilation pipeline (parse + semantic analysis)
+        return await this.compile();
+    }
+
+    /**
+     * runs the frontend only (parsing + semantic analysis + type checking)
+     * without requiring a contract and without throwing on diagnostics.
+     *
+     * returns `CheckResult` with diagnostics, the typed program,
+     * and a `SourceTypeMap` for querying types at source positions.
+     */
+    async check(): Promise<CheckResult>
+    {
+        const filePath = this.cfg.entry;
+        if( !filePath )
+        {
+            this.error(
+                DiagnosticCode.File_0_not_found,
+                undefined, this.cfg.entry
+            );
+            return {
+                diagnostics: this.diagnostics.slice(),
+                program: this.program,
+                sourceTypeMap: new SourceTypeMap( this.program )
+            };
+        }
+
+        if( !this.io.exsistSync( filePath ) )
+        {
+            this.error(
+                DiagnosticCode.File_0_not_found,
+                undefined, filePath
+            );
+            return {
+                diagnostics: this.diagnostics.slice(),
+                program: this.program,
+                sourceTypeMap: new SourceTypeMap( this.program )
+            };
+        }
+
+        await this.compileFile( filePath, true );
+        // no contract check, no throw — just collect diagnostics
+        const typeMap = new SourceTypeMap( this.program );
+        typeMap.buildFromProgram();
+        return {
+            diagnostics: this.diagnostics.slice(),
+            program: this.program,
+            sourceTypeMap: typeMap
+        };
     }
 
     /**
@@ -200,14 +284,15 @@ export class AstCompiler extends DiagnosticEmitter
             let msg: DiagnosticMessage;
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
-            while( msg = this.diagnostics.shift()! ) {
-                /*
+            for( msg of this.diagnostics ) {
+                //*
                 this.io.stdout.write( msg.toString() + "\n" );
                 /*/
                 console.log( msg );
                 console.log( msg.toString() );
                 //*/
             }
+            // return this.program;
             throw new Error("AstCompiler.compile: failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
 
@@ -1201,7 +1286,8 @@ export class AstCompiler extends DiagnosticEmitter
                 astType,
                 undefined, // initExpr
                 CommonFlags.Const,
-                param.range
+                param.range,
+                astName // original source name for LSP
             );
         }
 
@@ -1270,6 +1356,21 @@ const _declKeywords = new Set([
     "data",
     "runtime",
 ]);
+
+/**
+ * Returns a function name that does not appear in the source text.
+ * Starts with `baseName` and appends an incrementing suffix if needed.
+ */
+function _uniqueFuncName( baseName: string, sourceText: string ): string
+{
+    let name = baseName;
+    let i = 0;
+    while( sourceText.includes( name ) )
+    {
+        name = baseName + "_" + (i++);
+    }
+    return name;
+}
 
 /**
  * Splits source text into declaration blocks and body blocks
@@ -1410,6 +1511,169 @@ function _wrapSourceTextForRun( text: string, funcName: string ): string
         "}\n"
     );
 }
+
+/**
+ * Like `_wrapSourceTextForRun` but:
+ * - omits the return type annotation (no `: void`)
+ * - turns the last non-declaration statement into a `return` expression
+ *
+ * This allows the compiler to infer the return type from the expression,
+ * used by the REPL to evaluate and return expression values.
+ */
+function _wrapSourceTextForRepl( text: string, funcName: string ): string
+{
+    const len = text.length;
+    const ranges: { start: number; end: number; isDecl: boolean }[] = [];
+
+    let pos = 0;
+
+    while( pos < len )
+    {
+        // skip whitespace
+        while( pos < len && _isWhitespace( text.charCodeAt( pos ) ) ) pos++;
+        if( pos >= len ) break;
+
+        const stmtStart = pos;
+
+        // read the first word to determine if this is a declaration
+        const word = _readWord( text, pos );
+        const isDecl = _declKeywords.has( word );
+
+        // find the end of this statement:
+        // track brace/paren depth, respect strings and comments
+        let braceDepth = 0;
+        let parenDepth = 0;
+        let ended = false;
+
+        while( pos < len && !ended )
+        {
+            const ch = text.charCodeAt( pos );
+
+            // single-line comment
+            if( ch === 0x2F /* / */ && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F /* / */ )
+            {
+                pos += 2;
+                while( pos < len && text.charCodeAt( pos ) !== 0x0A /* \n */ ) pos++;
+                continue;
+            }
+            // multi-line comment
+            if( ch === 0x2F /* / */ && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2A /* * */ )
+            {
+                pos += 2;
+                while( pos < len && !( text.charCodeAt( pos ) === 0x2A && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F ) ) pos++;
+                pos += 2; // skip */
+                continue;
+            }
+            // string literals
+            if( ch === 0x22 /* " */ || ch === 0x27 /* ' */ || ch === 0x60 /* ` */ )
+            {
+                pos++;
+                while( pos < len )
+                {
+                    const sc = text.charCodeAt( pos );
+                    if( sc === 0x5C /* \ */ ) { pos += 2; continue; } // escaped char
+                    if( sc === ch ) { pos++; break; }
+                    pos++;
+                }
+                continue;
+            }
+
+            if( ch === 0x28 /* ( */ )
+            {
+                parenDepth++;
+                pos++;
+            }
+            else if( ch === 0x29 /* ) */ )
+            {
+                parenDepth--;
+                pos++;
+            }
+            else if( ch === 0x7B /* { */ )
+            {
+                braceDepth++;
+                pos++;
+            }
+            else if( ch === 0x7D /* } */ )
+            {
+                braceDepth--;
+                pos++;
+                if( braceDepth <= 0 && parenDepth <= 0 )
+                {
+                    // consume optional trailing semicolon
+                    let p2 = pos;
+                    while( p2 < len && _isWhitespace( text.charCodeAt( p2 ) ) ) p2++;
+                    if( p2 < len && text.charCodeAt( p2 ) === 0x3B /* ; */ ) pos = p2 + 1;
+                    ended = true;
+                }
+            }
+            else if( ch === 0x3B /* ; */ && braceDepth === 0 && parenDepth === 0 )
+            {
+                pos++;
+                ended = true;
+            }
+            else
+            {
+                pos++;
+            }
+        }
+
+        const stmtEnd = pos;
+        // skip empty ranges
+        if( stmtEnd > stmtStart )
+        {
+            ranges.push({ start: stmtStart, end: stmtEnd, isDecl });
+        }
+    }
+
+    // If there are no body ranges, nothing to wrap
+    if( ranges.every( r => r.isDecl ) )
+    {
+        return text;
+    }
+
+    // Build the new source text
+    const declarations: string[] = [];
+    const bodyParts: string[] = [];
+
+    for( const r of ranges )
+    {
+        const slice = text.substring( r.start, r.end );
+        if( r.isDecl ) declarations.push( slice );
+        else bodyParts.push( slice );
+    }
+
+    // turn the last body part into a return statement
+    // (if it isn't already one and doesn't start with a statement keyword)
+    if( bodyParts.length > 0 )
+    {
+        let last = bodyParts[ bodyParts.length - 1 ].trim();
+        // remove trailing semicolon for wrapping
+        if( last.endsWith(";") ) last = last.slice( 0, -1 ).trim();
+
+        const firstWord = last.match( /^([a-zA-Z_]\w*)/ );
+        const isStmtKeyword = firstWord && _stmtKeywords.has( firstWord[1] );
+
+        if( !isStmtKeyword && !last.startsWith("return") )
+        {
+            bodyParts[ bodyParts.length - 1 ] = "return " + last + ";";
+        }
+    }
+
+    return (
+        declarations.join( "\n" ) +
+        ( declarations.length > 0 ? "\n" : "" ) +
+        "function " + funcName + "() {\n" +
+        bodyParts.join( "\n" ) + "\n" +
+        "}\n"
+    );
+}
+
+const _stmtKeywords = new Set([
+    "let", "var", "const", "using",
+    "if", "for", "while", "match",
+    "return", "break", "continue",
+    "trace", "assert", "fail", "test",
+]);
 
 function _isWhitespace( ch: number ): boolean
 {

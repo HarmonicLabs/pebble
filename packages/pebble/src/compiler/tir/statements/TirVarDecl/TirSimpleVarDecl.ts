@@ -13,6 +13,10 @@ export class TirSimpleVarDecl
         public initExpr: TirExpr | undefined, // deconstructed OR function param
         public isConst: boolean,
         readonly range: SourceRange,
+        /** range of explicit type annotation (e.g., `MyDatum` in `as MyDatum`) for LSP */
+        readonly typeAnnotationRange?: SourceRange,
+        /** original source name for internal-renamed params (e.g., `owner` for `§owner_0`) for LSP */
+        readonly sourceName?: string,
     ) {
     }
 

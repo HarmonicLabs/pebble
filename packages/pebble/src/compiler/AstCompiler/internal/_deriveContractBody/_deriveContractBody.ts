@@ -108,6 +108,10 @@ export function _deriveContractBody(
     // so we only have 3 statements in the body
     const bodyStmts: BodyStmt[] = [];
 
+    // generated identifiers/declarations use mock ranges so they don't
+    // produce SourceTypeMap entries (which would span the entire contract)
+    const mockRange = SourceRange.mock;
+
     const txUniqueName = getUniqueInternalName("tx");
     const purposeUniqueName = getUniqueInternalName("purpose");
     const redeemerUniqueName = getUniqueInternalName("redeemer");
@@ -118,21 +122,21 @@ export function _deriveContractBody(
                 // fields
                 new Map<Identifier, VarDecl>([
                     [
-                        new Identifier( "tx", contractRange ),
-                        SimpleVarDecl.onlyNameConst( txUniqueName, contractRange )
+                        new Identifier( "tx", mockRange ),
+                        SimpleVarDecl.onlyNameConst( txUniqueName, mockRange )
                     ],
                     [
-                        new Identifier( "purpose", contractRange ),
-                        SimpleVarDecl.onlyNameConst( purposeUniqueName, contractRange )
+                        new Identifier( "purpose", mockRange ),
+                        SimpleVarDecl.onlyNameConst( purposeUniqueName, mockRange )
                     ],
                     [
-                        new Identifier( "redeemer", contractRange ),
-                        SimpleVarDecl.onlyNameConst( redeemerUniqueName, contractRange )
+                        new Identifier( "redeemer", mockRange ),
+                        SimpleVarDecl.onlyNameConst( redeemerUniqueName, mockRange )
                     ],
                 ]),
                 undefined, // rest
                 undefined, // type (inferred from initExpr)
-                new Identifier( scriptContextName, contractRange ), // initExpr
+                new Identifier( scriptContextName, mockRange ), // initExpr
                 CommonFlags.Const,
                 contractRange
             )],
@@ -173,12 +177,12 @@ export function _deriveContractBody(
         const optionalDatumUniqueName = getUniqueInternalName("optionalDatum");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "ref", contractRange ),
-                SimpleVarDecl.onlyNameConst( spendingRefUniqueName, contractRange )
+                new Identifier( "ref", mockRange ),
+                SimpleVarDecl.onlyNameConst( spendingRefUniqueName, mockRange )
             ],
             [
-                new Identifier( "optionalDatum", contractRange ),
-                SimpleVarDecl.onlyNameConst( optionalDatumUniqueName, contractRange )
+                new Identifier( "optionalDatum", mockRange ),
+                SimpleVarDecl.onlyNameConst( optionalDatumUniqueName, mockRange )
             ],
         ]);
 
@@ -202,7 +206,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Spend", contractRange ),
+                    new Identifier( "Spend", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -222,8 +226,8 @@ export function _deriveContractBody(
         const policyUniqueName = getUniqueInternalName("policy");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "policy", contractRange ),
-                SimpleVarDecl.onlyNameConst( policyUniqueName, contractRange )
+                new Identifier( "policy", mockRange ),
+                SimpleVarDecl.onlyNameConst( policyUniqueName, mockRange )
             ],
         ]);
 
@@ -246,7 +250,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Mint", contractRange ),
+                    new Identifier( "Mint", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -266,8 +270,8 @@ export function _deriveContractBody(
         const credentialUniqueName = getUniqueInternalName("credential");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "credential", contractRange ),
-                SimpleVarDecl.onlyNameConst( credentialUniqueName, contractRange )
+                new Identifier( "credential", mockRange ),
+                SimpleVarDecl.onlyNameConst( credentialUniqueName, mockRange )
             ],
         ]);
 
@@ -290,7 +294,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Withdraw", contractRange ),
+                    new Identifier( "Withdraw", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -311,12 +315,12 @@ export function _deriveContractBody(
         const certificateUniqueName = getUniqueInternalName("certificate");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "certificateIndex", contractRange ),
-                SimpleVarDecl.onlyNameConst( indexUniqueName, contractRange )
+                new Identifier( "certificateIndex", mockRange ),
+                SimpleVarDecl.onlyNameConst( indexUniqueName, mockRange )
             ],
             [
-                new Identifier( "certificate", contractRange ),
-                SimpleVarDecl.onlyNameConst( certificateUniqueName, contractRange )
+                new Identifier( "certificate", mockRange ),
+                SimpleVarDecl.onlyNameConst( certificateUniqueName, mockRange )
             ],
         ]);
 
@@ -340,7 +344,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Certificate", contractRange ),
+                    new Identifier( "Certificate", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -361,12 +365,12 @@ export function _deriveContractBody(
         const proposalUniqueName = getUniqueInternalName("proposal");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "proposalIndex", contractRange ),
-                SimpleVarDecl.onlyNameConst( indexUniqueName, contractRange )
+                new Identifier( "proposalIndex", mockRange ),
+                SimpleVarDecl.onlyNameConst( indexUniqueName, mockRange )
             ],
             [
-                new Identifier( "proposal", contractRange ),
-                SimpleVarDecl.onlyNameConst( proposalUniqueName, contractRange )
+                new Identifier( "proposal", mockRange ),
+                SimpleVarDecl.onlyNameConst( proposalUniqueName, mockRange )
             ],
         ]);
 
@@ -390,7 +394,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Propose", contractRange ),
+                    new Identifier( "Propose", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -410,8 +414,8 @@ export function _deriveContractBody(
         const voterUniqueName = getUniqueInternalName("voter");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
             [
-                new Identifier( "voter", contractRange ),
-                SimpleVarDecl.onlyNameConst( voterUniqueName, contractRange )
+                new Identifier( "voter", mockRange ),
+                SimpleVarDecl.onlyNameConst( voterUniqueName, mockRange )
             ],
         ]);
         const bodyStmts = _getMatchedPurposeBlockStatements(
@@ -433,7 +437,7 @@ export function _deriveContractBody(
         purposeMatchCases.push(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
-                    new Identifier( "Vote", contractRange ),
+                    new Identifier( "Vote", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)
@@ -452,7 +456,7 @@ export function _deriveContractBody(
 
     bodyStmts.push(
         new MatchStmt(
-            new Identifier( purposeUniqueName, contractRange ),
+            new Identifier( purposeUniqueName, mockRange ),
             purposeMatchCases,
             new MatchStmtElseCase(
                 new FailStmt( undefined, contractRange ),
@@ -553,12 +557,13 @@ function _getMatchedPurposeBlockStatements(
     return [
         new MatchStmt(
             new TypeConversionExpr(
-                new Identifier( contextVarsMapping.redeemerData, contractRange ),
+                new Identifier( contextVarsMapping.redeemerData, SourceRange.mock ),
                 new AstNamedTypeExpr(
-                    new Identifier( redeemerTypeDef.name.text, contractRange ),
+                    new Identifier( redeemerTypeDef.name.text, SourceRange.mock ),
                     [], // typeArgs
                     contractRange
-                )
+                ),
+                SourceRange.mock // mock range: generated expression should not appear in SourceTypeMap
             ),
             redeemerMatchCases,
             new MatchStmtElseCase(
@@ -1318,7 +1323,7 @@ function _deriveRedeemerTypeDef(
 
     const uniqueName = getUniqueInternalName( redeemerName );
     return new StructDecl(
-        new Identifier( uniqueName, contractRange ),
+        new Identifier( uniqueName, SourceRange.mock ),
         [], // typeParams
         methods.map( m => {
             const methodParams = m.expr.signature.params;

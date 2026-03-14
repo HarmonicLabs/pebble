@@ -8,6 +8,7 @@ import { completeCompileOptions } from "./compile/completeCompileOptions";
 import { completeExportOptions } from "./export/completeExportOptions";
 import { exportPebbleFunction } from "./export/exportPebbleFunction";
 import { prettyPrintUplcFromFile } from "./uplc/pretty/prettyPrintUplcFromFile";
+import { pebbleRepl } from "./repl/pebbleRepl";
 
 const program = new Command();
 
@@ -89,8 +90,10 @@ program.command("init")
 /*
 // TODO
 defineVersionManager( program );
-
-program.command("repl");
 //*/
+
+program.command("repl")
+    .description("Start an interactive Pebble REPL")
+    .action( pebbleRepl );
 
 program.parse();

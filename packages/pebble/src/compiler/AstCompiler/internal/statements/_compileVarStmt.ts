@@ -74,7 +74,7 @@ export function _compileSimpleVarDecl(
 {
     const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
     if( !typeAndExpr ) return undefined;
-    const [ finalVarType, initExpr ] = typeAndExpr;
+    const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
     const success = ctx.scope.defineValue({
         name: decl.name.text,
@@ -92,7 +92,9 @@ export function _compileSimpleVarDecl(
         finalVarType,
         initExpr,
         decl.isConst(),
-        decl.range
+        decl.range,
+        typeAnnotationRange,
+        decl.sourceName
     );
 }
 export function _compileNamedDeconstructVarDecl(
@@ -120,7 +122,7 @@ export function _compileNamedDeconstructVarDecl(
 
     const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
     if( !typeAndExpr ) return undefined;
-    const [ finalVarType, initExpr ] = typeAndExpr;
+    const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
     const namedDestructableType = getNamedDestructableType( finalVarType )
     if(
@@ -159,7 +161,7 @@ export function _compileNamedDeconstructVarDecl(
             )
         );
         if( !deconstructedFields ) return undefined;
-        const [ fieds, rest ] = deconstructedFields;
+        const [ fieds, rest, fieldLabelRanges ] = deconstructedFields;
 
         return new TirNamedDeconstructVarDecl(
             decl.name.text,
@@ -168,7 +170,10 @@ export function _compileNamedDeconstructVarDecl(
             finalVarType,
             initExpr,
             decl.isConst(),
-            decl.range
+            decl.range,
+            decl.name.range,
+            fieldLabelRanges,
+            typeAnnotationRange
         );
     }
     if( isTirStructType( namedDestructableType ) )
@@ -188,7 +193,7 @@ export function _compileNamedDeconstructVarDecl(
             finalConstructorDef
         );
         if( !deconstructedFields ) return undefined;
-        const [ fieds, rest ] = deconstructedFields;
+        const [ fieds, rest, fieldLabelRanges ] = deconstructedFields;
 
         return new TirNamedDeconstructVarDecl(
             decl.name.text,
@@ -197,7 +202,10 @@ export function _compileNamedDeconstructVarDecl(
             finalVarType,
             initExpr,
             decl.isConst(),
-            decl.range
+            decl.range,
+            decl.name.range,
+            fieldLabelRanges,
+            typeAnnotationRange
         );
     }
 }
@@ -212,7 +220,7 @@ export function _compileSingleDeconstructVarDecl(
 {
     const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
     if( !typeAndExpr ) return undefined;
-    const [ finalVarType, initExpr ] = typeAndExpr;
+    const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
     const finalStructType = getStructType( finalVarType );
     if( !finalStructType )
@@ -232,7 +240,7 @@ export function _compileSingleDeconstructVarDecl(
         finalStructType.constructors[0]
     );
     if( !deconstructedFields ) return undefined;
-    const [ fieds, rest ] = deconstructedFields;
+    const [ fieds, rest, fieldLabelRanges ] = deconstructedFields;
 
     return new TirSingleDeconstructVarDecl(
         fieds,
@@ -240,7 +248,9 @@ export function _compileSingleDeconstructVarDecl(
         finalVarType,
         initExpr,
         decl.isConst(),
-        decl.range
+        decl.range,
+        fieldLabelRanges,
+        typeAnnotationRange
     );
 }
 export function _compileArrayLikeDeconstr(
@@ -254,7 +264,7 @@ export function _compileArrayLikeDeconstr(
 {
     const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
     if( !typeAndExpr ) return undefined;
-    const [ finalVarType, initExpr ] = typeAndExpr;
+    const [ finalVarType, initExpr, _typeAnnotationRange ] = typeAndExpr;
 
     const elemsType = getListTypeArg( finalVarType );
     if( !elemsType ) return ctx.error(
@@ -306,10 +316,12 @@ export function _getDeconstructedFields(
     ctorDef: TirStructConstr
 ): [
     fields: Map<string, TirVarDecl>,
-    rest: string | undefined
+    rest: string | undefined,
+    fieldLabelRanges: Map<string, { range: SourceRange, type: TirType }>
 ] | undefined
 {
     const tirFields: Map<string, TirVarDecl> = new Map();
+    const fieldLabelRanges: Map<string, { range: SourceRange, type: TirType }> = new Map();
     const ctorDefFieldNames = ctorDef.fields.map( f => f.name );
     const ctorNamesAlreadySpecified: string[] = [];
     for( const [ fieldIdentifier, varDecl ] of astDeconstruct.fields )
@@ -327,11 +339,14 @@ export function _getDeconstructedFields(
             );
         ctorNamesAlreadySpecified.push( fieldName );
 
+        const ctorFieldType = ctorDef.fields.find( f => f.name === fieldName )!.type;
+        fieldLabelRanges.set( fieldName, { range: fieldIdentifier.range, type: ctorFieldType } );
+
         // adds to scope "simple" var decls
         const tirVarDecl = _compileVarDecl(
             ctx,
             varDecl,
-            ctorDef.fields.find( f => f.name === fieldName )!.type,
+            ctorFieldType,
         );
         if( !tirVarDecl ) return undefined;
 
@@ -344,7 +359,7 @@ export function _getDeconstructedFields(
         );
 
     let rest: string | undefined = astDeconstruct.rest ? astDeconstruct.rest.text : undefined;
-    return [ tirFields, rest ];
+    return [ tirFields, rest, fieldLabelRanges ];
 }
 export function _getVarDeclTypeAndExpr(
     ctx: AstCompilationCtx,
@@ -354,7 +369,8 @@ export function _getVarDeclTypeAndExpr(
     // stmtIdx: number
 ): [
     varType: TirType,
-    varInitExpr: TirExpr | undefined // undefined in case of deconstruction
+    varInitExpr: TirExpr | undefined, // undefined in case of deconstruction
+    typeAnnotationRange: SourceRange | undefined
 ] | undefined
 {
     const declarationType = decl.type ? _compileSopEncodedConcreteType( ctx, decl.type ) : undefined;
@@ -414,5 +430,5 @@ export function _getVarDeclTypeAndExpr(
         decl.range
     );
 
-    return [ finalVarType, initExpr ];
+    return [ finalVarType, initExpr, decl.type?.range ];
 }
