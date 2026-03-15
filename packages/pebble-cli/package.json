@@ -50,7 +50,7 @@
   "dependencies": {
     "@harmoniclabs/crypto": "^0.3.0",
     "@harmoniclabs/obj-utils": "^1.0.0",
-    "@harmoniclabs/pebble": "harmoniclabs-pebble-0.1.3-dev6.tgz",
+    "@harmoniclabs/pebble": "0.1.3-dev7",
     "@harmoniclabs/plutus-machine": "^3.0.0",
     "@harmoniclabs/uint8array-utils": "^1.0.4",
     "@harmoniclabs/uplc": "^2.0.5",
