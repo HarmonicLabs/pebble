@@ -24,27 +24,40 @@ async function main() {
 		const cliPkg = JSON.parse(await readFile(cliPkgPath, "utf8"));
 		cliVersion = cliPkg.version ?? cliVersion;
 
-        const cliPebbleDepVersion = cliPkg.dependencies["@harmoniclabs/pebble"];
-        pebbleVersion = typeof cliPebbleDepVersion === "string" ? cliPebbleDepVersion : pebbleVersion;
+		const cliPebbleDepVersion = cliPkg.dependencies["@harmoniclabs/pebble"];
+		const isLocal = typeof cliPebbleDepVersion === "string" &&
+			(cliPebbleDepVersion.startsWith("file:") || cliPebbleDepVersion.endsWith(".tgz"));
 
-		const cliPkgLock = JSON.parse(await readFile(cliPkgLockPath, "utf8"));
-        pebbleVersion = cliPkgLock.packages?.["node_modules/@harmoniclabs/pebble"]?.version ?? pebbleVersion;
+		if (isLocal) {
+			// read version from sibling pebble package
+			const pebblePkgPath = path.resolve(cliRoot, "..", "pebble", "package.json");
+			if (existsSync(pebblePkgPath)) {
+				const pebblePkg = JSON.parse(await readFile(pebblePkgPath, "utf8"));
+				pebbleVersion = pebblePkg.version ?? pebbleVersion;
+			}
+		} else {
+			// try to get the resolved version from package-lock.json
+			let lockVersion;
+			try {
+				const cliPkgLock = JSON.parse(await readFile(cliPkgLockPath, "utf8"));
+				lockVersion = cliPkgLock.packages?.["node_modules/@harmoniclabs/pebble"]?.version;
+			} catch (_) {}
 
-        if( pebbleVersion !== "unknown" )
-        {
-            while( !isSingleDigit( pebbleVersion[0] ) ) pebbleVersion = pebbleVersion.slice(1);
-        }
-        /*
-		// Try to read the local monorepo pebble package version first
-		const pebblePkgPath = path.resolve(cliRoot, "..", "pebble", "package.json");
-		if (existsSync(pebblePkgPath)) {
-			const pebblePkg = JSON.parse(await readFile(pebblePkgPath, "utf8"));
-			pebbleVersion = pebblePkg.version ?? pebbleVersion;
-		} else if (cliPkg.dependencies && cliPkg.dependencies["@harmoniclabs/pebble"]) {
-			// Fallback to whatever is declared in dependencies (may be a file: tgz path)
-			
+			if (lockVersion) {
+				pebbleVersion = lockVersion;
+			} else if (typeof cliPebbleDepVersion === "string") {
+				pebbleVersion = cliPebbleDepVersion;
+			}
 		}
-        //*/
+
+		// strip leading non-digit chars (e.g. ^ or ~)
+		if (pebbleVersion !== "unknown") {
+			while (!isSingleDigit(pebbleVersion[0])) pebbleVersion = pebbleVersion.slice(1);
+		}
+
+		if (isLocal) {
+			pebbleVersion += " (local)";
+		}
 	} catch (e) {
 		console.error("Failed to read package versions:", e);
 	}

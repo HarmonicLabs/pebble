@@ -118,5 +118,6 @@ function exsistSync(
     filename: string
 ): boolean
 {
+    filename = memoryFsAdaptFilename( filename );
     return this.has( filename );
 }

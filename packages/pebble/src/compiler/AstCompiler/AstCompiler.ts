@@ -112,6 +112,12 @@ export class AstCompiler extends DiagnosticEmitter
     {
         super( diagnostics );
         this.program = new TypedProgram( this.diagnostics );
+        // normalize entry to absolute path so import resolution works correctly
+        if( typeof cfg.entry === "string" && typeof cfg.root === "string" )
+        {
+            const resolved = getEnvRelativePath( cfg.entry, cfg.root );
+            if( resolved ) cfg.entry = resolved;
+        }
         this._isExporting = false;
     }
 
@@ -266,7 +272,7 @@ export class AstCompiler extends DiagnosticEmitter
      */
     async compile(): Promise<TypedProgram>
     {
-        const filePath = this.cfg.entry; // getEnvRelativePath( this.cfg.entry, this.rootPath );
+        const filePath = this.cfg.entry;
         if( !filePath )
         {
             this.error(

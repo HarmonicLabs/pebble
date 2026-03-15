@@ -1,8 +1,12 @@
 {
   "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
   "scripts": {
+    "build-pebble": "cd packages/pebble && npm run build && cd ../..",
+    "pre-cli-pack": "node ./scripts/pack-pebble-locally.mjs",
+    "pre-cli-commit": "npm run pre-cli-pack && git add . && git commit -m \"pre cli build\"",
+    "build-cli": "npm run pre-cli-commit && npm run build && cd ../..",
+    "build": "npm run build-pebble && npm run build-cli",
     "buidl": "npm run build",
-    "build": "cd packages/pebble && npm run build && cd ../pebble-cli && npm run build",
     "test": "jest"
   },
   "author": "Harmonic Labs",
