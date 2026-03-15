@@ -51,6 +51,11 @@ const defaultHoistedMeta: IRHoistedMeta = freezeAll({
 
 const _hoisted_hash_to_symbol: Map<number, WeakRef<Symbol>> = new Map();
 
+export function __unsafe_clear_hoisted_hash_to_symbol(): void
+{
+    _hoisted_hash_to_symbol.clear();
+}
+
 export class IRHoisted
     implements IIRTerm, Cloneable<IRHoisted>, IIRParent, ToJson, IRHoistedMetadata
 {

@@ -709,3 +709,8 @@ function expressifyListMethodCall(
 }
 
 const _base_mapToType_cache: Map<string, TirHoistedExpr> = new Map();
+
+export function __unsafe_clear_mapToType_cache(): void
+{
+    _base_mapToType_cache.clear();
+}

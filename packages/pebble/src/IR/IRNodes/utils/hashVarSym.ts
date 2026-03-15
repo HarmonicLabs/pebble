@@ -28,6 +28,13 @@ function _collectUnusedHashes(): void
     }
 }
 
+export function __VERY_UNSAFE_FORGET_VAR_SYM_HASHES_ONLY_USE_AT_END_OF_UPLC_COMPILATION(): void
+{
+    _hash_to_sym.clear();
+    unusedHashes.length = 0;
+    _next_hash = MIN_SAFE_INTEGER;
+}
+
 export function hashVarSym( s: symbol ): Uint8Array
 {
     const limitReached = _next_hash >= MAX_SAFE_INTEGER;

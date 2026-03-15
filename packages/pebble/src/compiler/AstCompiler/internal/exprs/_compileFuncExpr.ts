@@ -7,9 +7,11 @@ import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.gener
 import { getUniqueInternalName } from "../../../internalVar";
 import { TirFuncExpr } from "../../../tir/expressions/TirFuncExpr";
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
+import { TirReturnStmt } from "../../../tir/statements/TirReturnStmt";
 import { TirStmt } from "../../../tir/statements/TirStmt";
 import { TirSimpleVarDecl } from "../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirFuncT } from "../../../tir/types/TirNativeType/native/function";
+import { void_t } from "../../../tir/program/stdScope/stdScope";
 import { TirType } from "../../../tir/types/TirType";
 import { TirTypeParam } from "../../../tir/types/TirTypeParam";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
@@ -89,13 +91,25 @@ export function _compileFuncExpr(
         expectedFuncType = (
             isMethod ? undefined :
             ctx.program.functions.get( expr.name.text )?.sig()
-        ) ?? getDataFuncSignature(
-            ctx,
-            expr.signature
         );
-        if(!(
-            expectedFuncType instanceof TirFuncT
-        )) return undefined;
+        if(!( expectedFuncType instanceof TirFuncT ))
+        {
+            // if the return type annotation is missing,
+            // infer it from the body instead of erroring
+            if( !expr.signature.returnType )
+            {
+                return _compileFuncExprInferReturnType(
+                    ctx, expr, isMethod
+                );
+            }
+            expectedFuncType = getDataFuncSignature(
+                ctx,
+                expr.signature
+            );
+            if(!(
+                expectedFuncType instanceof TirFuncT
+            )) return undefined;
+        }
     }
 
     const returnType = expectedFuncType.returnType;
@@ -148,6 +162,106 @@ export function _compileFuncExpr(
     );
 
     return funcExpr;
+}
+
+/**
+ * compiles a function expression whose return type annotation is missing,
+ * inferring the return type from the body's return expressions.
+ *
+ * uses `inferReturnType` flag on the function context so that
+ * `_compileReturnStmt` skips the return type assignability check.
+ */
+function _compileFuncExprInferReturnType(
+    ctx: AstCompilationCtx,
+    expr: FuncExpr,
+    isMethod: boolean,
+): TirFuncExpr | undefined
+{
+    // compile param types (reuse getDataFuncSignature logic for params only)
+    const funcParams = expr.signature.params;
+    const paramTypes = new Array<TirType>( funcParams.length );
+    for( let i = 0; i < funcParams.length; i++ )
+    {
+        const param = funcParams[i];
+        if( !param.type )
+        return ctx.error(
+            DiagnosticCode.Could_not_infer_function_signature_parameter_type_is_missing,
+            param.range,
+        );
+        const type = _compileDataEncodedConcreteType( ctx, param.type, true );
+        if( !type ) return undefined;
+        paramTypes[i] = type;
+    }
+
+    // use void as a temporary return type; the real type will be inferred
+    // from the body's return expressions after compilation
+    const tempReturnType = void_t;
+    const tempFuncType = new TirFuncT( paramTypes, tempReturnType );
+
+    const funcCtx = ctx.newFunctionChildScope( tempReturnType, isMethod );
+    // mark the context as inferring so _compileReturnStmt
+    // skips the return type assignability check
+    funcCtx.functionCtx!.inferReturnType = true;
+    funcCtx.scope.defineValue({
+        name: expr.name.text,
+        type: tempFuncType,
+        isConstant: true,
+    });
+
+    if( expr.typeParams.length > 0 )
+    return ctx.error(
+        DiagnosticCode.Not_implemented_0,
+        expr.typeParams[0].range,
+        "generic functions"
+    );
+
+    const destructuredParamsResult = _getDestructuredParamsAsVarDecls(
+        funcCtx,
+        expr,
+        tempFuncType
+    );
+    if( !destructuredParamsResult ) return undefined;
+    const { blockInitStmts, params } = destructuredParamsResult;
+
+    const astBody = expr.body instanceof BlockStmt ? expr.body :
+    new BlockStmt(
+        [ new ReturnStmt( expr.body, expr.body.range ) ],
+        expr.body.range
+    );
+
+    const compileResult = _compileBlockStmt(
+        funcCtx,
+        astBody
+    );
+    if( !compileResult ) return undefined;
+    const body = compileResult[0];
+
+    body.stmts.unshift( ...blockInitStmts );
+
+    // infer return type from the first return statement in the body
+    const returnType = _inferReturnType( body.stmts ) ?? tempReturnType;
+
+    const funcExpr = new TirFuncExpr(
+        expr.name.text,
+        params,
+        returnType,
+        body,
+        expr.range
+    );
+
+    return funcExpr;
+}
+
+function _inferReturnType( stmts: TirStmt[] ): TirType | undefined
+{
+    for( const stmt of stmts )
+    {
+        if( stmt instanceof TirReturnStmt && stmt.value )
+        {
+            return stmt.value.type;
+        }
+    }
+    return undefined;
 }
 
 function _getDestructuredParamsAsVarDecls(

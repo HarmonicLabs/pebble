@@ -63,6 +63,11 @@ const defaultLettedMeta: IRLettedMeta = freezeAll({
 
 const _letted_hash_to_symbol: Map<number, WeakRef<Symbol>> = new Map();
 
+export function __unsafe_clear_letted_hash_to_symbol(): void
+{
+    _letted_hash_to_symbol.clear();
+}
+
 export class IRLetted
     implements IIRTerm, Cloneable<IRLetted>, IIRParent, ToJson, IRLettedMetadata
 {

@@ -11,6 +11,11 @@ import { sanifyTree } from "./sanifyTree";
 
 const _hoisted_cache = new Map<IRHash, WeakRef<IRLetted>>();
 
+export function __unsafe_clear_hoisted_cache(): void
+{
+    _hoisted_cache.clear();
+}
+
 export function replaceHoistedWithLetted( term: IRTerm ): void
 {
     // children first

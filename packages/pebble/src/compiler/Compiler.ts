@@ -8,6 +8,11 @@ import { CompilerIoApi, createMemoryCompilerIoApi } from "./io/CompilerIoApi";
 import { compileTypedProgram } from "./TirCompiler/compileTirProgram";
 import { toHex } from "@harmoniclabs/uint8array-utils";
 import { __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from "../IR/IRHash";
+import { __VERY_UNSAFE_FORGET_VAR_SYM_HASHES_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from "../IR/IRNodes/utils/hashVarSym";
+import { __unsafe_clear_hoisted_hash_to_symbol } from "../IR/IRNodes/IRHoisted";
+import { __unsafe_clear_letted_hash_to_symbol } from "../IR/IRNodes/IRLetted";
+import { __unsafe_clear_hoisted_cache } from "../IR/toUPLC/subRoutines/replaceHoistedWithLetted";
+import { __unsafe_clear_mapToType_cache } from "./TirCompiler/expressify/expressifyVars";
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
@@ -163,6 +168,11 @@ export class Compiler
         this.io.stdout.write( `compiled program written to ${outPath}\n` );
 
         __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION();
+        __VERY_UNSAFE_FORGET_VAR_SYM_HASHES_ONLY_USE_AT_END_OF_UPLC_COMPILATION();
+        __unsafe_clear_hoisted_hash_to_symbol();
+        __unsafe_clear_letted_hash_to_symbol();
+        __unsafe_clear_hoisted_cache();
+        __unsafe_clear_mapToType_cache();
         return serialized;
     }
 }

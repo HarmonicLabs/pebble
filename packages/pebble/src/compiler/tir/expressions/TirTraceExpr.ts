@@ -1,5 +1,7 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { _ir_apps } from "../../../IR/IRNodes/IRApp";
+import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
+import { IRForced } from "../../../IR/IRNodes/IRForced";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { hoisted_intToUtf8Bytes } from "../../../IR/tree_utils/intToUtf8Bytes";
@@ -76,11 +78,17 @@ export class TirTraceExpr
             bytesIR = this.traceExpr.toIR( ctx );
         }
 
-        return _ir_apps(
-            IRNative.trace,
-            // bytes -> string via decodeUtf8
-            _ir_apps( IRNative.decodeUtf8, bytesIR ),
-            this.continuation.toIR( ctx )
+        // Force(trace(msg, Delay(continuation)))
+        // Delay prevents the continuation from being evaluated
+        // as a trace argument; Force evaluates it after the
+        // trace call has logged the message.
+        // This gives correct trace order in loops and nested traces.
+        return new IRForced(
+            _ir_apps(
+                IRNative.trace,
+                _ir_apps( IRNative.decodeUtf8, bytesIR ),
+                new IRDelayed( this.continuation.toIR( ctx ) )
+            )
         );
     }
 }

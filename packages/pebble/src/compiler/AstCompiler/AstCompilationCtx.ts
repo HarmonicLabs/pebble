@@ -8,11 +8,14 @@ import { AstScope, ScopeInfos } from "./scope/AstScope";
 export interface AstCompilationCtxFuncInfo {
     /** present where the function definition is inside
      * an other function definiton (closure)
-     * 
+     *
      * in which case, only constants from the parent funciton can be used
     **/
     parentFunctionCtx: AstCompilationCtxFuncInfo | undefined;
-    returnType: TirType
+    returnType: TirType;
+    /** when true, skip the return type assignability check
+     * and infer the return type from the returned expression */
+    inferReturnType?: boolean;
 }
 
 export interface IAstCompilationCtx {

@@ -16,16 +16,16 @@ export function _compileReturnStmt(
         stmt.range
     );
     const hintReturn = ctx.functionCtx.returnType;
+    const inferring = ctx.functionCtx.inferReturnType === true;
     const expr = stmt.value ?
     _compileExpr(
         ctx,
         stmt.value,
-        hintReturn
+        inferring ? undefined : hintReturn
     ) : new TirLitVoidExpr( stmt.range );
     if( !expr ) return undefined;
 
-
-    if( !canAssignTo( expr.type, hintReturn ) ) return ctx.error(
+    if( !inferring && !canAssignTo( expr.type, hintReturn ) ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
         stmt.value?.range ?? stmt.range, expr.type.toString(), hintReturn.toString()
     );
