@@ -8,7 +8,7 @@
     "pre-cli-commit": "git add . && git commit -m \"pre cli commit\"",
     "build-cli": "npm run sync-pebble-version && npm run pre-cli-commit && npm run build-cli:no-commit",
     "build-cli:no-commit": "cd packages/pebble-cli && npm run build && cd ../..",
-    "pub": "npm run pub-pebble && npm run build-cli",
+    "pub": "npm run pub-pebble && sleep 10 && npm run build-cli",
     "buidl": "npm run build",
     "test": "jest"
   },
