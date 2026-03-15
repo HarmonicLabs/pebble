@@ -19,11 +19,20 @@ export async function initPebbleProject(): Promise<void>
         default: "my-pebble-project",
     });
 
+    const includeClaudeMd = await confirm({
+        message: "Do you want to include a CLAUDE.md file? (helps AI assistants understand Pebble)",
+        default: true
+    });
+
     let offchain: OffchainConfig | undefined = undefined;
-    const includeOffchain = await confirm({
+    const includeOffchain = /*
+    await confirm({
         message: "Do you want to include offchain code using buildooor?",
         default: false
     });
+    /*/
+    false;
+    //*/
 
     if( includeOffchain )
     {
@@ -221,6 +230,127 @@ contract MyContract {
 }`
     );
     await writeFile(indexPebblePath, indexPebble);
+
+    // CLAUDE.md
+    if( includeClaudeMd )
+    {
+    const claudeMdPath = path.join(projectRoot, "CLAUDE.md");
+    const claudeMd = (
+`# Pebble Project
+
+This is a Pebble smart contract project. Pebble is a language with JavaScript-like syntax that compiles to UPLC for Cardano smart contracts.
+
+## Project structure
+
+- \`src/index.pebble\` - main contract entry point
+- \`pebble.config.json\` - compiler config (entry, outDir, removeTraces)
+- \`out/\` - compiled output (generated)
+${includeOffchain ? "- \\`offchain/\\` - offchain code using buildooor\n" : ""}\
+## CLI commands
+
+- \`pebble compile --config ./pebble.config.json\` - compile the project
+- \`pebble export --function-name <name>\` - export a single function
+- \`npm run compile\` - shortcut for compile
+
+## Pebble language reference
+
+### Contracts
+
+\`\`\`pebble
+contract ContractName {
+    param owner: PubKeyHash;
+
+    spend methodName(arg: int) {
+        const { tx } = context;
+        assert tx.requiredSigners.includes(this.owner);
+    }
+}
+\`\`\`
+
+A contract with no methods is an always-failing validator.
+
+### Method types
+
+\`spend\`, \`mint\`, \`cert\`, \`withdraw\`, \`vote\`, \`propose\`
+
+### Context
+
+Inside contract methods, \`context\` provides:
+- \`tx\` - the transaction (always available)
+- \`spendingInputRef\` - reference to the UTxO being spent (\`spend\` methods)
+- \`optionalDatum\` - optional datum on the spent UTxO (\`spend\` methods)
+
+### Tx fields
+
+\`tx.inputs\`, \`tx.refInputs\`, \`tx.outputs\`, \`tx.fee\`, \`tx.mint\`,
+\`tx.certificates\`, \`tx.withdrawals\`, \`tx.validityInterval\`,
+\`tx.requiredSigners\`, \`tx.redeemers\`, \`tx.datums\`, \`tx.hash\`,
+\`tx.votes\`, \`tx.proposals\`, \`tx.currentTreasury\`, \`tx.treasuryDonation\`
+
+### Structs
+
+\`\`\`pebble
+struct Order {
+    ownerPaymentCreds: PubKeyHash,
+    policy: bytes,
+    minAmount: int
+}
+\`\`\`
+
+Sum types (data structs):
+
+\`\`\`pebble
+struct OutputDatum {
+    NoDatum {}
+    DatumHash { hash: Hash32 }
+    InlineDatum { datum: data }
+}
+\`\`\`
+
+### Built-in types
+
+\`int\`, \`bytes\`, \`bool\`, \`data\`,
+\`PubKeyHash\`, \`ScriptHash\`, \`Hash32\`, \`Hash28\`,
+\`PolicyId\`, \`TokenName\`, \`TxHash\`,
+\`Credential\`, \`Address\`, \`Value\`, \`TxOut\`, \`TxIn\`, \`TxOutRef\`,
+\`List<T>\`, \`Optional<T>\`, \`LinearMap<K,V>\`, \`Interval\`
+
+### Variables and control flow
+
+- \`const x = value;\` / \`let x = value;\`
+- \`if/else\`, ternary \`? :\`
+- \`for(const x of list)\`, \`for(let i = 0; i < n; i++)\`
+- \`assert condition;\` - fails the contract if false
+- \`trace value;\` - debug output
+- \`fail;\` - explicitly fail
+
+### Pattern matching
+
+\`\`\`pebble
+assert case ownerCreds
+    is PubKeyHash{ hash } => tx.signatories.includes(hash)
+    is Validator{ hash } => tx.inputs.some(input => input.resolved.address.payment.hash() === hash);
+\`\`\`
+
+### Datum extraction
+
+\`\`\`pebble
+const InlineDatum{ datum: { field1, field2 } as MyStruct } = someOutput.datum;
+\`\`\`
+
+### Common operations
+
+- \`list.includes(item)\`, \`list.filter(fn)\`, \`list.find(fn)\`, \`list.some(fn)\`
+- \`list.head()\`, \`list.tail()\`, \`list.isEmpty()\`, \`list.length()\`
+- \`value.lovelaces()\`, \`value.amountOf(policy, tokenName)\`
+- \`credential.hash()\`
+- Hex literals: \`#aabbcc\`
+- Numeric separators: \`5_000_000\`
+- Access contract params with \`this.paramName\`
+`
+    );
+    await writeFile(claudeMdPath, claudeMd);
+    }
 
     // optional offchain scaffolding
     if (includeOffchain && offchain) {
