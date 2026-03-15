@@ -6,15 +6,9 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 
-function isSingleDigit( str )
-{
-    return /^\d$/.test( str );
-}
-
 async function main() {
 	const cliRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 	const cliPkgPath = path.join(cliRoot, "package.json");
-	const cliPkgLockPath = path.join(cliRoot, "package-lock.json");
 	const outPath = path.join(cliRoot, "src", "version.generated.ts");
 
 	let cliVersion = "0.0.0";
@@ -24,39 +18,11 @@ async function main() {
 		const cliPkg = JSON.parse(await readFile(cliPkgPath, "utf8"));
 		cliVersion = cliPkg.version ?? cliVersion;
 
-		const cliPebbleDepVersion = cliPkg.dependencies["@harmoniclabs/pebble"];
-		const isLocal = typeof cliPebbleDepVersion === "string" &&
-			(cliPebbleDepVersion.startsWith("file:") || cliPebbleDepVersion.endsWith(".tgz"));
-
-		if (isLocal) {
-			// read version from sibling pebble package
-			const pebblePkgPath = path.resolve(cliRoot, "..", "pebble", "package.json");
-			if (existsSync(pebblePkgPath)) {
-				const pebblePkg = JSON.parse(await readFile(pebblePkgPath, "utf8"));
-				pebbleVersion = pebblePkg.version ?? pebbleVersion;
-			}
-		} else {
-			// try to get the resolved version from package-lock.json
-			let lockVersion;
-			try {
-				const cliPkgLock = JSON.parse(await readFile(cliPkgLockPath, "utf8"));
-				lockVersion = cliPkgLock.packages?.["node_modules/@harmoniclabs/pebble"]?.version;
-			} catch (_) {}
-
-			if (lockVersion) {
-				pebbleVersion = lockVersion;
-			} else if (typeof cliPebbleDepVersion === "string") {
-				pebbleVersion = cliPebbleDepVersion;
-			}
-		}
-
-		// strip leading non-digit chars (e.g. ^ or ~)
-		if (pebbleVersion !== "unknown") {
-			while (!isSingleDigit(pebbleVersion[0])) pebbleVersion = pebbleVersion.slice(1);
-		}
-
-		if (isLocal) {
-			pebbleVersion += " (local)";
+		// read version from sibling pebble package (same monorepo)
+		const pebblePkgPath = path.resolve(cliRoot, "..", "pebble", "package.json");
+		if (existsSync(pebblePkgPath)) {
+			const pebblePkg = JSON.parse(await readFile(pebblePkgPath, "utf8"));
+			pebbleVersion = pebblePkg.version ?? pebbleVersion;
 		}
 	} catch (e) {
 		console.error("Failed to read package versions:", e);

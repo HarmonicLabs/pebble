@@ -2,6 +2,7 @@
   "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
   "scripts": {
     "build-pebble": "cd packages/pebble && npm run ci && cd ../..",
+    "bump-dev-cli": "node ./scripts/bump-cli-dev-version.mjs",
     "bump-dev": "node ./scripts/bump-dev-version.mjs",
     "sync-pebble-version": "node ./scripts/sync-pebble-version.mjs",
     "pre-cli-commit": "git add . && git commit -m \"pre cli commit\"",
