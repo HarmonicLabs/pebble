@@ -1083,7 +1083,19 @@ export class AstCompiler extends DiagnosticEmitter
 
                 // define on source top level scope
                 if( isValue ) srcImportsScope.variables.set( declName, importedSymbols.variables.get( declName )! );
-                if( isFunction ) srcImportsScope.functions.set( declName, importedSymbols.functions.get( declName )! );
+                if( isFunction )
+                {
+                    const tirFuncName = importedSymbols.functions.get( declName )!;
+                    srcImportsScope.functions.set( declName, tirFuncName );
+                    // also define as a value so that `resolveValue` can find it
+                    // (mirrors what `_collectTopLevelFuncDeclSig` does for local functions)
+                    const funcExpr = this.program.functions.get( tirFuncName );
+                    if( funcExpr ) srcImportsScope.defineValue({
+                        isConstant: true,
+                        name: declName,
+                        type: funcExpr.type,
+                    });
+                }
                 if( isType ) srcImportsScope.types.set( declName, importedSymbols.types.get( declName )! );
                 if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! )
             }
