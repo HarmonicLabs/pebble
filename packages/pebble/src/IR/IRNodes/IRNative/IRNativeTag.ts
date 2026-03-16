@@ -161,6 +161,7 @@ export enum IRNativeTag {
     _findSopOptional      = -45,
     _increment            = -46,
     _decrement            = -47,
+    _lookupLinearMap       = -48,
 }
 Object.freeze( IRNativeTag );
 
@@ -208,6 +209,7 @@ export function nativeTagToString( nativeTag: IRNativeTag ): string
         case IRNativeTag._getCredentialsHash : return "getCredentialHash";
         case IRNativeTag._increment     : return "increment";
         case IRNativeTag._decrement     : return "decrement";
+        case IRNativeTag._lookupLinearMap : return "lookupLinearMap";
 
         default: return ""
     }

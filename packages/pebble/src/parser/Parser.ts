@@ -2435,6 +2435,32 @@ export class Parser extends DiagnosticEmitter
                     );
                 }
 
+                // LitNamedObjExpr with type qualifier
+                // eg: `Type.Constructor{ a: 1, b: 2 }`
+                if( tn.peek() === Token.Dot ) {
+                    const savedState = tn.mark();
+                    tn.next(); // consume '.'
+                    if( tn.skipIdentifier( IdentifierHandling.Always ) ) {
+                        const ctorIdentifier = new Identifier(
+                            tn.readIdentifier(),
+                            tn.range()
+                        );
+                        if( tn.peek() === Token.OpenBrace ) {
+                            const litObjExpr = this.parseExprStart();
+                            if( litObjExpr instanceof LitObjExpr ) {
+                                return new LitNamedObjExpr(
+                                    ctorIdentifier,
+                                    litObjExpr.fieldNames,
+                                    litObjExpr.values,
+                                    SourceRange.join( identifier.range, litObjExpr.range ),
+                                    identifier // typeName
+                                );
+                            }
+                        }
+                    }
+                    tn.reset(savedState);
+                }
+
                 // param => ...
                 if(
                     tn.peek() === Token.FatArrow

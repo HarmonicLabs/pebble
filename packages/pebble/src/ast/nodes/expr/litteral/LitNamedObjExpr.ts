@@ -11,6 +11,8 @@ export class LitNamedObjExpr
         readonly name: Identifier,
         readonly fieldNames: Identifier[],
         readonly values: PebbleExpr[],
-        readonly range: SourceRange
+        readonly range: SourceRange,
+        /** When using `Type.Constructor{ ... }` syntax, this is the type name */
+        readonly typeName: Identifier | undefined = undefined,
     ) {}
 }

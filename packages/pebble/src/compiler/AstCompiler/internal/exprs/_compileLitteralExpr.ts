@@ -132,9 +132,35 @@ export function _compileLitteralNamedObjExpr(
         structType = getStructType( typeHint );
     } else typeHint = undefined;
     const constructorName = expr.name.text;
-    const inferredStructType: TirStructType | undefined = getStructType(
-        ctx.scope.inferStructTypeFromConstructorName( constructorName )?.structType
-    );
+    let inferredStructType: TirStructType | undefined = undefined;
+
+    // Type.Constructor{ ... } syntax — resolve type directly
+    if( expr.typeName )
+    {
+        const possibleTypes = ctx.scope.resolveType( expr.typeName.text );
+        if( possibleTypes )
+        {
+            const dataTirName = possibleTypes.dataTirName;
+            const sopTirName = possibleTypes.sopTirName;
+            inferredStructType = getStructType(
+                (dataTirName ? ctx.program.types.get( dataTirName ) : undefined)
+                ?? ctx.program.types.get( sopTirName )
+            );
+        }
+        if( !inferredStructType )
+        {
+            return ctx.error(
+                DiagnosticCode._0_is_not_defined,
+                expr.typeName.range, expr.typeName.text
+            );
+        }
+    }
+    else
+    {
+        inferredStructType = getStructType(
+            ctx.scope.inferStructTypeFromConstructorName( constructorName )?.structType
+        );
+    }
     if( !inferredStructType )
     {
         return ctx.error(
@@ -156,12 +182,21 @@ export function _compileLitteralNamedObjExpr(
     structType = inferredStructType;
     if( !isTirType( typeHint ) ) typeHint = structType ?? inferredStructType;
 
+    const constructorIndex = structType?.constructors.findIndex( c => c.name === constructorName ) ?? -1;
+    if( constructorIndex < 0 )
+    {
+        return ctx.error(
+            DiagnosticCode._0_is_not_defined,
+            expr.name.range, constructorName
+        );
+    }
+
     const fieldValues = __commonCompileStructFieldValues(
         ctx,
         expr,
         typeHint,
         structType,
-        structType?.constructors.findIndex( c => c.name === constructorName ) ?? -1
+        constructorIndex
     );
     if( !Array.isArray( fieldValues ) ) return undefined;
 
