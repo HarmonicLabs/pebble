@@ -460,7 +460,7 @@ function expressifyPropAccess(
 function expressifyMethodCall(
     ctx: ExpressifyCtx,
     methodCall: TirCallExpr
-): TirCallExpr
+): TirCallExpr | TirCaseExpr
 {
     const methodPropAccess = methodCall.func;
     if(!( methodPropAccess instanceof TirPropAccessExpr ))
