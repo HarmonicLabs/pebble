@@ -390,24 +390,27 @@ export const hoisted_findSopOptional = new IRHoisted(
                     // case nil
                     new IRConstr( 1, [] ), // None
                     // case cons
-                    new IRFunc(
-                        [ findSop_head ],
-                        _ir_lazyIfThenElse(
-                            _ir_apps(
-                                new IRVar( findSop_predicate ),
-                                new IRVar( findSop_head )
-                            ),
-                            // then => Some(head)
-                            new IRConstr( 1, [ new IRVar( findSop_head ) ] ), // Some{ head }
-                            // else => self(tail)
-                            _ir_apps(
-                                new IRSelfCall( findSop_self ),
+                    new IRApp(
+                        new IRFunc(
+                            [ findSop_head ],
+                            _ir_lazyIfThenElse(
                                 _ir_apps(
-                                    IRNative.tailList,
-                                    new IRVar( findSop_list )
+                                    new IRVar( findSop_predicate ),
+                                    new IRVar( findSop_head )
+                                ),
+                                // then => Some(head)
+                                new IRConstr( 0, [ new IRVar( findSop_head ) ] ), // Some{ head }
+                                // else => self(tail)
+                                _ir_apps(
+                                    new IRSelfCall( findSop_self ),
+                                    _ir_apps(
+                                        IRNative.tailList,
+                                        new IRVar( findSop_list )
+                                    )
                                 )
                             )
-                        )
+                        ),
+                        new IRApp( IRNative.headList, new IRVar( findSop_list ) )
                     )
                 )
             )
@@ -434,33 +437,36 @@ export const hoisted_lookupLinearMap = new IRHoisted(
                     // case nil => None
                     new IRConstr( 1, [] ),
                     // case cons
-                    new IRFunc(
-                        [ lookup_head ],
-                        _ir_lazyIfThenElse(
-                            _ir_apps(
-                                IRNative.equalsData,
+                    new IRApp(
+                        new IRFunc(
+                            [ lookup_head ],
+                            _ir_lazyIfThenElse(
                                 _ir_apps(
-                                    IRNative.fstPair,
-                                    new IRVar( lookup_head )
+                                    IRNative.equalsData,
+                                    _ir_apps(
+                                        IRNative.fstPair,
+                                        new IRVar( lookup_head )
+                                    ),
+                                    new IRVar( lookup_key )
                                 ),
-                                new IRVar( lookup_key )
-                            ),
-                            // then => Some(sndPair(head))
-                            new IRConstr( 1, [
+                                // then => Some(sndPair(head))
+                                new IRConstr( 0, [
+                                    _ir_apps(
+                                        IRNative.sndPair,
+                                        new IRVar( lookup_head )
+                                    )
+                                ]),
+                                // else => self(tailList(map))
                                 _ir_apps(
-                                    IRNative.sndPair,
-                                    new IRVar( lookup_head )
-                                )
-                            ]),
-                            // else => self(tailList(map))
-                            _ir_apps(
-                                new IRSelfCall( lookup_self ),
-                                _ir_apps(
-                                    IRNative.tailList,
-                                    new IRVar( lookup_map )
+                                    new IRSelfCall( lookup_self ),
+                                    _ir_apps(
+                                        IRNative.tailList,
+                                        new IRVar( lookup_map )
+                                    )
                                 )
                             )
-                        )
+                        ),
+                        new IRApp( IRNative.headList, new IRVar( lookup_map ) )
                     )
                 )
             )

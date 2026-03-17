@@ -3,6 +3,7 @@ import { mergeSortedStrArrInplace } from "../../../utils/array/mergeSortedStrArr
 import { TirExpr } from "../expressions/TirExpr";
 import { ITirStmt } from "./TirStmt";
 import { TirTraceIfFalseExpr } from "../expressions/TirTraceIfFalseExpr";
+import { TirSopOptToBoolExpr } from "../expressions/TirSopOptToBoolExpr";
 
 export class TirAssertStmt
     implements ITirStmt
@@ -45,7 +46,10 @@ export class TirAssertStmt
 
     toSafeCondition(): TirExpr
     {
-        if( !this.elseExpr ) return this.condition;
+        if( !this.elseExpr )
+        {
+            return TirSopOptToBoolExpr.wrapIfNeeded( this.condition );
+        }
 
         return new TirTraceIfFalseExpr(
             this.condition,

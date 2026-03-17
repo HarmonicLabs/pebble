@@ -142,11 +142,13 @@ export class TirCaseExpr
                 c => c.pattern.constrName === "Some"
             );
             let someBranchVarSym: symbol = Symbol("some_value_unused");
+            let someValueType: TirType | undefined = undefined;
             if( someBranch ) {
                 const varDecl = someBranch.pattern.fields.values().next().value;
                 if(!( varDecl instanceof TirSimpleVarDecl ))
                 throw new Error("case pattern not expressified.");
                 someBranchVarSym = someBranchCtx.defineVar( varDecl.name );
+                someValueType = varDecl.type;
             }
             const someBranchIR = someBranch?.body.toIR( someBranchCtx ) ?? wildcardBodyIR;
 
@@ -154,10 +156,23 @@ export class TirCaseExpr
                 c => c.pattern.constrName === "None"
             )?.body.toIR( ctx ) ?? wildcardBodyIR;
 
+            // The SoP Optional wraps raw data values from lookups;
+            // apply _inlineFromData to convert to the expected native type
+            // (e.g., unMapData for LinearMap values)
+            const rawValueSym = Symbol("sop_opt_raw_value");
+            const someHandler: IRTerm = someValueType
+                ? new IRFunc([ rawValueSym ],
+                    new IRApp(
+                        new IRFunc([ someBranchVarSym ], someBranchIR ),
+                        _inlineFromData( someValueType, new IRVar( rawValueSym ) )
+                    )
+                )
+                : new IRFunc([ someBranchVarSym ], someBranchIR );
+
             return new IRCase(
                 this.matchExpr.toIR( ctx ), [
                     // Some{ value }
-                    new IRFunc([ someBranchVarSym ], someBranchIR ),
+                    someHandler,
                     // None
                     noneBranchIR
                 ]
@@ -265,8 +280,7 @@ export class TirCaseExpr
                 c => c.pattern.constrName === "None"
             )?.body.toIR( stmtCtx ) ?? wildcardBodyIR;
 
-            return new IRForced(
-                _ir_let(
+            return _ir_let(
                     _ir_apps(
                         IRNative.unConstrData,
                         this.matchExpr.toIR( ctx )
@@ -286,7 +300,6 @@ export class TirCaseExpr
                         // else None
                         noneBranchIR
                     )
-                )
             );
         }
 
