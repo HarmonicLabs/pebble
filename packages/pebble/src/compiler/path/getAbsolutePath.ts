@@ -63,7 +63,8 @@ function addExtension(path: string, endsWithSlash: boolean): string {
 
 export function isAbsolutePath( path: string ): boolean
 {
-    return path.startsWith( PATH_DELIMITER );
+    // Support both Unix (/) and Windows (C:/, D:/) absolute paths
+    return path.startsWith( PATH_DELIMITER ) || /^[A-Za-z]:[\\/]/.test( path );
 }
 
 export function getEnvRelativePath( filePath: string, projectRoot: string ): string | undefined

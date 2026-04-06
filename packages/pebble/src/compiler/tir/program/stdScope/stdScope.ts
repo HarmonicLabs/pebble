@@ -23,6 +23,9 @@ import { TirReturnStmt } from "../../statements/TirReturnStmt";
 import { TirInlineClosedIR } from "../../expressions/TirInlineClosedIR";
 import { TirFuncT } from "../../types/TirNativeType";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
+import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
+import { IRVar } from "../../../../IR/IRNodes/IRVar";
+import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 
 export const void_t = new TirVoidT();
 export const int_t = new TirIntT();
@@ -751,6 +754,7 @@ export function populatePreludeScope( program: TypedProgram ): void
     );
     if(!map_policyId_map_tokenName_int_t) throw new Error("expected map_policyId_map_tokenName_int_t");
     const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
+    const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
     const value_t = _defineUnambigousAlias(
         "Value",
         map_policyId_map_tokenName_int_t,
@@ -758,6 +762,10 @@ export function populatePreludeScope( program: TypedProgram ): void
             [
                 "lovelaces",
                 valueLovelacesName
+            ],
+            [
+                "amountOf",
+                valueAmountOfName
             ],
         ])
     );
@@ -769,7 +777,61 @@ export function populatePreludeScope( program: TypedProgram ): void
             SourceRange.unknown
         )
     );
-    
+    // Value.amountOf( policy: PolicyId, name: bytes ): int
+    // The IR native _amountOfValue is curried as: (isPolicy)(value)(isTokenName) => int
+    // where isPolicy and isTokenName are equality-check predicates.
+    // This wrapper adapts (self, policy, tokenName) => _amountOfValue(p => equalsByteString(p, policy))(self)(tn => equalsByteString(tn, tokenName))
+    preludeScope.program.functions.set(
+        valueAmountOfName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, policyId_t, bytes_t ], int_t ),
+            ( ctx ) => {
+                const self = Symbol("amtOf_self");
+                const policy = Symbol("amtOf_policy");
+                const tokenName = Symbol("amtOf_tokenName");
+                const p = Symbol("amtOf_p");
+                const tn = Symbol("amtOf_tn");
+                return new IRFunc(
+                    [ self ],
+                    new IRFunc(
+                        [ policy ],
+                        new IRFunc(
+                            [ tokenName ],
+                            _ir_apps(
+                                _ir_apps(
+                                    _ir_apps(
+                                        IRNative._amountOfValue,
+                                        // isPolicy predicate: \p -> equalsByteString(p, policy)
+                                        new IRFunc(
+                                            [ p ],
+                                            _ir_apps(
+                                                IRNative.equalsByteString,
+                                                new IRVar( p ),
+                                                new IRVar( policy )
+                                            )
+                                        )
+                                    ),
+                                    // value (self)
+                                    new IRVar( self )
+                                ),
+                                // isTokenName predicate: \tn -> equalsByteString(tn, tokenName)
+                                new IRFunc(
+                                    [ tn ],
+                                    _ir_apps(
+                                        IRNative.equalsByteString,
+                                        new IRVar( tn ),
+                                        new IRVar( tokenName )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
     /* // TODO
     untagged struct FlatValueEntry {
         policy: PolicyId,
