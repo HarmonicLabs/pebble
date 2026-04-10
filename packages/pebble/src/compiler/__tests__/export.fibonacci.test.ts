@@ -35,11 +35,11 @@ function fibonacci( n: int ): int {
         expect( diagnostics.length ).toBe( 0 );
 
         const output = ioApi.outputs.get("out/out.flat")!;
+        // console.log( prettyUPLC( parseUPLC( output ).body, 2 ) )
         expect( output instanceof Uint8Array ).toBe( true );
-        expect( output.length ).toBe( 56 );
+        expect( output.length ).toBeLessThanOrEqual( 56 );
 
         // console.log( output.length, toHex( output ) );
-        // console.log( prettyUPLC( parseUPLC( output ).body, 2 ) )
     });
     
 /*

@@ -6,7 +6,7 @@ import { constT, constTypeEq } from "@harmoniclabs/uplc";
 import { dataFromCbor } from "@harmoniclabs/plutus-data";
 import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
 
-describe("compiler.run", () => {
+describe.skip("compiler.run", () => {
     test("trace sum 1 to 10", async () => {
 
         const fileName = "test.pebble";

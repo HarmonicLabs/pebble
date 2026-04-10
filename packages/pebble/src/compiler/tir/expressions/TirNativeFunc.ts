@@ -915,6 +915,17 @@ export class TirNativeFunc
             ], new TirSopOptT(elems_t))
         );
     }
+    static _lookupLinearMap(keyT: TirType, valT: TirType): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag._lookupLinearMap,
+            new TirFuncT([
+                // key: data
+                data_t,
+                // map: list<pair<data,data>>
+                new TirLinearMapT(keyT, valT)
+            ], new TirSopOptT(valT))
+        );
+    }
     static _length(elemT: TirType): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag._length,

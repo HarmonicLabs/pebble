@@ -192,6 +192,23 @@ export class SourceTypeMap
             }
         }
 
+        // constructor accessor methods for multi-constructor structs
+        // e.g. ExtendedInteger.finite() returns int
+        if( type.constructors.length > 1 )
+        {
+            for( const ctor of type.constructors )
+            {
+                if( ctor.fields.length === 1 )
+                {
+                    result.push({
+                        name: ctor.name.toLowerCase(),
+                        type: new TirFuncT([], ctor.fields[0].type),
+                        kind: "method"
+                    });
+                }
+            }
+        }
+
         // methods
         result.push( ...this.methodsFromMap( type.methodNamesPtr ) );
         return result;

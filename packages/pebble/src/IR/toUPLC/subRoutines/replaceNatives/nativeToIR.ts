@@ -390,24 +390,27 @@ export const hoisted_findSopOptional = new IRHoisted(
                     // case nil
                     new IRConstr( 1, [] ), // None
                     // case cons
-                    new IRFunc(
-                        [ findSop_head ],
-                        _ir_lazyIfThenElse(
-                            _ir_apps(
-                                new IRVar( findSop_predicate ),
-                                new IRVar( findSop_head )
-                            ),
-                            // then => Some(head)
-                            new IRConstr( 1, [ new IRVar( findSop_head ) ] ), // Some{ head }
-                            // else => self(tail)
-                            _ir_apps(
-                                new IRSelfCall( findSop_self ),
+                    new IRApp(
+                        new IRFunc(
+                            [ findSop_head ],
+                            _ir_lazyIfThenElse(
                                 _ir_apps(
-                                    IRNative.tailList,
-                                    new IRVar( findSop_list )
+                                    new IRVar( findSop_predicate ),
+                                    new IRVar( findSop_head )
+                                ),
+                                // then => Some(head)
+                                new IRConstr( 0, [ new IRVar( findSop_head ) ] ), // Some{ head }
+                                // else => self(tail)
+                                _ir_apps(
+                                    new IRSelfCall( findSop_self ),
+                                    _ir_apps(
+                                        IRNative.tailList,
+                                        new IRVar( findSop_list )
+                                    )
                                 )
                             )
-                        )
+                        ),
+                        new IRApp( IRNative.headList, new IRVar( findSop_list ) )
                     )
                 )
             )
@@ -415,6 +418,62 @@ export const hoisted_findSopOptional = new IRHoisted(
     )
 );
 hoisted_findSopOptional.hash;
+
+// hoisted _lookupLinearMap
+// (key: data) -> (map: list<pair<data,data>>) -> SopOptional<data>
+const lookup_key = Symbol("lookup_key");
+const lookup_self = Symbol("lookup_self");
+const lookup_map = Symbol("lookup_map");
+const lookup_head = Symbol("lookup_head");
+export const hoisted_lookupLinearMap = new IRHoisted(
+    new IRFunc(
+        [ lookup_key ],
+        new IRRecursive(
+            lookup_self,
+            new IRFunc(
+                [ lookup_map ],
+                _ir_lazyChooseList(
+                    new IRVar( lookup_map ),
+                    // case nil => None
+                    new IRConstr( 1, [] ),
+                    // case cons
+                    new IRApp(
+                        new IRFunc(
+                            [ lookup_head ],
+                            _ir_lazyIfThenElse(
+                                _ir_apps(
+                                    IRNative.equalsData,
+                                    _ir_apps(
+                                        IRNative.fstPair,
+                                        new IRVar( lookup_head )
+                                    ),
+                                    new IRVar( lookup_key )
+                                ),
+                                // then => Some(sndPair(head))
+                                new IRConstr( 0, [
+                                    _ir_apps(
+                                        IRNative.sndPair,
+                                        new IRVar( lookup_head )
+                                    )
+                                ]),
+                                // else => self(tailList(map))
+                                _ir_apps(
+                                    new IRSelfCall( lookup_self ),
+                                    _ir_apps(
+                                        IRNative.tailList,
+                                        new IRVar( lookup_map )
+                                    )
+                                )
+                            )
+                        ),
+                        new IRApp( IRNative.headList, new IRVar( lookup_map ) )
+                    )
+                )
+            )
+        )
+    )
+);
+hoisted_lookupLinearMap.hash;
 
 // hoisted _mkFindDataOptional
 const mkFind_elemToData = Symbol("elemToData");
@@ -936,6 +995,7 @@ export function nativeToIR( native: IRNative ): IRTerm
         // case IRNativeTag._equalPairData: ;
         case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         case IRNativeTag._negateInt: return hoisted_negateInteger.clone();
+        case IRNativeTag._lookupLinearMap: return hoisted_lookupLinearMap.clone();
         // case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         default:
         throw new Error(

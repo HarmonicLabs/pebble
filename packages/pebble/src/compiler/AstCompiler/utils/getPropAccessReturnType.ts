@@ -123,6 +123,21 @@ function getStructPropAccessReturnType(
         const field = constr.fields.find( f => f.name === propName );
         if( field ) return field.type;
     }
+
+    // constructor accessor methods for multi-constructor data structs
+    // e.g. ExtendedInteger.finite() returns int (the field of the Finite constructor)
+    if( structType.constructors.length > 1 )
+    {
+        const lowerPropName = propName.toLowerCase();
+        const ctor = structType.constructors.find(
+            c => c.name.toLowerCase() === lowerPropName
+        );
+        if( ctor && ctor.fields.length === 1 )
+        {
+            return new TirFuncT([], ctor.fields[0].type);
+        }
+    }
+
     return findPropInImpls( ctx, structType.methodNamesPtr, propName );
 }
 

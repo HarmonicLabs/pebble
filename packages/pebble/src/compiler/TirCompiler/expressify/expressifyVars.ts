@@ -16,7 +16,7 @@ import { TirLitUndefExpr } from "../../tir/expressions/litteral/TirLitUndefExpr"
 import { TirLitVoidExpr } from "../../tir/expressions/litteral/TirLitVoidExpr";
 import { TirAssertAndContinueExpr } from "../../tir/expressions/TirAssertAndContinueExpr";
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
-import { TirCaseExpr, TirCaseMatcher } from "../../tir/expressions/TirCaseExpr";
+import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../tir/expressions/TirCaseExpr";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
 import { TirFailExpr } from "../../tir/expressions/TirFailExpr";
@@ -47,7 +47,8 @@ import { TirArrayLikeDeconstr } from "../../tir/statements/TirVarDecl/TirArrayLi
 import { TirNamedDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirAliasType } from "../../tir/types/TirAliasType";
-import { TirFuncT, TirListT } from "../../tir/types/TirNativeType";
+import { TirFuncT, TirListT, TirPairDataT } from "../../tir/types/TirNativeType";
+import { TirLinearMapT } from "../../tir/types/TirNativeType/native/linearMap";
 import { TirDataStructType, TirSoPStructType } from "../../tir/types/TirStructType";
 import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../tir/types/utils/getUnaliased";
@@ -77,16 +78,30 @@ export function expressifyVars(
         || expr instanceof TirLitTrueExpr
         || expr instanceof TirLitFalseExpr
         || expr instanceof TirLitThisExpr
-        || expr instanceof TirLitArrExpr
-        || expr instanceof TirLitObjExpr
-        || expr instanceof TirLitNamedObjExpr
         || expr instanceof TirLitStrExpr
         || expr instanceof TirLitIntExpr
         || expr instanceof TirLitHexBytesExpr
         || expr instanceof TirNativeFunc
         // hoisted expressions are necessarily closed, so no external variables
         || expr instanceof TirHoistedExpr
-    ) return expr; 
+    ) return expr;
+
+    if(
+        expr instanceof TirLitObjExpr
+        || expr instanceof TirLitNamedObjExpr
+    ) {
+        for( let i = 0; i < expr.values.length; i++ ) {
+            expr.values[i] = expressifyVars( ctx, expr.values[i] );
+        }
+        return expr;
+    }
+
+    if( expr instanceof TirLitArrExpr ) {
+        for( let i = 0; i < expr.elems.length; i++ ) {
+            expr.elems[i] = expressifyVars( ctx, expr.elems[i] );
+        }
+        return expr;
+    }
 
     // every property access must be replaced with a variable access (or similar)
     // that is either letted/hoisted/nativeFunc/varAccess expression
@@ -445,7 +460,7 @@ function expressifyPropAccess(
 function expressifyMethodCall(
     ctx: ExpressifyCtx,
     methodCall: TirCallExpr
-): TirCallExpr
+): TirCallExpr | TirCaseExpr
 {
     const methodPropAccess = methodCall.func;
     if(!( methodPropAccess instanceof TirPropAccessExpr ))
@@ -480,6 +495,59 @@ function expressifyMethodCall(
         objectType instanceof TirDataStructType
         || objectType instanceof TirSoPStructType
     ) {
+        // constructor accessor methods for multi-constructor structs
+        // e.g. ExtendedInteger.finite() asserts Finite and returns int
+        if( objectType.constructors.length > 1 && methodCall.args.length === 0 )
+        {
+            const lowerMethodName = methodName.toLowerCase();
+            const ctor = objectType.constructors.find(
+                c => c.name.toLowerCase() === lowerMethodName
+            );
+            if( ctor && ctor.fields.length === 1 )
+            {
+                const fName = ctor.fields[0].name;
+                const fType = ctor.fields[0].type;
+                const exprRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+
+                return new TirCaseExpr(
+                    objectExpr,
+                    [
+                        new TirCaseMatcher(
+                            new TirNamedDeconstructVarDecl(
+                                ctor.name,
+                                new Map([
+                                    [ fName, new TirSimpleVarDecl( fName, fType, undefined, true, exprRange ) ]
+                                ]),
+                                undefined,
+                                objectExpr.type,
+                                undefined,
+                                true,
+                                exprRange,
+                            ),
+                            new TirVariableAccessExpr(
+                                {
+                                    variableInfos: {
+                                        name: fName,
+                                        type: fType,
+                                        isConstant: true,
+                                    },
+                                    isDefinedOutsideFuncScope: false,
+                                },
+                                exprRange
+                            ),
+                            exprRange
+                        )
+                    ],
+                    new TirWildcardCaseMatcher(
+                        new TirFailExpr( undefined, fType, exprRange ),
+                        exprRange
+                    ),
+                    fType,
+                    exprRange
+                );
+            }
+        }
+
         const structMethods = objectType.methodNamesPtr;
         const tirMethodName = structMethods.get( methodName );
         if( !tirMethodName ) throw new Error(
@@ -505,6 +573,34 @@ function expressifyMethodCall(
             methodName,
             objectType,
             SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() )
+        );
+        if( result ) return result;
+    }
+
+    if( objectType instanceof TirLinearMapT ) {
+        const exprRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+
+        if( methodName === "lookup" ) {
+            if( methodCall.args.length !== 1 ) throw new Error(
+                `Method 'lookup' of type 'LinearMap' takes 1 argument, ${methodCall.args.length} provided`
+            );
+            return new TirCallExpr(
+                TirNativeFunc._lookupLinearMap( objectType.keyTypeArg, objectType.valTypeArg ),
+                [ methodCall.args[0], objectExpr ],
+                methodCall.type,
+                exprRange
+            );
+        }
+
+        // LinearMap is List<PairData> at UPLC level; delegate list methods
+        const listType = new TirListT( new TirPairDataT() );
+        const result = expressifyListMethodCall(
+            ctx,
+            objectExpr,
+            methodCall,
+            methodName,
+            listType,
+            exprRange
         );
         if( result ) return result;
     }

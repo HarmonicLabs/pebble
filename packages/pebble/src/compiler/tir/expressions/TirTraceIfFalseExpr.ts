@@ -12,6 +12,10 @@ import { IRNative } from "../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { _ir_apps } from "../../../IR/IRNodes/IRApp";
 import { _ir_lazyIfThenElse } from "../../../IR/tree_utils/_ir_lazyIfThenElse";
+import { IRCase, IRConstr } from "../../../IR/IRNodes";
+import { IRFunc } from "../../../IR/IRNodes/IRFunc";
+import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
+import { getUnaliased } from "../types/utils/getUnaliased";
 
 export class TirTraceIfFalseExpr
     implements ITirExpr
@@ -55,6 +59,27 @@ export class TirTraceIfFalseExpr
 
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
+        const condType = getUnaliased( this.condition.type );
+
+        // SoP Optional: use case expression to convert to bool
+        if( condType instanceof TirSopOptT )
+        {
+            const unusedSym = Symbol("_some_val");
+            return new IRCase(
+                this.condition.toIR( ctx ),
+                [
+                    // Some{ value } => true
+                    new IRFunc( [ unusedSym ], IRConst.bool( true ) ),
+                    // None => trace(msg, false)
+                    _ir_apps(
+                        IRNative.trace,
+                        this.traceStrExpr.toIR( ctx ),
+                        IRConst.bool( false )
+                    )
+                ]
+            );
+        }
+
         return _ir_lazyIfThenElse(
             // condition
             this.condition.toIR( ctx ),
