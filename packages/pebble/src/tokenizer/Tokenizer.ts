@@ -5,7 +5,7 @@ import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
 import { DiagnosticCode } from "../diagnostics/diagnosticMessages.generated";
 import { assert } from "../utils/assert";
 import { CharCode } from "../utils/CharCode";
-import { isHighSurrogate, combineSurrogates, isIdentifierStart, numCodeUnits, isIdentifierPart, isWhiteSpace, isLineBreak, isDecimal, isOctal, isHexBase } from "../utils/text";
+import { isHighSurrogate, combineSurrogates, isIdentifierStart, numCodeUnits, isIdentifierPart, isWhiteSpace, isLineBreak, isDecimal, isOctal, isHexBase, isHexOrDecimal } from "../utils/text";
 import { IdentifierHandling } from "./IdentifierHandling";
 import { OnNewLine } from "./OnNewLine";
 import { Token } from "./Token";
@@ -1062,7 +1062,7 @@ export class Tokenizer extends DiagnosticEmitter {
         let length = 0;
         while (pos < end) {
             let c = text.charCodeAt(pos);
-            if (isHexBase(c)) {
+            if (isHexOrDecimal(c)) {
                 length++;
                 pos++;
             } else {

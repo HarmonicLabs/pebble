@@ -1230,28 +1230,28 @@ export const hoisted_amountOfValue = new IRHoisted(
                                                                                 IRNative.fstPair,
                                                                                 new IRVar( pairDataTokenSym )
                                                                             )
-                                                                        ),
-                                                                        // then: return amount
-                                                                        new IRDelayed(
+                                                                        )
+                                                                    ),
+                                                                    // then: return amount
+                                                                    new IRDelayed(
+                                                                        _ir_apps(
+                                                                            IRNative.unIData,
                                                                             _ir_apps(
-                                                                                IRNative.unIData,
-                                                                                _ir_apps(
-                                                                                    IRNative.sndPair,
-                                                                                    new IRVar( pairDataTokenSym )
-                                                                                )
-                                                                            )
-                                                                        ),
-                                                                        // else: recurse tail
-                                                                        new IRDelayed(
-                                                                            _ir_apps(
-                                                                                new IRSelfCall( amount_tokenNameLoop ),
-                                                                                _ir_apps(
-                                                                                    IRNative.tailList,
-                                                                                    new IRVar( amount_tokenMap ) // tokenMap list
-                                                                                )
+                                                                                IRNative.sndPair,
+                                                                                new IRVar( pairDataTokenSym )
                                                                             )
                                                                         )
                                                                     ),
+                                                                    // else: recurse tail
+                                                                    new IRDelayed(
+                                                                        _ir_apps(
+                                                                            new IRSelfCall( amount_tokenNameLoop ),
+                                                                            _ir_apps(
+                                                                                IRNative.tailList,
+                                                                                new IRVar( amount_tokenMap ) // tokenMap list
+                                                                            )
+                                                                        )
+                                                                    )
                                                                 ))
                                                             )
                                                         )

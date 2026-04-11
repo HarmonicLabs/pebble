@@ -39,7 +39,8 @@ import { TirUnaryMinus } from "../../tir/expressions/unary/TirUnaryMinus";
 import { TirUnaryPlus } from "../../tir/expressions/unary/TirUnaryPlus";
 import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
-import { bool_t } from "../../tir/program/stdScope/stdScope";
+import { bool_t, bytes_t, int_t, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
+import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
 import { TirStmt } from "../../tir/statements/TirStmt";
@@ -480,6 +481,52 @@ function expressifyMethodCall(
             continue;
         }
 
+        const callRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+
+        // fast-path: `Value.amountOf(policy, name)` compiles directly to
+        // `_amountOfValue(eqByteString(policy))(value)(eqByteString(name))`
+        // skipping the wrapper function indirection.
+        if(
+            tirMethodName === valueAmountOfName
+            && methodCall.args.length === 2
+        ) {
+            const [ policyArg, nameArg ] = methodCall.args;
+            const bytesToBoolT = new TirFuncT([ bytes_t ], bool_t );
+
+            const isPolicy = new TirLettedExpr( "value_amountOf_isPolicy",
+                new TirCallExpr(
+                    TirNativeFunc.equalsByteString,
+                    [ policyArg ],
+                    bytesToBoolT,
+                    policyArg.range
+                ),
+                policyArg.range
+            );
+            const isTokenName = new TirLettedExpr( "value_amountOf_isTokenName",
+                new TirCallExpr(
+                    TirNativeFunc.equalsByteString,
+                    [ nameArg ],
+                    bytesToBoolT,
+                    nameArg.range
+                ),
+                nameArg.range
+            );
+            const amountOfValueNative = new TirNativeFunc(
+                IRNativeTag._amountOfValue,
+                new TirFuncT(
+                    [ bytesToBoolT, objectExpr.type, bytesToBoolT ],
+                    int_t
+                )
+            );
+
+            return new TirCallExpr(
+                amountOfValueNative,
+                [ isPolicy, objectExpr, isTokenName ],
+                int_t,
+                callRange
+            );
+        }
+
         const funcExpr = ctx.program.functions.get( tirMethodName );
         if( !funcExpr ) throw new Error(`Definition of method '${methodName}' on type '${objectType.toString()}' is missing.`);
 
@@ -487,7 +534,7 @@ function expressifyMethodCall(
             funcExpr,
             [ objectExpr, ...methodCall.args ],
             methodCall.type,
-            SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() )
+            callRange
         );
     }
 

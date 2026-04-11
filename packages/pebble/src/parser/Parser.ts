@@ -2878,11 +2878,11 @@ export class Parser extends DiagnosticEmitter
             const expr = this.parseExpr( Precedence.Comma + 1 );
             if (!expr) return undefined;
             args.push(expr);
-            
+
             if( tn.skip( Token.Comma ) ) continue;
-            
+
             if (tn.skip( Token.CloseParen)) break;
-            
+
             this.error(
                 DiagnosticCode._0_expected,
                 tn.range(), ")"

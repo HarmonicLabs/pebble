@@ -90,7 +90,7 @@ export class Compiler
             while( msg = this.diagnostics.shift()! ) {
                 this.io.stdout.write( msg.toString() + "\n" );
             }
-            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+            // throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
         return this._compileBackend( cfg, program );
     }

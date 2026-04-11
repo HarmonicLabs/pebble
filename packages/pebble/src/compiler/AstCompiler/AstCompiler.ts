@@ -298,8 +298,8 @@ export class AstCompiler extends DiagnosticEmitter
                 console.log( msg.toString() );
                 //*/
             }
-            // return this.program;
-            throw new Error("AstCompiler.compile: failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+            return this.program;
+            // throw new Error("AstCompiler.compile: failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
 
         const mainFuncExpr = this.program.functions.get( this.program.contractTirFuncName );

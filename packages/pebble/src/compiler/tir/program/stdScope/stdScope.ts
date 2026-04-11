@@ -34,6 +34,9 @@ export const bytes_t = new TirBytesT();
 export const bool_t = new TirBoolT();
 export const data_t = new TirDataT();
 
+export const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
+export const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
+
 export function populateStdScope( program: TypedProgram ): void
 {
     const stdScope = program.stdScope;
@@ -753,8 +756,6 @@ export function populatePreludeScope( program: TypedProgram ): void
         [ policyId_t, map_tokenName_int_t ]
     );
     if(!map_policyId_map_tokenName_int_t) throw new Error("expected map_policyId_map_tokenName_int_t");
-    const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
-    const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
     const value_t = _defineUnambigousAlias(
         "Value",
         map_policyId_map_tokenName_int_t,
@@ -792,38 +793,24 @@ export function populatePreludeScope( program: TypedProgram ): void
                 const p = Symbol("amtOf_p");
                 const tn = Symbol("amtOf_tn");
                 return new IRFunc(
-                    [ self ],
-                    new IRFunc(
-                        [ policy ],
-                        new IRFunc(
-                            [ tokenName ],
+                    [ self, policy, tokenName ],
+                    _ir_apps(
+                        _ir_apps(
                             _ir_apps(
+                                IRNative._amountOfValue,
+                                // isPolicy predicate: \p -> equalsByteString(p, policy)
                                 _ir_apps(
-                                    _ir_apps(
-                                        IRNative._amountOfValue,
-                                        // isPolicy predicate: \p -> equalsByteString(p, policy)
-                                        new IRFunc(
-                                            [ p ],
-                                            _ir_apps(
-                                                IRNative.equalsByteString,
-                                                new IRVar( p ),
-                                                new IRVar( policy )
-                                            )
-                                        )
-                                    ),
-                                    // value (self)
-                                    new IRVar( self )
-                                ),
-                                // isTokenName predicate: \tn -> equalsByteString(tn, tokenName)
-                                new IRFunc(
-                                    [ tn ],
-                                    _ir_apps(
-                                        IRNative.equalsByteString,
-                                        new IRVar( tn ),
-                                        new IRVar( tokenName )
-                                    )
+                                    IRNative.equalsByteString,
+                                    new IRVar( policy )
                                 )
-                            )
+                            ),
+                            // value (self)
+                            new IRVar( self )
+                        ),
+                        // isTokenName predicate: \tn -> equalsByteString(tn, tokenName)
+                        _ir_apps(
+                            IRNative.equalsByteString,
+                            new IRVar( tokenName )
                         )
                     )
                 );
