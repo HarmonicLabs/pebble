@@ -48,6 +48,8 @@ import { TirArrayLikeDeconstr } from "../../tir/statements/TirVarDecl/TirArrayLi
 import { TirNamedDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirAliasType } from "../../tir/types/TirAliasType";
+import { TirBytesT } from "../../tir/types/TirNativeType/native/bytes";
+import { TirStringT } from "../../tir/types/TirNativeType/native/string";
 import { TirFuncT, TirListT, TirPairDataT } from "../../tir/types/TirNativeType";
 import { TirLinearMapT } from "../../tir/types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
@@ -706,6 +708,35 @@ function expressifyMethodCall(
             exprRange
         );
         if( result ) return result;
+    }
+
+    if( objectType instanceof TirBytesT || objectType instanceof TirStringT ) {
+        const exprRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+
+        if( methodName === "length" ) {
+            return new TirCallExpr(
+                TirNativeFunc.lengthOfByteString,
+                [ objectExpr ],
+                int_t,
+                exprRange
+            );
+        }
+        if( methodName === "subByteString" || methodName === "slice" ) {
+            return new TirCallExpr(
+                TirNativeFunc.sliceByteString,
+                [ methodCall.args[0], methodCall.args[1], objectExpr ],
+                bytes_t,
+                exprRange
+            );
+        }
+        if( methodName === "prepend" ) {
+            return new TirCallExpr(
+                TirNativeFunc.consByteString,
+                [ methodCall.args[0], objectExpr ],
+                bytes_t,
+                exprRange
+            );
+        }
     }
 
     throw new Error(`not implemented::expressifyMethodCall for type '${objectType.toString()}' (method name: '${methodName}')`);

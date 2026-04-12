@@ -73,10 +73,7 @@ export function canCastTo( a: TirType, b: TirType ): boolean
         if( a instanceof TirBytesT ) return true;
         if( a instanceof TirDataT ) return true;
         if( a instanceof TirStringT ) return true; // string -> bytes // decode utf8
-        // how do we handle this?
-        // in theory we can encode but only fixed size
-        // we have no idea of the size of ints
-        // if( a instanceof TirIntT ) return true;
+        if( a instanceof TirIntT ) return true; // int -> bytes // big endian encoding
         return false;
     }
     if( b instanceof TirStringT )
