@@ -7,6 +7,7 @@ import { isTirStructType, TirStructType, TirStructField } from "./tir/types/TirS
 import { TirFuncT } from "./tir/types/TirNativeType/native/function";
 import { TirListT } from "./tir/types/TirNativeType/native/list";
 import { TirLinearMapT } from "./tir/types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "./tir/types/TirNativeType/native/linearMapEntry";
 import { TirBytesT } from "./tir/types/TirNativeType/native/bytes";
 import { TirStringT } from "./tir/types/TirNativeType/native/string";
 import { TirBoolT } from "./tir/types/TirNativeType/native/bool";
@@ -173,6 +174,7 @@ export class SourceTypeMap
         if( isTirOptType( type ) ) return [];
         if( type instanceof TirFuncT ) return [];
         if( type instanceof TirListT ) return this.listMembers( type.typeArg );
+        if( type instanceof TirLinearMapEntryT ) return this.linearMapEntryMembers( type );
         if( type instanceof TirLinearMapT ) return this.linearMapMembers( type.keyTypeArg, type.valTypeArg );
 
         return [];
@@ -272,10 +274,34 @@ export class SourceTypeMap
         ];
     }
 
-    private linearMapMembers( kT: TirType, vT: TirType ): MemberInfo[]
+    private linearMapEntryMembers( type: TirLinearMapEntryT ): MemberInfo[]
     {
         return [
-            { name: "lookup", type: new TirFuncT([kT], new TirSopOptT(vT)), kind: "method" },
+            { name: "key",   type: type.keyTypeArg, kind: "field" },
+            { name: "value", type: type.valTypeArg, kind: "field" },
+        ];
+    }
+
+    private linearMapMembers( kT: TirType, vT: TirType ): MemberInfo[]
+    {
+        const entryType = new TirLinearMapEntryT( kT, vT );
+        const mapType = new TirLinearMapT( kT, vT );
+        const mapReturnT = new TirTypeParam("T");
+        return [
+            { name: "length",   type: new TirFuncT( [], int_t ), kind: "method" },
+            { name: "isEmpty",  type: new TirFuncT( [], bool_t ), kind: "method" },
+            { name: "show",     type: new TirFuncT( [], bytes_t ), kind: "method" },
+            { name: "head",     type: new TirFuncT( [], entryType ), kind: "method" },
+            { name: "tail",     type: new TirFuncT( [], mapType ), kind: "method" },
+            { name: "reverse",  type: new TirFuncT( [], mapType ), kind: "method" },
+            { name: "find",     type: new TirFuncT( [ new TirFuncT([entryType], bool_t) ], new TirSopOptT(entryType) ), kind: "method" },
+            { name: "filter",   type: new TirFuncT( [ new TirFuncT([entryType], bool_t) ], mapType ), kind: "method" },
+            { name: "prepend",  type: new TirFuncT( [ kT, vT ], mapType ), kind: "method" },
+            { name: "map",      type: new TirFuncT( [ new TirFuncT([entryType], mapReturnT) ], new TirListT(mapReturnT) ), kind: "method" },
+            { name: "every",    type: new TirFuncT( [ new TirFuncT([entryType], bool_t) ], bool_t ), kind: "method" },
+            { name: "some",     type: new TirFuncT( [ new TirFuncT([entryType], bool_t) ], bool_t ), kind: "method" },
+            { name: "includes", type: new TirFuncT( [ entryType ], bool_t ), kind: "method" },
+            { name: "lookup",   type: new TirFuncT( [ kT ], new TirSopOptT(vT) ), kind: "method" },
         ];
     }
 

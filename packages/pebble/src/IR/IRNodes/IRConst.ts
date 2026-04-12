@@ -24,6 +24,7 @@ import { TirDataT } from "../../compiler/tir/types/TirNativeType/native/data";
 import { TirFuncT } from "../../compiler/tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../compiler/tir/types/TirNativeType/native/int";
 import { TirLinearMapT } from "../../compiler/tir/types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../../compiler/tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../compiler/tir/types/TirNativeType/native/list";
 import { TirDataOptT } from "../../compiler/tir/types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../../compiler/tir/types/TirNativeType/native/Optional/sop";
@@ -262,7 +263,9 @@ function isValueAssignableToType( value: IRConstValue, type: TirType ): boolean
             value.every( v => isValueAssignableToType( v, elemsT ) )
         );
     }
-    
+
+    if( type instanceof TirLinearMapEntryT ) return isIRConstPair( value );
+
     const tsEnsureExsaustiveCheck: never = type;
     return false;
 }
@@ -342,6 +345,7 @@ function serializeIRConstValue( value: any, type: TirType ): Uint8Array
     if(
         type instanceof TirFuncT
         || type instanceof TirSopOptT
+        || type instanceof TirLinearMapEntryT
         || type instanceof TirSoPStructType
         || type instanceof TirTypeParam
     ) throw new Error("invalid uplc const type");
@@ -394,6 +398,8 @@ export function tirTypeToUplcType( t: TirType ): ConstType
     if( t instanceof TirPairDataT ) return constT.pairOf( constT.data, constT.data );
     if( t instanceof TirLinearMapT ) return constT.listOf( constT.pairOf( constT.data, constT.data ) );
     if( t instanceof TirUnConstrDataResultT ) return constT.pairOf( constT.int, constT.listOf( constT.data ) );
+
+    if( t instanceof TirLinearMapEntryT ) return constT.pairOf( constT.data, constT.data );
 
     if(
         t instanceof TirAliasType

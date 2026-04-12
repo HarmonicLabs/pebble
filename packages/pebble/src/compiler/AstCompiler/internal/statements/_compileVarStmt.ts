@@ -16,11 +16,13 @@ import { TirSingleDeconstructVarDecl } from "../../../tir/statements/TirVarDecl/
 import { TirVarDecl } from "../../../tir/statements/TirVarDecl/TirVarDecl";
 import { TirDataT } from "../../../tir/types/TirNativeType/native/data";
 import { isTirOptType } from "../../../tir/types/TirNativeType/native/Optional/isTirOptType";
+import { TirLinearMapEntryT } from "../../../tir/types/TirNativeType/native/linearMapEntry";
 import { isTirStructType, TirStructConstr, TirStructField } from "../../../tir/types/TirStructType";
 import { TirType } from "../../../tir/types/TirType";
 import { getNamedDestructableType, getStructType, canAssignTo } from "../../../tir/types/utils/canAssignTo";
 import { canCastToData } from "../../../tir/types/utils/canCastTo";
 import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
+import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { _compileSopEncodedConcreteType } from "../types/_compileSopEncodedConcreteType";
@@ -221,6 +223,32 @@ export function _compileSingleDeconstructVarDecl(
     const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
     if( !typeAndExpr ) return undefined;
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
+
+    // LinearMapEntry<K,V> can be destructured as { key, value }
+    const unaliasedVarType = getUnaliased( finalVarType );
+    if( unaliasedVarType instanceof TirLinearMapEntryT ) {
+        const virtualConstr = new TirStructConstr(
+            "Entry",
+            [
+                new TirStructField( "key", unaliasedVarType.keyTypeArg ),
+                new TirStructField( "value", unaliasedVarType.valTypeArg ),
+            ]
+        );
+        const deconstructedFields = _getDeconstructedFields( ctx, decl, virtualConstr );
+        if( !deconstructedFields ) return undefined;
+        const [ fields, rest, fieldLabelRanges ] = deconstructedFields;
+
+        return new TirSingleDeconstructVarDecl(
+            fields,
+            rest,
+            finalVarType,
+            initExpr,
+            decl.isConst(),
+            decl.range,
+            fieldLabelRanges,
+            typeAnnotationRange
+        );
+    }
 
     const finalStructType = getStructType( finalVarType );
     if( !finalStructType )

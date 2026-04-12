@@ -39,7 +39,7 @@ import { TirUnaryMinus } from "../../tir/expressions/unary/TirUnaryMinus";
 import { TirUnaryPlus } from "../../tir/expressions/unary/TirUnaryPlus";
 import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
-import { bool_t, bytes_t, int_t, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
+import { bool_t, bytes_t, data_t, int_t, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
@@ -50,6 +50,7 @@ import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDe
 import { TirAliasType } from "../../tir/types/TirAliasType";
 import { TirFuncT, TirListT, TirPairDataT } from "../../tir/types/TirNativeType";
 import { TirLinearMapT } from "../../tir/types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
 import { TirDataStructType, TirSoPStructType } from "../../tir/types/TirStructType";
 import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../tir/types/utils/getUnaliased";
@@ -403,6 +404,37 @@ function expressifyPropAccess(
 
         const objType = getUnaliased( expr.type );
 
+        if( objType instanceof TirLinearMapEntryT ) {
+            // LinearMapEntry<K,V> is Pair<Data,Data> at runtime
+            // .key  => fstPair(expr) then decode from data to K
+            // .value => sndPair(expr) then decode from data to V
+            if( prop === "key" ) {
+                return new TirFromDataExpr(
+                    new TirCallExpr(
+                        TirNativeFunc.fstPairData,
+                        [ expr ],
+                        data_t,
+                        propAccessExpr.range
+                    ),
+                    objType.keyTypeArg,
+                    propAccessExpr.range
+                );
+            }
+            if( prop === "value" ) {
+                return new TirFromDataExpr(
+                    new TirCallExpr(
+                        TirNativeFunc.sndPairData,
+                        [ expr ],
+                        data_t,
+                        propAccessExpr.range
+                    ),
+                    objType.valTypeArg,
+                    propAccessExpr.range
+                );
+            }
+            throw new Error(`Property '${prop}' does not exist on LinearMapEntry`);
+        }
+
         if( !isSingleConstrStruct( objType ) ) {
             // IMPORTANT: we only care about fields here
             // any methods should have already been converted to functions
@@ -634,6 +666,30 @@ function expressifyMethodCall(
             return new TirCallExpr(
                 TirNativeFunc._lookupLinearMap( objectType.keyTypeArg, objectType.valTypeArg ),
                 [ methodCall.args[0], objectExpr ],
+                methodCall.type,
+                exprRange
+            );
+        }
+
+        if( methodName === "prepend" ) {
+            if( methodCall.args.length !== 2 ) throw new Error(
+                `Method 'prepend' of type 'LinearMap' takes 2 arguments (key, value), ${methodCall.args.length} provided`
+            );
+            // encode key and value to data, construct a Pair<Data,Data>, then mkCons
+            const keyToData = new TirToDataExpr( methodCall.args[0], methodCall.args[0].range );
+            const valToData = new TirToDataExpr( methodCall.args[1], methodCall.args[1].range );
+            const mkPair = new TirCallExpr(
+                new TirNativeFunc(
+                    IRNativeTag.mkPairData,
+                    new TirFuncT([ data_t, data_t ], new TirPairDataT() )
+                ),
+                [ keyToData, valToData ],
+                new TirPairDataT(),
+                exprRange
+            );
+            return new TirCallExpr(
+                TirNativeFunc.mkCons( new TirPairDataT() ),
+                [ mkPair, objectExpr ],
                 methodCall.type,
                 exprRange
             );

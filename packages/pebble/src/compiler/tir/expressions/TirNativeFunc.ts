@@ -9,6 +9,7 @@ import { ToIRTermCtx } from "./ToIRTermCtx";
 import { TirUnConstrDataResultT, TirPairDataT, TirIntT, TirBytesT, TirDataT, TirBoolT, TirSopOptT } from "../types/TirNativeType";
 import { TirFuncT } from "../types/TirNativeType/native/function";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../types/TirNativeType/native/list";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirDataStructType } from "../types/TirStructType";
@@ -1056,6 +1057,18 @@ export class TirNativeFunc
             ], bool_t)
         );
     }
+    static get fstPairData(): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag.fstPair,
+            new TirFuncT([ new TirPairDataT() ], data_t)
+        );
+    }
+    static get sndPairData(): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag.sndPair,
+            new TirFuncT([ new TirPairDataT() ], data_t)
+        );
+    }
     static get _pairDataToData(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag._pairDataToData,
@@ -1123,6 +1136,7 @@ export class TirNativeFunc
         if( t instanceof TirIntT ) return this.equalsInteger;
         if( t instanceof TirBytesT ) return this.equalsByteString;
         if( t instanceof TirPairDataT ) return this._equalPairData;
+        if( t instanceof TirLinearMapEntryT ) return this._equalPairData;
         if( t instanceof TirBoolT ) return this._equalBoolean;
         if(
             t instanceof TirDataT

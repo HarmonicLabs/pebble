@@ -3830,6 +3830,31 @@ export class Parser extends DiagnosticEmitter
                     return true;
                 }
 
+                // possibly a destructured parameter
+                // ( { field, ... } ) => ...
+                // or a parenthesized object expression
+                // ( { a: 1, b: 2 } )
+                case Token.OpenBrace: {
+                    // skip past the balanced braces
+                    this.skipBlock(tn);
+                    // check what follows the `}`
+                    const afterBrace = tn.next();
+                    if( afterBrace === Token.CloseParen ) {
+                        // ( { ... } ) — check for `=>`
+                        const isArrow = tn.skip( Token.FatArrow );
+                        tn.reset(tnState);
+                        return isArrow;
+                    }
+                    if( afterBrace === Token.Comma ) {
+                        // ( { ... }, ... ) — multiple params, must be arrow func
+                        tn.reset(tnState);
+                        return true;
+                    }
+                    // anything else — parenthesized expression
+                    tn.reset(tnState);
+                    return false;
+                }
+
                 // can be both parenthesized expression or function parameter
                 // ( Identifier...
                 case Token.Identifier: {

@@ -26,7 +26,11 @@ import { TirNamedDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirN
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirSingleDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirSingleDeconstructVarDecl";
 import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
+import { TirFromDataExpr } from "../../tir/expressions/TirFromDataExpr";
+import { data_t } from "../../tir/program/stdScope/stdScope";
+import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
 import { TirDataStructType, TirSoPStructType } from "../../tir/types/TirStructType";
+import { getUnaliased } from "../../tir/types/utils/getUnaliased";
 import { ExpressifyCtx } from "./ExpressifyCtx";
 import { expressifyVarAssignmentStmt } from "./expressifyVarAssignmentStmt";
 import { isSingleConstrStruct } from "./isSingleConstrStruct";
@@ -214,7 +218,41 @@ export function expressifyFuncBody(
                 stmt.range
             );
 
-            if( stmt.type instanceof TirSoPStructType )
+            const stmtUnaliasedType = getUnaliased( stmt.type );
+            if( stmtUnaliasedType instanceof TirLinearMapEntryT )
+            {
+                // LinearMapEntry<K,V> is Pair<Data,Data> at runtime
+                // extract fields via fstPair/sndPair + _inlineFromData
+                for( const [ fieldName, varDecl ] of stmt.fields )
+                {
+                    if(!( varDecl instanceof TirSimpleVarDecl )) throw new Error("expected simple var decl in entry deconstruction");
+                    const isKey = fieldName === "key";
+                    const fieldType = isKey ? stmtUnaliasedType.keyTypeArg : stmtUnaliasedType.valTypeArg;
+                    const pairAccessor = isKey ? TirNativeFunc.fstPairData : TirNativeFunc.sndPairData;
+
+                    const fieldLettedName = getUniqueInternalName(`${lettedExpr.varName}_${fieldName}`);
+                    const lettedField = ctx.introduceLettedConstant(
+                        fieldLettedName,
+                        expressifyVars( ctx,
+                            new TirFromDataExpr(
+                                new TirCallExpr(
+                                    pairAccessor,
+                                    [ lettedExpr ],
+                                    data_t,
+                                    stmt.range
+                                ),
+                                fieldType,
+                                stmt.range
+                            )
+                        ),
+                        stmt.range
+                    );
+
+                    ctx.setNewVariableName( varDecl.name, lettedField.varName );
+                }
+                continue;
+            }
+            else if( stmtUnaliasedType instanceof TirSoPStructType )
             {
                 const nestedDeconstructs = flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
                     stmt,
@@ -223,7 +261,7 @@ export function expressifyFuncBody(
                 // nested single constr structs
                 // are added as destructed variables in the matcher body
                 // using `getNestedDestructsInSingleSopDestructPattern`
-                
+
                 return TirAssertAndContinueExpr.fromStmtsAndContinuation(
                     assertions,
                     new TirCaseExpr(

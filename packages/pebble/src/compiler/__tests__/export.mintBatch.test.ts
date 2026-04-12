@@ -3,10 +3,9 @@ import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromHex, fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
 import { Application, constT, parseUPLC, prettyUPLC, UPLCConst } from "@harmoniclabs/uplc";
-import { CEKConst, DataB, DataConstr, DataI, DataMap, Hash28, Machine, Value } from "@harmoniclabs/buildooor";
+import { CEKConst, CEKError, DataB, DataConstr, DataI, DataMap, Hash28, Machine, Value } from "@harmoniclabs/buildooor";
 
 const policyHex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const nameHex = "ff";
 
 describe("amountOf", () => {
 
@@ -22,11 +21,8 @@ data struct WrappedValue {
     value: Value
 }
 
-function getAmtA( wrapped: WrappedValue ): int {
-    return wrapped.value.amountOf(
-        #${policyHex},
-        #${nameHex}
-    );
+function getAmtA( wrapped: WrappedValue ): boolean {
+    return wrapped.value[#${policyHex}].every(({ value }) => value == 42 )
 }
 `;
 
@@ -59,14 +55,14 @@ function getAmtA( wrapped: WrappedValue ): int {
             getValueUplc(
                 Value.singleAsset(
                     policyHex,
-                    fromHex(nameHex),
+                    fromHex(""),
                     42n
                 )
             )
         );
         const result_1 = Machine.eval(applied_1);
         expect(result_1.result instanceof CEKConst).toBe(true);
-        expect(( result_1.result as CEKConst).value ).toBe( 42n );
+        expect(( result_1.result as CEKConst).value ).toBe( true );
 
         const applied_2 = new Application(
             uplc,
@@ -80,21 +76,21 @@ function getAmtA( wrapped: WrappedValue ): int {
         );
         const result_2 = Machine.eval(applied_2);
         expect(result_2.result instanceof CEKConst).toBe(true);
-        expect(( result_2.result as CEKConst).value ).toBe( 0n );
+        expect(( result_2.result as CEKConst).value ).toBe( true );
 
         const applied_3 = new Application(
             uplc,
             getValueUplc(
                 Value.singleAsset(
                     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                    fromHex(nameHex),
+                    fromHex(""),
                     42n
                 )
             )
         );
         const result_3 = Machine.eval(applied_3);
-        expect(result_3.result instanceof CEKConst).toBe(true);
-        expect(( result_3.result as CEKConst).value ).toBe( 0n );
+        // map[key] fails when key not found (lookup(key)! semantics)
+        expect(result_3.result instanceof CEKError).toBe(true);
 
         const result_4 = Machine.eval(
             new Application(
@@ -104,7 +100,7 @@ function getAmtA( wrapped: WrappedValue ): int {
                         Value.lovelaceEntry(1000n),
                         Value.singleAssetEntry(
                             policyHex,
-                            fromHex(nameHex),
+                            fromHex(""),
                             42n
                         )
                     ])
@@ -112,7 +108,7 @@ function getAmtA( wrapped: WrappedValue ): int {
             )
         );
         expect(result_4.result instanceof CEKConst).toBe(true);
-        expect(( result_4.result as CEKConst).value ).toBe( 42n );
+        expect(( result_4.result as CEKConst).value ).toBe( true );
 
         const result_5 = Machine.eval(
             new Application(
@@ -137,7 +133,7 @@ function getAmtA( wrapped: WrappedValue ): int {
                         ),
                         Value.singleAssetEntry(
                             policyHex,
-                            fromHex(nameHex),
+                            fromHex(""),
                             42n
                         )
                     ])
@@ -145,7 +141,7 @@ function getAmtA( wrapped: WrappedValue ): int {
             )
         );
         expect(result_5.result instanceof CEKConst).toBe(true);
-        expect(( result_5.result as CEKConst).value ).toBe( 42n );
+        expect(( result_5.result as CEKConst).value ).toBe( true );
 
         const result_6 = Machine.eval(
             new Application(
@@ -172,8 +168,8 @@ function getAmtA( wrapped: WrappedValue ): int {
                 )
             )
         );
-        expect(result_6.result instanceof CEKConst).toBe(true);
-        expect(( result_6.result as CEKConst).value ).toBe( 0n );
+        // policy not in value → map[key] fails (lookup(key)! semantics)
+        expect(result_6.result instanceof CEKError).toBe(true);
 
         const result_7 = Machine.eval(
             new Application(
@@ -208,8 +204,8 @@ function getAmtA( wrapped: WrappedValue ): int {
                                     quantity: 42n
                                 },
                                 {
-                                    name: fromHex(nameHex),
-                                    quantity: 69n
+                                    name: fromHex("41"),
+                                    quantity: 42n
                                 }
                             ]
                         }
@@ -218,8 +214,53 @@ function getAmtA( wrapped: WrappedValue ): int {
             )
         );
         expect(result_7.result instanceof CEKConst).toBe(true);
-        expect(( result_7.result as CEKConst).value ).toBe( 69n );
-    })
+        expect(( result_7.result as CEKConst).value ).toBe( true );
+
+        const result_8 = Machine.eval(
+            new Application(
+                uplc,
+                getValueUplc(
+                    new Value([
+                        Value.lovelaceEntry(1000n),
+                        Value.singleAssetEntry(
+                            "00".repeat(28),
+                            fromHex(""),
+                            42n
+                        ),
+                        Value.singleAssetEntry(
+                            "11".repeat(28),
+                            fromHex(""),
+                            42n
+                        ),
+                        Value.singleAssetEntry(
+                            "22".repeat(28),
+                            fromHex(""),
+                            42n
+                        ),
+                        {
+                            policy: new Hash28(policyHex),
+                            assets: [
+                                {
+                                    name: fromHex("00"),
+                                    quantity: 42n
+                                },
+                                {
+                                    name: fromHex("40"),
+                                    quantity: 42n
+                                },
+                                {
+                                    name: fromHex("41"),
+                                    quantity: 69n
+                                }
+                            ]
+                        }
+                    ])
+                )
+            )
+        );
+        expect(result_8.result instanceof CEKConst).toBe(true);
+        expect(( result_8.result as CEKConst).value ).toBe( false );
+    });
 
 });
 

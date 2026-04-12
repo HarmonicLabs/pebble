@@ -24,6 +24,7 @@ import { TirDataT } from "../../../compiler/tir/types/TirNativeType/native/data"
 import { TirFuncT } from "../../../compiler/tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../../compiler/tir/types/TirNativeType/native/int";
 import { TirLinearMapT } from "../../../compiler/tir/types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../../../compiler/tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../../compiler/tir/types/TirNativeType/native/list";
 import { TirDataOptT } from "../../../compiler/tir/types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../../../compiler/tir/types/TirNativeType/native/Optional/sop";
@@ -284,7 +285,7 @@ export class IRNative
         ) return IRNative.equalsData;
         if( type instanceof TirListT ) return IRNative.equalListOf( getListTypeArg( type )! );
         if( type instanceof TirLinearMapT ) return IRNative.equalListOf( new TirPairDataT() );
-        if( type instanceof TirLinearMapT ) return IRNative.equalListOf( new TirPairDataT() );
+        if( type instanceof TirLinearMapEntryT ) return IRNative._equalPairData;
         if( type instanceof TirUnConstrDataResultT ) return getEqUnConstr();
         if( type instanceof TirVoidT ) return getEqVoid();
 

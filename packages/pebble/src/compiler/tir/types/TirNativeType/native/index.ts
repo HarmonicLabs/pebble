@@ -5,6 +5,7 @@ export * from "./data";
 export * from "./function";
 export * from "./int";
 export * from "./linearMap";
+export * from "./linearMapEntry";
 export * from "./list";
 export * from "./string";
 export * from "./void";

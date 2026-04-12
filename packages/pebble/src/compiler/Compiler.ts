@@ -56,7 +56,7 @@ export class Compiler
         const program = await astCompiler.compile();
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
-            globalThis.console && console.log( this.diagnostics );
+            // globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
             for( msg of this.diagnostics ) {

@@ -14,6 +14,7 @@ import { TirDataT } from "../../tir/types/TirNativeType/native/data";
 import { TirFuncT } from "../../tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../tir/types/TirNativeType/native/int";
 import { TirLinearMapT } from "../../tir/types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../tir/types/TirNativeType/native/list";
 import { isTirOptType } from "../../tir/types/TirNativeType/native/Optional/isTirOptType";
 import { TirSopOptT } from "../../tir/types/TirNativeType/native/Optional/sop";
@@ -51,6 +52,11 @@ export function getPropAccessReturnType(
     if( isTirOptType( objType ) ) return undefined;
     if( objType instanceof TirFuncT ) return undefined;
     if( objType instanceof TirListT ) return getListMethods( objType.typeArg )[propName];
+    if( objType instanceof TirLinearMapEntryT ) {
+        if( propName === "key" ) return objType.keyTypeArg;
+        if( propName === "value" ) return objType.valTypeArg;
+        return undefined;
+    }
     if( objType instanceof TirLinearMapT ) return getLinearMapMethods( objType.keyTypeArg, objType.valTypeArg )[propName];
     if( objType instanceof TirUnConstrDataResultT ) return undefined;
     if( objType instanceof TirPairDataT ) return undefined;
@@ -92,9 +98,24 @@ function getListMethods( elemsType: TirType ): { [x: string]: TirFuncT | undefin
 
 function getLinearMapMethods( kT: TirType, vT: TirType ): { [x: string]: TirFuncT | undefined }
 {
+    const entryType = new TirLinearMapEntryT( kT, vT );
+    const mapType = new TirLinearMapT( kT, vT );
+    const mapReturnT = new TirTypeParam("T");
     return {
-        // ...getListMethods( /* to add when adding support for pairs */ ),
-        lookup: new TirFuncT( [kT], new TirSopOptT( vT ) )
+        length:   new TirFuncT( [], int_t ),
+        isEmpty:  new TirFuncT( [], bool_t ),
+        show:     new TirFuncT( [], bytes_t ),
+        head:     new TirFuncT( [], entryType ),
+        tail:     new TirFuncT( [], mapType ),
+        reverse:  new TirFuncT( [], mapType ),
+        find:     new TirFuncT( [ new TirFuncT( [entryType], bool_t ) ], new TirSopOptT( entryType ) ),
+        filter:   new TirFuncT( [ new TirFuncT( [entryType], bool_t ) ], mapType ),
+        prepend:  new TirFuncT( [ kT, vT ], mapType ),
+        map:      new TirFuncT( [ new TirFuncT( [entryType], mapReturnT ) ], new TirListT( mapReturnT ) ),
+        every:    new TirFuncT( [ new TirFuncT( [entryType], bool_t ) ], bool_t ),
+        some:     new TirFuncT( [ new TirFuncT( [entryType], bool_t ) ], bool_t ),
+        includes: new TirFuncT( [ entryType ], bool_t ),
+        lookup:   new TirFuncT( [ kT ], new TirSopOptT( vT ) ),
     };
 }
 

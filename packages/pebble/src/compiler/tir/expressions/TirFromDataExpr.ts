@@ -15,6 +15,7 @@ import { TirBytesT } from "../types/TirNativeType/native/bytes";
 import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../types/TirNativeType/native/list";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
@@ -96,6 +97,9 @@ export function _inlineFromData(
         IRNative.unMapData,
         dataExprIR
     );
+
+    // LinearMapEntry is Pair<Data,Data> at runtime — no conversion needed
+    if( to_t instanceof TirLinearMapEntryT ) return dataExprIR;
 
     if( to_t instanceof TirListT )
     {

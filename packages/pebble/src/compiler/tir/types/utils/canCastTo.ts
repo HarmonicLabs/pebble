@@ -5,6 +5,7 @@ import { TirDataT } from "../TirNativeType/native/data";
 import { TirFuncT } from "../TirNativeType/native/function";
 import { TirIntT } from "../TirNativeType/native/int";
 import { TirLinearMapT } from "../TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../TirNativeType/native/linearMapEntry";
 import { TirListT } from "../TirNativeType/native/list";
 import { TirDataOptT } from "../TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../TirNativeType/native/Optional/sop";
@@ -116,6 +117,17 @@ export function canCastTo( a: TirType, b: TirType ): boolean
             canCastToData( b.keyTypeArg )
             && canCastToData( b.valTypeArg )
         );
+        return false;
+    }
+    if( b instanceof TirLinearMapEntryT )
+    {
+        if( a instanceof TirLinearMapEntryT )
+        {
+            return (
+                canCastTo( a.keyTypeArg, b.keyTypeArg )
+                && canCastTo( a.valTypeArg, b.valTypeArg )
+            );
+        }
         return false;
     }
 

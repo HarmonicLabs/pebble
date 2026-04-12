@@ -8,6 +8,7 @@ import { TirDataT } from "./native/data";
 import { TirFuncT } from "./native/function";
 import { TirIntT } from "./native/int";
 import { TirLinearMapT } from "./native/linearMap";
+import { TirLinearMapEntryT } from "./native/linearMapEntry";
 import { TirListT } from "./native/list";
 import { TirDataOptT } from "./native/Optional/data";
 import { TirSopOptT } from "./native/Optional/sop";
@@ -44,6 +45,7 @@ export type TirNativeType
     | TirSopOptT<TirType>
     | TirListT<TirType>
     | TirLinearMapT<TirType,TirType>
+    | TirLinearMapEntryT<TirType,TirType>
     | TirFuncT
     | TirUnConstrDataResultT
     | TirPairDataT
@@ -62,6 +64,7 @@ export function isTirNativeType( t: any ): t is TirNativeType
         || t instanceof TirSopOptT
         || t instanceof TirListT
         || t instanceof TirLinearMapT
+        || t instanceof TirLinearMapEntryT
         || t instanceof TirFuncT // =>
         || t instanceof TirUnConstrDataResultT
         || t instanceof TirPairDataT

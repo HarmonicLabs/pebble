@@ -6,6 +6,7 @@ import { TirDataT } from "../TirNativeType/native/data";
 import { TirFuncT } from "../TirNativeType/native/function";
 import { TirIntT } from "../TirNativeType/native/int";
 import { TirLinearMapT } from "../TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../TirNativeType/native/linearMapEntry";
 import { TirListT } from "../TirNativeType/native/list";
 import { TirDataOptT } from "../TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../TirNativeType/native/Optional/sop";
@@ -196,6 +197,17 @@ function uncheckedGetCanAssign(
             );
         }
         if( a instanceof TirDataT ) return CanAssign.RequiresExplicitCast;
+        return CanAssign.No;
+    }
+    if( b instanceof TirLinearMapEntryT )
+    {
+        if( a instanceof TirLinearMapEntryT )
+        {
+            return decideCanAssignField(
+                uncheckedGetCanAssign( a.keyTypeArg, b.keyTypeArg, symbols ),
+                uncheckedGetCanAssign( a.valTypeArg, b.valTypeArg, symbols )
+            );
+        }
         return CanAssign.No;
     }
 
