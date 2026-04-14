@@ -291,53 +291,6 @@ export const hoisted_dropList = new IRHoisted(
 );
 hoisted_dropList.hash;
 
-const MAX_WORD4 = 0xFFFFFFFF;
-
-// Added missing symbols & refactored hoisted_sizeofPositiveInt if previously numeric
-const sizeof_self = Symbol("sizeofPositiveInt_self");
-const sizeof_n = Symbol("n");
-const sizeof_countWords = Symbol("count_words");
-export const hoisted_sizeofPositiveInt = new IRHoisted(
-    _ir_apps(
-        new IRRecursive(
-            sizeof_self,
-            new IRFunc(
-                [ sizeof_n, sizeof_countWords ],
-                new IRForced(_ir_apps(
-                    IRNative.strictIfThenElse,
-                    _ir_apps( hoisted_isZero.clone(), new IRVar( sizeof_n ) ),
-                    new IRDelayed(
-                        new IRForced(_ir_apps(
-                            IRNative.strictIfThenElse,
-                            _ir_apps( hoisted_isZero.clone(), new IRVar( sizeof_countWords ) ),
-                            new IRDelayed( IRConst.int( 4 ) ),
-                            new IRDelayed(
-                                _ir_apps(
-                                    IRNative.multiplyInteger,
-                                    IRConst.int( 4 ),
-                                    new IRVar( sizeof_countWords )
-                                )
-                            )
-                        ))
-                    ),
-                    new IRDelayed(
-                        _ir_apps(
-                            new IRSelfCall( sizeof_self ),
-                            _ir_apps( hoisted_addOne.clone(), new IRVar( sizeof_countWords ) ),
-                            _ir_apps(
-                                IRNative.divideInteger,
-                                new IRVar( sizeof_n ),
-                                IRConst.int( MAX_WORD4 )
-                            )
-                        )
-                    )
-                ))
-            )
-        ),
-        IRConst.int( 0 ),
-    )
-);
-
 const foldl_reduce = Symbol("reduceFunc");
 const foldl_self = Symbol("foldl_self");
 const foldl_acc = Symbol("accum");
@@ -848,8 +801,9 @@ export const hoisted_boolToInt = new IRHoisted(
 );
 hoisted_boolToInt.hash;
 
-const intSym = Symbol("int");
+// const intSym = Symbol("int");
 export const hoisted_intToBytesBE = new IRHoisted(
+    /*
     new IRFunc(
         [ intSym ],
         _ir_apps(
@@ -862,6 +816,13 @@ export const hoisted_intToBytesBE = new IRHoisted(
             new IRVar( intSym )
         )
     )
+    /*/
+    _ir_apps(
+        IRNative.integerToByteString,
+        IRConst.bool( true ),
+        IRConst.int( 0 ), // CIP-121, size 0 means "minimal size needed to represent the integer"
+    )
+    //*/
 );
 hoisted_intToBytesBE.hash;
 
