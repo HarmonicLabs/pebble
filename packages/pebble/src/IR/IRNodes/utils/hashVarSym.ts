@@ -5,11 +5,8 @@ import { fromHex } from "@harmoniclabs/uint8array-utils";
 const MAX_SAFE_INTEGER = Number( globalThis.Number?.MAX_SAFE_INTEGER ?? ((2**53) - 1) );
 const MIN_SAFE_INTEGER = Number( globalThis.Number?.MIN_SAFE_INTEGER ?? -MAX_SAFE_INTEGER );
 
-/// @ts-ignore Type 'symbol' does not satisfy the constraint 'object'.
-const _sym_to_hash: WeakMap<symbol, number> = new WeakMap();
-// we cannot store the symbol itself as it would prevent garbage collection
-/// @ts-ignore Type 'symbol' does not satisfy the constraint 'object'.
-const _hash_to_sym: Map<number, WeakRef<symbol>> = new Map();
+const _sym_to_hash: Map<symbol, number> = new Map();
+const _hash_to_sym: Map<number, symbol> = new Map();
 let _next_hash = MIN_SAFE_INTEGER;
 
 const unusedHashes: number[] = [];
@@ -17,11 +14,8 @@ function _collectUnusedHashes(): void
 {
     for( const [h, s] of _hash_to_sym )
     {
-        const newSymbol = s.deref();
-        if(
-            !newSymbol
-            || !_sym_to_hash.has( newSymbol )
-        ) {
+        if( !_sym_to_hash.has( s ) )
+        {
             _hash_to_sym.delete( h );
             unusedHashes.push( h );
         }
@@ -50,8 +44,7 @@ export function hashVarSym( s: symbol ): Uint8Array
 
     const result_hash = unusedHashes.shift() ?? _next_hash++;
     _sym_to_hash.set( s, result_hash );
-    /// @ts-ignore Argument of type 'WeakRef<object>' is not assignable to parameter of type 'WeakRef<symbol>'
-    _hash_to_sym.set( result_hash, new WeakRef( s ) );
+    _hash_to_sym.set( result_hash, s );
 
     return fromHex(
         (BigInt( result_hash ) + BigInt( MAX_SAFE_INTEGER ))
