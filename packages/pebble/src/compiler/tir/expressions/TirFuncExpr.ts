@@ -11,6 +11,7 @@ import { TirReturnStmt } from "../statements/TirReturnStmt";
 import { TirFuncT } from "../types/TirNativeType/native/function";
 import { IRTerm } from "../../../IR/IRTerm";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
+import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import type { TirExpr } from "./TirExpr";
 
 export class TirFuncExpr
@@ -146,7 +147,9 @@ export class TirFuncExpr
         if( isRecursive ) recursiveVarSym = ctx.defineRecursiveVar( this.name );
         const introuducedVars = this.params.map( param => ctx.defineVar( param.name ) );
 
-        let irFunc: IRTerm = new IRFunc( introuducedVars, expr.toIR( ctx ) );
+        let irFunc: IRTerm = this.params.length === 0
+            ? new IRDelayed( expr.toIR( ctx ) )
+            : new IRFunc( introuducedVars, expr.toIR( ctx ) );
         if( isRecursive ) irFunc = new IRRecursive( recursiveVarSym!, irFunc );
 
         return irFunc;

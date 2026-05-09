@@ -1,5 +1,6 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { _ir_apps } from "../../../IR/IRNodes/IRApp";
+import { IRForced } from "../../../IR/IRNodes/IRForced";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { mergeSortedStrArrInplace } from "../../../utils/array/mergeSortedStrArrInplace";
 import { TirType } from "../types/TirType";
@@ -61,6 +62,9 @@ export class TirCallExpr implements ITirExpr
 
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
+        if( this.args.length === 0 ) {
+            return new IRForced( this.func.toIR( ctx ) );
+        }
         return _ir_apps(
             this.func.toIR( ctx ),
             ...(this.args.map( arg => arg.toIR( ctx ) ) as [ IRTerm ]),

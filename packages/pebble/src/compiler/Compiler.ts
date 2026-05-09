@@ -1,4 +1,4 @@
-import { compileUPLC, parseUPLC, prettyUPLC, UPLCProgram } from "@harmoniclabs/uplc";
+import { compileUPLC, Force, parseUPLC, prettyUPLC, UPLCProgram } from "@harmoniclabs/uplc";
 import { Machine } from "@harmoniclabs/plutus-machine";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
@@ -117,7 +117,9 @@ export class Compiler
         }
         const serialized = this._compileBackend( cfg, program );
         const uplcProgram = parseUPLC( serialized );
-        return Machine.eval( uplcProgram.body );
+        // the run-wrapper is always a 0-arg function, which now
+        // compiles to `Delay(body)`; force it so the body executes.
+        return Machine.eval( new Force( uplcProgram.body ) );
     }
 
     async runRepl( config?: Partial<CompilerOptions> )
@@ -141,7 +143,9 @@ export class Compiler
         }
         const serialized = this._compileBackend( cfg, program );
         const uplcProgram = parseUPLC( serialized );
-        return Machine.eval( uplcProgram.body );
+        // the repl-wrapper is always a 0-arg function, which now
+        // compiles to `Delay(body)`; force it so the body executes.
+        return Machine.eval( new Force( uplcProgram.body ) );
     }
 
     private _compileBackend(
