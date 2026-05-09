@@ -1,3 +1,6 @@
+import { Identifier } from "../../../../ast/nodes/common/Identifier";
+import { ParentesizedExpr } from "../../../../ast/nodes/expr/ParentesizedExpr";
+import { PebbleExpr } from "../../../../ast/nodes/expr/PebbleExpr";
 import { ArrayLikeDeconstr } from "../../../../ast/nodes/statements/declarations/VarDecl/ArrayLikeDeconstr";
 import { NamedDeconstructVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/NamedDeconstructVarDecl";
 import { SimpleVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
@@ -16,6 +19,12 @@ import { wrapManyStatements } from "../../utils/wrapManyStatementsOrReturnSame";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { _compileStatement } from "./_compileStatement";
 import { _compileArrayLikeDeconstr, _compileNamedDeconstructVarDecl, _compileSingleDeconstructVarDecl, _compileVarDecl } from "./_compileVarStmt";
+
+function unwrapToIdentifierName( expr: PebbleExpr ): string | undefined
+{
+    while( expr instanceof ParentesizedExpr ) expr = expr.expr;
+    return expr instanceof Identifier ? expr.text : undefined;
+}
 
 export function _compileMatchStmt(
     ctx: AstCompilationCtx,
@@ -56,6 +65,8 @@ export function _compileMatchStmt(
         stmt.range
     );
 
+    const matchedVarName = unwrapToIdentifierName( stmt.matchExpr );
+
     const cases: TirMatchStmtCase[] = [];
     const constrNamesAlreadySpecified: string[] = [];
     for( const matchCase of stmt.cases )
@@ -64,7 +75,8 @@ export function _compileMatchStmt(
             ctx,
             matchCase,
             deconstructableType,
-            constrNamesAlreadySpecified
+            constrNamesAlreadySpecified,
+            matchedVarName
         );
         if( !branch ) return undefined;
         
@@ -125,7 +137,8 @@ export function _compileTirMatchStmtCase(
     ctx: AstCompilationCtx,
     matchCase: MatchStmtCase,
     deconstructableType: DeconstructableTirType,
-    constrNamesAlreadySpecified: string[]
+    constrNamesAlreadySpecified: string[],
+    matchedVarName?: string
 ): TirMatchStmtCase | undefined
 {
     /*
@@ -173,13 +186,25 @@ export function _compileTirMatchStmtCase(
             || deconstructableType instanceof TirDataStructType
         )
         {
-            const ctorDef = deconstructableType.constructors.find( c => c.name === deconstructedCtorName );
-            if( !ctorDef ) return ctx.error(
+            const localIdx = deconstructableType.constructors.findIndex(
+                c => c.name === deconstructedCtorName
+            );
+            if( localIdx < 0 ) return ctx.error(
                 DiagnosticCode.Unknown_0_constructor_1,
                 pattern.name.range, deconstructableType.toString(), deconstructedCtorName
             );
 
             const branchCtx = ctx.newBranchChildScope();
+
+            // narrow the matched variable (if it's a plain identifier) to the matched constructor
+            if( matchedVarName )
+            {
+                const parentIdx = deconstructableType.parentCtorIdx( localIdx );
+                branchCtx.scope.narrowVariable(
+                    matchedVarName,
+                    deconstructableType.narrowTo( [ parentIdx ] )
+                );
+            }
 
             const branchArg = _compileNamedDeconstructVarDecl(
                 branchCtx,

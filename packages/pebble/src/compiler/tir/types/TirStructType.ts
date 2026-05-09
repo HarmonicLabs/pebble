@@ -28,6 +28,16 @@ export function isTirStructType( thing: any ): thing is TirStructType
 export class TirDataStructType
     implements ITirStructType
 {
+    /**
+     * indexes (in the ORIGINAL parent struct's constructors array) of the
+     * constructors still possible after flow-sensitive narrowing.
+     *
+     * `undefined` means "not narrowed" (full struct).
+     * If present, length matches `this.constructors.length` and entries
+     * correspond positionally to `this.constructors`.
+     */
+    readonly narrowedFromParentCtorIdxs: number[] | undefined;
+
     constructor(
         readonly name: string,
         readonly fileUid: string,
@@ -35,8 +45,10 @@ export class TirDataStructType
         /** points to an array possibly shared with alternative encoding types */
         readonly methodNamesPtr: Map<AstFuncName, TirFuncName>,
         readonly untagged: boolean = false,
+        narrowedFromParentCtorIdxs: number[] | undefined = undefined,
     ) {
         this.untagged = false; // always false for now
+        this.narrowedFromParentCtorIdxs = narrowedFromParentCtorIdxs;
     }
 
     hasDataEncoding(): boolean { return true; }
@@ -50,6 +62,46 @@ export class TirDataStructType
 
     isSingleConstr(): boolean {
         return this.constructors.length === 1;
+    }
+
+    isNarrowed(): boolean {
+        return this.narrowedFromParentCtorIdxs !== undefined;
+    }
+
+    /**
+     * Original ctor index of `this.constructors[localIdx]` in the
+     * un-narrowed parent type. For un-narrowed types this is identity.
+     */
+    parentCtorIdx( localIdx: number ): number {
+        return this.narrowedFromParentCtorIdxs?.[localIdx] ?? localIdx;
+    }
+
+    /**
+     * Returns a clone of this struct type narrowed to the constructors
+     * whose ORIGINAL parent indexes are listed in `parentIdxs`.
+     */
+    narrowTo( parentIdxs: number[] ): TirDataStructType
+    {
+        const baseIdxs = this.narrowedFromParentCtorIdxs ?? this.constructors.map( ( _, i ) => i );
+        const filtered: number[] = [];
+        const filteredCtors: TirStructConstr[] = [];
+        for( let i = 0; i < this.constructors.length; i++ )
+        {
+            const parentIdx = baseIdxs[i];
+            if( parentIdxs.includes( parentIdx ) )
+            {
+                filtered.push( parentIdx );
+                filteredCtors.push( this.constructors[i] );
+            }
+        }
+        return new TirDataStructType(
+            this.name,
+            this.fileUid,
+            filteredCtors,
+            this.methodNamesPtr,
+            this.untagged,
+            filtered
+        );
     }
 
     toString(): string {
@@ -74,7 +126,9 @@ export class TirDataStructType
             this.name,
             this.fileUid,
             this.constructors.map( c => c.clone() ),
-            this.methodNamesPtr
+            this.methodNamesPtr,
+            this.untagged,
+            this.narrowedFromParentCtorIdxs ? [ ...this.narrowedFromParentCtorIdxs ] : undefined
         );
         result._isConcrete = this._isConcrete;
         return result;
@@ -88,13 +142,25 @@ export class TirDataStructType
 export class TirSoPStructType
     implements ITirStructType
 {
+    /**
+     * indexes (in the ORIGINAL parent struct's constructors array) of the
+     * constructors still possible after flow-sensitive narrowing.
+     *
+     * `undefined` means "not narrowed" (full struct).
+     * If present, length matches `this.constructors.length`.
+     */
+    readonly narrowedFromParentCtorIdxs: number[] | undefined;
+
     constructor(
         readonly name: string,
         readonly fileUid: string,
         readonly constructors: TirStructConstr[],
         /** points to an array possibly shared with alternative encoding types */
         readonly methodNamesPtr: Map<AstFuncName, TirFuncName>,
-    ) {}
+        narrowedFromParentCtorIdxs: number[] | undefined = undefined,
+    ) {
+        this.narrowedFromParentCtorIdxs = narrowedFromParentCtorIdxs;
+    }
 
     hasDataEncoding(): boolean { return false; }
 
@@ -107,6 +173,37 @@ export class TirSoPStructType
 
     isSingleConstr(): boolean {
         return this.constructors.length === 1;
+    }
+
+    isNarrowed(): boolean {
+        return this.narrowedFromParentCtorIdxs !== undefined;
+    }
+
+    parentCtorIdx( localIdx: number ): number {
+        return this.narrowedFromParentCtorIdxs?.[localIdx] ?? localIdx;
+    }
+
+    narrowTo( parentIdxs: number[] ): TirSoPStructType
+    {
+        const baseIdxs = this.narrowedFromParentCtorIdxs ?? this.constructors.map( ( _, i ) => i );
+        const filtered: number[] = [];
+        const filteredCtors: TirStructConstr[] = [];
+        for( let i = 0; i < this.constructors.length; i++ )
+        {
+            const parentIdx = baseIdxs[i];
+            if( parentIdxs.includes( parentIdx ) )
+            {
+                filtered.push( parentIdx );
+                filteredCtors.push( this.constructors[i] );
+            }
+        }
+        return new TirSoPStructType(
+            this.name,
+            this.fileUid,
+            filteredCtors,
+            this.methodNamesPtr,
+            filtered
+        );
     }
 
     toString(): string {
@@ -131,7 +228,8 @@ export class TirSoPStructType
             this.name,
             this.fileUid,
             this.constructors.map( c => c.clone() ),
-            this.methodNamesPtr
+            this.methodNamesPtr,
+            this.narrowedFromParentCtorIdxs ? [ ...this.narrowedFromParentCtorIdxs ] : undefined
         );
         result._isConcrete = this._isConcrete;
         return result;

@@ -64,6 +64,7 @@ import { EnumDecl, EnumValueDecl } from "../ast/nodes/statements/declarations/En
 import { TypeConversionExpr } from "../ast/nodes/expr/TypeConversionExpr";
 import { NonNullExpr } from "../ast/nodes/expr/unary/NonNullExpr";
 import { ElemAccessExpr } from "../ast/nodes/expr/ElemAccessExpr";
+import { IsExpr } from "../ast/nodes/expr/IsExpr";
 import { TernaryExpr } from "../ast/nodes/expr/TernaryExpr";
 import { makePropAccessExpr } from "../ast/nodes/expr/PropAccessExpr";
 import { makeBinaryExpr } from "../ast/nodes/expr/binary/BinaryExpr";
@@ -2005,28 +2006,23 @@ export class Parser extends DiagnosticEmitter
                     expr = this.tryParseCallExprOrReturnSame( expr );
                     break;
                 }
-                /*
                 case Token.Is: {
-                    // TODO:
-                    // should optionally check for destructuring 
-                    if(!(tn.skipIdentifier()))
+                    if( !tn.skipIdentifier() )
                     {
                         this.error(
                             DiagnosticCode.Identifier_expected,
                             tn.range()
                         );
-                        return undefined
+                        return undefined;
                     }
-                    const ofType = new Identifier( tn.readIdentifier(), tn.range() );
-                    tn.skip( Token.Semicolon); // if any
+                    const ofConstr = new Identifier( tn.readIdentifier(), tn.range() );
                     expr = new IsExpr(
                         expr,
-                        ofType,
+                        ofConstr,
                         tn.range( startPos, tn.pos )
                     );
                     break;
                 }
-                //*/
                 case Token.OpenBracket: { // [ // accessing list element
                     const idxExpr = this.parseExpr();
                     if( !idxExpr ) return undefined;
@@ -2529,6 +2525,7 @@ export class Parser extends DiagnosticEmitter
             case Token.Case: {
                 const expr = this.parseCaseExpr();
                 if (!expr) return undefined;
+                return expr;
             }
             case Token.Fail: {
                 return new LitFailExpr( tn.range() );
@@ -2595,7 +2592,9 @@ export class Parser extends DiagnosticEmitter
 
         const startPos = tn.tokenPos;
 
-        const expr = this.parseExpr();
+        // parse the matched expression at a precedence higher than `is`
+        // so the case-level `is` is left unconsumed
+        const expr = this.parseExpr( Precedence.Relational + 1 );
         if (!expr) return undefined;
 
         let noPatternCaseSeen = false;
@@ -2628,7 +2627,10 @@ export class Parser extends DiagnosticEmitter
                 tn.range(), "=>"
             );
 
-            const body = this.parseExpr( Precedence.CaseExpr );
+            // parse body at precedence higher than `is` so the next case-arm's
+            // `is` is left unconsumed (otherwise `is` would be greedily parsed
+            // as the binary `is` operator inside the body)
+            const body = this.parseExpr( Precedence.Relational + 1 );
             if( !body ) return undefined;
 
             cases.push(
@@ -2644,7 +2646,10 @@ export class Parser extends DiagnosticEmitter
         if( tn.skip( Token.Else ) )
         {
             const wildcardStart = tn.tokenPos;
-            const body = this.parseExpr( Precedence.CaseExpr );
+            // parse body at precedence higher than `is` so the next case-arm's
+            // `is` is left unconsumed (otherwise `is` would be greedily parsed
+            // as the binary `is` operator inside the body)
+            const body = this.parseExpr( Precedence.Relational + 1 );
             if( !body ) return undefined;
             wildcardCase = new CaseWildcardMatcher(
                 body,

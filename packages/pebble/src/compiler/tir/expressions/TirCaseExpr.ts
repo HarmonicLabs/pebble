@@ -181,7 +181,15 @@ export class TirCaseExpr
 
         // TirSopStructType
         const wildcardBodyIR = this.wildcardCase?.body.toIR( ctx ) ?? new IRError();
-        const branches: IRTerm[] = matchExprType.constructors.map(
+
+        // For narrowed SoP types, `matchExprType.constructors` may be a strict
+        // subset of the runtime universe. The IRCase branch array must be
+        // indexed by runtime (parent) ctor index, so we build it sized to the
+        // largest parent index we know about and fill missing slots with the
+        // wildcard / IRError.
+        const sopType = matchExprType instanceof TirSopOptT ? undefined : matchExprType;
+        const sopParentIdxs = sopType?.narrowedFromParentCtorIdxs;
+        const localBranches: IRTerm[] = matchExprType.constructors.map(
             (ctor, ctorIdx) => {
 
                 const nFields = ctor.fields.length;
@@ -222,6 +230,24 @@ export class TirCaseExpr
                 return new IRFunc( introducedVars, branch.body.toIR( branchCtx ) );
             }
         );
+
+        // Map local branches into runtime-indexed slots. For un-narrowed types
+        // this is identity.
+        let branches: IRTerm[];
+        if( sopParentIdxs )
+        {
+            const maxParent = sopParentIdxs.reduce( ( m, x ) => x > m ? x : m, -1 );
+            branches = new Array( maxParent + 1 );
+            for( let i = 0; i < branches.length; i++ ) branches[i] = wildcardBodyIR;
+            for( let localIdx = 0; localIdx < localBranches.length; localIdx++ )
+            {
+                branches[ sopParentIdxs[localIdx] ] = localBranches[localIdx];
+            }
+        }
+        else
+        {
+            branches = localBranches;
+        }
 
         // branches at the end that are supposed to "just fail"
         // can be omitted, as the CEK machine will fail if no branch for
@@ -342,10 +368,15 @@ export class TirCaseExpr
 
             if( usedFieldsCtorNames.length <= 0 ) {
                 ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                    // condition
+                    // condition (compare against the PARENT ctor index — the
+                    // value's runtime tag is unaffected by narrowing)
                     _ir_apps(
                         new IRVar( isConstrIdxSym ), // isConstrIdx
-                        IRConst.int( ctorIdx )
+                        IRConst.int(
+                            matchExprType instanceof TirDataStructType
+                                ? matchExprType.parentCtorIdx( ctorIdx )
+                                : ctorIdx
+                        )
                     ),
                     // then
                     body.toIR( stmtCtx ),
@@ -391,10 +422,15 @@ export class TirCaseExpr
                     body.toIR( thenCtx )
                 );
                 ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                    // condition
+                    // condition (compare against the PARENT ctor index — the
+                    // value's runtime tag is unaffected by narrowing)
                     _ir_apps(
                         new IRVar( isConstrIdxSym ), // isConstrIdx
-                        IRConst.int( ctorIdx )
+                        IRConst.int(
+                            matchExprType instanceof TirDataStructType
+                                ? matchExprType.parentCtorIdx( ctorIdx )
+                                : ctorIdx
+                        )
                     ),
                     // then
                     thenCase,
@@ -449,10 +485,15 @@ export class TirCaseExpr
                 )
             );
             ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                // condition
+                // condition (compare against the PARENT ctor index — the
+                // value's runtime tag is unaffected by narrowing)
                 _ir_apps(
                     new IRVar( isConstrIdxSym ), // isConstrIdx
-                    IRConst.int( ctorIdx )
+                    IRConst.int(
+                        matchExprType instanceof TirDataStructType
+                            ? matchExprType.parentCtorIdx( ctorIdx )
+                            : ctorIdx
+                    )
                 ),
                 // then
                 thenCase,

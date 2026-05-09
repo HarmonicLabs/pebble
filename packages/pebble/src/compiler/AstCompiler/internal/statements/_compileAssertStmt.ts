@@ -5,6 +5,7 @@ import { TirTypeConversionExpr } from "../../../tir/expressions/TirTypeConversio
 import { TirAssertStmt } from "../../../tir/statements/TirAssertStmt";
 import { canAssignTo, canAssignToOptional } from "../../../tir/types/utils/canAssignTo";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
+import { applyNarrowingsToScope, extractIsNarrowings } from "../../utils/extractIsNarrowings";
 import { _compileExpr } from "../exprs/_compileExpr";
 
 export function _compileAssertStmt(
@@ -49,6 +50,13 @@ export function _compileAssertStmt(
             stmt.elseExpr.range, failMsgExpr.type.toString(), string_t.toString()
         );
     }
+
+    // After a successful `assert`, propagate any `is`-derived narrowings
+    // into the current scope so subsequent statements see narrowed types.
+    applyNarrowingsToScope(
+        ctx.scope,
+        extractIsNarrowings( tirCond, true )
+    );
 
     return [ new TirAssertStmt( tirCond, failMsgExpr, stmt.range ) ];
 }

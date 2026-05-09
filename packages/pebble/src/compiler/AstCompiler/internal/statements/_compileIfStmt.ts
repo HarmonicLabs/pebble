@@ -6,6 +6,7 @@ import { canAssignTo, canAssignToOptional } from "../../../tir/types/utils/canAs
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { bool_t } from "../../../tir/program/stdScope/stdScope";
 import { wrapManyStatements } from "../../utils/wrapManyStatementsOrReturnSame";
+import { applyNarrowingsToScope, extractIsNarrowings } from "../../utils/extractIsNarrowings";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { _compileStatement } from "./_compileStatement";
 
@@ -23,11 +24,14 @@ export function _compileIfStmt(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
         stmt.condition.range, coditionExpr.type.toString(), "boolean | Optional<T>"
     );
+
+    const thenCtx = ctx.newBranchChildScope();
+    applyNarrowingsToScope(
+        thenCtx.scope,
+        extractIsNarrowings( coditionExpr, true )
+    );
     const thenBranch = wrapManyStatements(
-        _compileStatement(
-            ctx.newBranchChildScope(),
-            stmt.thenBranch
-        ),
+        _compileStatement( thenCtx, stmt.thenBranch ),
         stmt.thenBranch.range
     );
     if( !thenBranch ) return undefined;
@@ -35,11 +39,13 @@ export function _compileIfStmt(
     let elseBranch: TirStmt | undefined = undefined;
     if( stmt.elseBranch )
     {
+        const elseCtx = ctx.newBranchChildScope();
+        applyNarrowingsToScope(
+            elseCtx.scope,
+            extractIsNarrowings( coditionExpr, false )
+        );
         elseBranch = wrapManyStatements(
-            _compileStatement(
-                ctx.newBranchChildScope(),
-                stmt.elseBranch
-            ),
+            _compileStatement( elseCtx, stmt.elseBranch ),
             stmt.elseBranch.range
         );
         if( !elseBranch ) return undefined;

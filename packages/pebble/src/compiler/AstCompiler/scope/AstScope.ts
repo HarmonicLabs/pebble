@@ -105,6 +105,12 @@ export class AstScope
      * ast name -> variable infos (name, type, isConstant)
      */
     readonly variables: Map<string, IVariableInfos> = new Map();
+    /**
+     * Flow-sensitive type narrowings active in this scope.
+     * Variable name -> narrowed type (overrides the type recorded in `variables`
+     * or any parent scope's narrowing/binding when resolving this variable).
+     */
+    readonly narrowings: Map<string, TirType> = new Map();
     readonly aviableConstructors: Map<string, IAvaiableConstructor> = new Map();
 
     private _isReadonly = false;
@@ -138,9 +144,12 @@ export class AstScope
 
     resolveValue( name: string ): ResolveValueResult | undefined
     {
+        const narrowed = this.narrowings.get( name );
         const localValue = this.variables.get( name );
         if( localValue ) return {
-            variableInfos: localValue,
+            variableInfos: narrowed
+                ? { ...localValue, type: narrowed }
+                : localValue,
             isDefinedOutsideFuncScope: false
         };
 
@@ -150,12 +159,25 @@ export class AstScope
             if( !parentValue ) return undefined;
 
             return {
-                variableInfos: parentValue.variableInfos,
+                variableInfos: narrowed
+                    ? { ...parentValue.variableInfos, type: narrowed }
+                    : parentValue.variableInfos,
                 isDefinedOutsideFuncScope: parentValue.isDefinedOutsideFuncScope || this.infos.isFunctionDeclScope
             };
         }
 
         return undefined;
+    }
+
+    /**
+     * Records a flow-sensitive narrowing for `name` in THIS scope.
+     * Subsequent `resolveValue(name)` calls (in this scope or its
+     * descendants, until shadowed) will return the narrowed type.
+     */
+    narrowVariable( name: string, narrowedType: TirType ): void
+    {
+        if( this._isReadonly ) return;
+        this.narrowings.set( name, narrowedType );
     }
 
     allVariables(): string[]
@@ -301,6 +323,9 @@ export class AstScope
                 key,
                 { ...value }
             );
+
+        for( const [key, value] of this.narrowings )
+            cloned.narrowings.set( key, value.clone() );
 
         for( const [key, value] of this.functions )
             cloned.functions.set(

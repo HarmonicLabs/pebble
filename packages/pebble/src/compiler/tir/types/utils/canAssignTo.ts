@@ -270,6 +270,25 @@ function canAssignStruct(
     while( a instanceof TirAliasType ) a = a.aliased;
     while( b instanceof TirAliasType ) b = b.aliased;
 
+    // Same logical struct type? (same name + fileUid). When this holds,
+    // we use parent-ctor-idx based subset checks to handle narrowing.
+    const sameLogicalType =
+        a.name === b.name
+        && (a as any).fileUid === (b as any).fileUid;
+
+    if( sameLogicalType )
+    {
+        const aIdxs = a.narrowedFromParentCtorIdxs ?? a.constructors.map( ( _, i ) => i );
+        const bIdxs = b.narrowedFromParentCtorIdxs ?? b.constructors.map( ( _, i ) => i );
+
+        // a is assignable to b iff a's parent-ctor set is a SUBSET of b's
+        for( const idx of aIdxs )
+        {
+            if( !bIdxs.includes( idx ) ) return CanAssign.No;
+        }
+        return CanAssign.Yes;
+    }
+
     const aCtors = a.constructors;
     const bCtors = b.constructors;
 

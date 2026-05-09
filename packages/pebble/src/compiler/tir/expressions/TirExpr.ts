@@ -21,6 +21,7 @@ import { TirTraceIfFalseExpr } from "./TirTraceIfFalseExpr";
 import { TirTraceExpr } from "./TirTraceExpr";
 import { TirNativeFunc } from "./TirNativeFunc";
 import { TirInlineClosedIR } from "./TirInlineClosedIR";
+import { TirIsExpr } from "./TirIsExpr";
 
 export type TirExpr
     =( TirUnaryPrefixExpr
@@ -30,7 +31,7 @@ export type TirExpr
     | TirCallExpr
     | TirCaseExpr
     | TirTypeConversionExpr
-    // | TirIsExpr // ( purpose is Spending )
+    | TirIsExpr
     | TirElemAccessExpr // arr[idx]
     | TirTernaryExpr
     | TirPropAccessExpr
@@ -60,7 +61,7 @@ export function isTirExpr( thing: any ): thing is TirExpr
         || thing instanceof TirCallExpr
         || thing instanceof TirCaseExpr
         || thing instanceof TirTypeConversionExpr
-        // || thing instanceof TirIsExpr
+        || thing instanceof TirIsExpr
         || thing instanceof TirElemAccessExpr
         || thing instanceof TirTernaryExpr
         || thing instanceof TirPropAccessExpr

@@ -17,6 +17,7 @@ import { TirLitVoidExpr } from "../../tir/expressions/litteral/TirLitVoidExpr";
 import { TirAssertAndContinueExpr } from "../../tir/expressions/TirAssertAndContinueExpr";
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../tir/expressions/TirCaseExpr";
+import { TirIsExpr } from "../../tir/expressions/TirIsExpr";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
 import { TirFailExpr } from "../../tir/expressions/TirFailExpr";
@@ -214,6 +215,11 @@ export function expressifyVars(
         return expr;
     }
 
+    if( expr instanceof TirIsExpr ) {
+        expr.instanceExpr = expressifyVars( ctx, expr.instanceExpr );
+        return expr;
+    }
+
     if( isTirBinaryExpr( expr ) ) {
         const left = expressifyVars( ctx, expr.left );
         const right = expressifyVars( ctx, expr.right );
@@ -307,6 +313,7 @@ function expressifyPropAccess(
         || expr instanceof TirPropAccessExpr // `expressifyVars` is called recursively on the object before this check
         // these result to native types
         || expr instanceof TirUnaryExclamation // boolean
+        || expr instanceof TirIsExpr // boolean
         || expr instanceof TirUnaryPlus // int
         || expr instanceof TirUnaryMinus // int
         || expr instanceof TirUnaryTilde // bytes

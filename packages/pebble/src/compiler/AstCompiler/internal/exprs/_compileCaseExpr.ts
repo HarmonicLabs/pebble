@@ -1,10 +1,14 @@
+import { Identifier } from "../../../../ast/nodes/common/Identifier";
+import { ParentesizedExpr } from "../../../../ast/nodes/expr/ParentesizedExpr";
+import { PebbleExpr } from "../../../../ast/nodes/expr/PebbleExpr";
 import { CaseExpr, CaseExprMatcher, CaseWildcardMatcher } from "../../../../ast/nodes/expr/CaseExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../../tir/expressions/TirCaseExpr";
 import { TirNamedDeconstructVarDecl } from "../../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSimpleVarDecl } from "../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
+import { TirDataStructType, TirSoPStructType } from "../../../tir/types/TirStructType";
 import { TirType } from "../../../tir/types/TirType";
-import { canAssignTo } from "../../../tir/types/utils/canAssignTo";
+import { canAssignTo, getStructType } from "../../../tir/types/utils/canAssignTo";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileVarDecl } from "../statements/_compileVarStmt";
 import { _compileExpr } from "./_compileExpr";
@@ -18,12 +22,17 @@ export function _compileCaseExpr(
     const matchExpr = _compileExpr( ctx, expr.matchExpr, typeHint );
     if( !matchExpr ) return undefined;
 
+    // if the matched expression is a plain variable, we can narrow its
+    // type inside each arm body to the matched constructor.
+    const matchedVarName = unwrapToIdentifierName( expr.matchExpr );
+
     const cases = expr.cases.map( branch =>
         _compileCaseExprMatcher(
             ctx,
             branch,
             matchExpr.type,
-            typeHint
+            typeHint,
+            matchedVarName
         )
     ) as TirCaseMatcher[]; // we early return in case of undefined so this is safe
     if( cases.some( c => !c ) ) return undefined;
@@ -63,7 +72,8 @@ export function _compileCaseExprMatcher(
     ctx: AstCompilationCtx,
     matcher: CaseExprMatcher,
     patternType: TirType,
-    returnTypeHint: TirType | undefined
+    returnTypeHint: TirType | undefined,
+    matchedVarName?: string
 ): TirCaseMatcher | undefined
 {
     const pattern = _compileVarDecl( ctx, matcher.pattern, patternType );
@@ -79,7 +89,33 @@ export function _compileCaseExprMatcher(
         matcher.pattern.range, pattern.type.toString(), patternType.toString()
     );
 
-    const body = _compileExpr( ctx, matcher.body, returnTypeHint );
+    let bodyCtx = ctx;
+    if( matchedVarName && pattern instanceof TirNamedDeconstructVarDecl )
+    {
+        const parentStruct = getStructType( patternType );
+        if( parentStruct )
+        {
+            const localIdx = parentStruct.constructors.findIndex(
+                c => c.name === pattern.constrName
+            );
+            if( localIdx >= 0 )
+            {
+                const parentIdx = parentStruct.parentCtorIdx( localIdx );
+                bodyCtx = ctx.newBranchChildScope();
+                if( parentStruct instanceof TirDataStructType
+                    || parentStruct instanceof TirSoPStructType
+                )
+                {
+                    bodyCtx.scope.narrowVariable(
+                        matchedVarName,
+                        parentStruct.narrowTo( [ parentIdx ] )
+                    );
+                }
+            }
+        }
+    }
+
+    const body = _compileExpr( bodyCtx, matcher.body, returnTypeHint );
     if( !body ) return undefined;
     if( returnTypeHint && !canAssignTo( body.type, returnTypeHint ) ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
@@ -113,4 +149,10 @@ function _compileCaseWildcardMatcher(
         bodyExpr,
         wildcardCase.range
     );
+}
+
+function unwrapToIdentifierName( expr: PebbleExpr ): string | undefined
+{
+    while( expr instanceof ParentesizedExpr ) expr = expr.expr;
+    return expr instanceof Identifier ? expr.text : undefined;
 }

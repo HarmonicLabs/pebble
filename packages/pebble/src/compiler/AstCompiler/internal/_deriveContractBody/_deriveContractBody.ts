@@ -19,6 +19,7 @@ import { LitThisExpr } from "../../../../ast/nodes/expr/litteral/LitThisExpr";
 import { LitTrueExpr } from "../../../../ast/nodes/expr/litteral/LitTrueExpr";
 import { LitUndefExpr } from "../../../../ast/nodes/expr/litteral/LitUndefExpr";
 import { LitVoidExpr } from "../../../../ast/nodes/expr/litteral/LitVoidExpr";
+import { IsExpr } from "../../../../ast/nodes/expr/IsExpr";
 import { ParentesizedExpr } from "../../../../ast/nodes/expr/ParentesizedExpr";
 import { PebbleExpr } from "../../../../ast/nodes/expr/PebbleExpr";
 import { isPropAccessExpr } from "../../../../ast/nodes/expr/PropAccessExpr";
@@ -1153,6 +1154,17 @@ function _exprReplaceParamsAndAssertNoLitContext(
         );
         if( !newInner ) return undefined;
         expr.expr = newInner;
+        return expr;
+    }
+    if( expr instanceof IsExpr ) {
+        const newInner = _exprReplaceParamsAndAssertNoLitContext(
+            compiler,
+            expr.instanceExpr,
+            paramsInternalNamesMap,
+            renamedVariables
+        );
+        if( !newInner ) return undefined;
+        expr.instanceExpr = newInner;
         return expr;
     }
     if( isPropAccessExpr( expr ) ) {
