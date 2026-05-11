@@ -90,6 +90,7 @@ export enum Token {
     Contract,       // contract Name { ... }
     Param,          // param name: Type;
     Spend,          // spend methodName() { ... }
+    State,          // state Foo { ...fields...; ...spend methods... }
     Mint,           // mint methodName() { ... }
     Certify,        // certify methodName() { ... }
     Withdraw,       // withdraw methodName() { ... }

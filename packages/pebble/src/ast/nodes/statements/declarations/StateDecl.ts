@@ -3,21 +3,14 @@ import { Identifier } from "../../common/Identifier";
 import { HasSourceRange } from "../../HasSourceRange";
 import { FuncDecl } from "./FuncDecl";
 import { SimpleVarDecl } from "./VarDecl/SimpleVarDecl";
-import { StateDecl } from "./StateDecl";
 
-export class ContractDecl
+export class StateDecl
     implements HasSourceRange
 {
     constructor(
         readonly name: Identifier,
-        readonly params: SimpleVarDecl[],
+        readonly fields: SimpleVarDecl[],
         readonly spendMethods: FuncDecl[],
-        readonly mintMethods: FuncDecl[],
-        readonly certifyMethods: FuncDecl[],
-        readonly withdrawMethods: FuncDecl[],
-        readonly proposeMethods: FuncDecl[],
-        readonly voteMethods: FuncDecl[],
-        readonly stateDecls: StateDecl[],
         readonly range: SourceRange
     ) {}
 }

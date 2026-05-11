@@ -146,13 +146,17 @@ export function tokenFromKeyword(text: string): Token {
             break;
         }
         case CharCode.s: {
+            if (len === 5) {
+                if (text === "spend") return Token.Spend;
+                if (text === "state") return Token.State;
+                break;
+            }
             if (len === 6) {
                 // if (text === "switch") return Token.Switch;
                 if (text === "static") return Token.Static;
                 if (text === "struct") return Token.Struct;
                 break;
             }
-            if (text === "spend") return Token.Spend;
             // if (text === "set") return Token.Set;
             // if (text === "super") return Token.Super;
             break;

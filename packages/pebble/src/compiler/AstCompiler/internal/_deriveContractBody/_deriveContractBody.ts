@@ -32,7 +32,10 @@ import { BlockStmt } from "../../../../ast/nodes/statements/BlockStmt";
 import { BreakStmt } from "../../../../ast/nodes/statements/BreakStmt";
 import { ContinueStmt } from "../../../../ast/nodes/statements/ContinueStmt";
 import { ContractDecl } from "../../../../ast/nodes/statements/declarations/ContractDecl";
+import { StateDecl } from "../../../../ast/nodes/statements/declarations/StateDecl";
 import { FuncDecl } from "../../../../ast/nodes/statements/declarations/FuncDecl";
+import { ArrowKind } from "../../../../ast/nodes/expr/functions/ArrowKind";
+import { AstFuncType, AstVoidType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
 import { StructConstrDecl, StructDecl, StructDeclAstFlags } from "../../../../ast/nodes/statements/declarations/StructDecl";
 import { NamedDeconstructVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/NamedDeconstructVarDecl";
 import { SimpleVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
@@ -82,6 +85,7 @@ export function _deriveContractBody(
         && contractDecl.withdrawMethods.length === 0
         && contractDecl.proposeMethods.length === 0
         && contractDecl.voteMethods.length === 0
+        && contractDecl.stateDecls.length === 0
     ) return new BlockStmt([
         new FailStmt( undefined, contractRange )
     ], contractRange);
@@ -173,7 +177,10 @@ export function _deriveContractBody(
     );
      */
     const purposeMatchCases: MatchStmtCase[] = [];
-    if( contractDecl.spendMethods.length > 0 ) {
+    if(
+        contractDecl.spendMethods.length > 0
+        || contractDecl.stateDecls.length > 0
+    ) {
         const spendingRefUniqueName = getUniqueInternalName("spendingRef");
         const optionalDatumUniqueName = getUniqueInternalName("optionalDatum");
         const fields: Map<Identifier, SimpleVarDecl> = new Map([
@@ -187,20 +194,20 @@ export function _deriveContractBody(
             ],
         ]);
 
-        const bodyStmts = _getMatchedPurposeBlockStatements(
+        const baseContextVars = Object.freeze({
+            tx: txUniqueName,
+            purposeData: purposeUniqueName,
+            redeemerData: redeemerUniqueName,
+            spendingRef: spendingRefUniqueName,
+            optionalDatum: optionalDatumUniqueName,
+        });
+
+        const bodyStmts = _buildSpendCaseBlock(
             compiler,
-            contractDecl.spendMethods,
+            contractDecl,
             paramsInternalNamesMap,
-            // contextVarsMapping
-            Object.freeze({
-                tx: txUniqueName,
-                purposeData: purposeUniqueName,
-                redeemerData: redeemerUniqueName,
-                spendingRef: spendingRefUniqueName,
-                optionalDatum: optionalDatumUniqueName,
-            }),
-            "SpendRedeemer",
-            contractRange,
+            baseContextVars,
+            contractRange
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
 
@@ -1322,6 +1329,331 @@ function _exprReplaceParamsAndAssertNoLitContext(
     const tsEnsureExhaustiveCheck: never = expr;
     console.error(expr);
     throw new Error("unreachable::_exprReplaceParamsAndAssertNoLitContext");
+}
+
+function _deriveContractDatumTypeDef(
+    contractName: string,
+    stateDecls: readonly StateDecl[],
+    contractRange: SourceRange,
+): StructDecl
+{
+    let defFlags = StructDeclAstFlags.onlyDataEncoding;
+    if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.untaggedSingleConstructor;
+
+    const uniqueName = getUniqueInternalName( `${contractName}Datum` );
+    return new StructDecl(
+        new Identifier( uniqueName, SourceRange.mock ),
+        [], // typeParams
+        stateDecls.map( s =>
+            new StructConstrDecl(
+                new Identifier( s.name.text, s.name.range ),
+                s.fields,
+                s.range
+            )
+        ),
+        defFlags,
+        contractRange
+    );
+}
+
+function _buildSpendCaseBlock(
+    compiler: AstCompiler,
+    contractDecl: ContractDecl,
+    paramsInternalNamesMap: Map<string, string>,
+    baseContextVars: RenamedVariables,
+    contractRange: SourceRange,
+): BodyStmt[] | undefined
+{
+    const mockRange = SourceRange.mock;
+    const hasPlainSpend = contractDecl.spendMethods.length > 0;
+    const hasState = contractDecl.stateDecls.length > 0;
+
+    // legacy / pure-plain-spend behavior: identical UPLC to before
+    if( !hasState ) {
+        return _getMatchedPurposeBlockStatements(
+            compiler,
+            contractDecl.spendMethods,
+            paramsInternalNamesMap,
+            baseContextVars,
+            "SpendRedeemer",
+            contractRange,
+        );
+    }
+
+    // synthetic union datum type
+    const datumTypeDef = _deriveContractDatumTypeDef(
+        contractDecl.name.text,
+        contractDecl.stateDecls,
+        contractRange
+    );
+    compiler.registerInternalTypeDecl( datumTypeDef );
+    const datumTypeName = datumTypeDef.name.text;
+
+    // build fallback (used when datum is absent or doesn't match any state)
+    // we bind the plain-spend redeemer match as a 0-arg function value, then
+    // call it via `return fallback();` at every fallback site. the 0-arg-func
+    // → delay lowering keeps the body emitted only once.
+    let fallbackBindStmt: VarStmt | undefined;
+    let fallbackFuncName: string | undefined;
+    const makeFallbackBody = (): BodyStmt[] => {
+        if( hasPlainSpend ) {
+            return [
+                new ReturnStmt(
+                    new CallExpr(
+                        new Identifier( fallbackFuncName!, mockRange ),
+                        undefined, // genericTypeArgs
+                        [],
+                        mockRange
+                    ),
+                    mockRange
+                )
+            ];
+        }
+        return [ new FailStmt( undefined, contractRange ) ];
+    };
+
+    if( hasPlainSpend ) {
+        fallbackFuncName = getUniqueInternalName("unknownDatum");
+        // pure-plain-spend behavior: identical UPLC to before
+        const plainBody = _getMatchedPurposeBlockStatements(
+            compiler,
+            contractDecl.spendMethods,
+            paramsInternalNamesMap,
+            baseContextVars,
+            "SpendRedeemer",
+            contractRange,
+        );
+        if( !Array.isArray( plainBody ) ) return undefined;
+
+        fallbackBindStmt = new VarStmt(
+            [
+                new SimpleVarDecl(
+                    new Identifier( fallbackFuncName, mockRange ),
+                    new AstFuncType(
+                        [], // params
+                        new AstVoidType( mockRange ),
+                        mockRange
+                    ),
+                    new FuncExpr(
+                        new Identifier( fallbackFuncName, mockRange ),
+                        CommonFlags.None,
+                        [], // typeParams
+                        new AstFuncType(
+                            [], // params
+                            new AstVoidType( mockRange ),
+                            mockRange
+                        ),
+                        new BlockStmt( plainBody, contractRange ),
+                        ArrowKind.None,
+                        mockRange
+                    ), // initExpr
+                    CommonFlags.Const,
+                    mockRange
+                )
+            ],
+            mockRange
+        );
+    }
+
+    const datumUniqueName = getUniqueInternalName("datum");
+    const datumAsUnionName = getUniqueInternalName("datumUnion");
+
+    // build per-state cases
+    const datumMatchCases: MatchStmtCase[] = [];
+    for( const stateDecl of contractDecl.stateDecls ) {
+        let stateBody: BodyStmt[];
+
+        // deconstruct each field of the state's constructor into a fresh
+        // internal placeholder so the existing match-compiler accepts the
+        // pattern (which requires every field to be specified)
+        const fieldExtracts = stateDecl.fields.map( f => ({
+            originalName: f.name.text,
+            extractName: getUniqueInternalName( `${stateDecl.name.text}_${f.name.text}` ),
+            range: f.name.range,
+        }) );
+
+        if( stateDecl.spendMethods.length === 0 ) {
+            // readonly-state: never spendable
+            stateBody = [ new FailStmt( undefined, stateDecl.range ) ];
+        } else {
+            // synthesize a per-state single-constructor struct so that
+            // `state.fieldName` is type-checked against a struct that has
+            // only this state's fields (the multi-ctor union would reject
+            // the access since fields differ across constructors).
+            const perStateStructDecl = new StructDecl(
+                new Identifier(
+                    getUniqueInternalName( `${contractDecl.name.text}_${stateDecl.name.text}` ),
+                    mockRange
+                ),
+                [], // typeParams
+                [
+                    new StructConstrDecl(
+                        new Identifier( stateDecl.name.text, mockRange ),
+                        stateDecl.fields,
+                        stateDecl.range
+                    )
+                ],
+                StructDeclAstFlags.onlyDataEncoding | StructDeclAstFlags.untaggedSingleConstructor,
+                stateDecl.range
+            );
+            compiler.registerInternalTypeDecl( perStateStructDecl );
+            const perStateStructName = perStateStructDecl.name.text;
+
+            // synthesize: const state = StateStruct{ field1: _f1, ... };
+            // - state has type StateStruct (single-ctor) so state.x type-checks
+            // - LitNamedObjExpr at expressify short-circuits property access
+            //   to the bound field value (the extracted variable)
+            const stateUniqueName = getUniqueInternalName( `state_${stateDecl.name.text}` );
+            const stateBindStmt = new VarStmt(
+                [
+                    new SimpleVarDecl(
+                        new Identifier( stateUniqueName, mockRange ),
+                        new AstNamedTypeExpr(
+                            new Identifier( perStateStructName, mockRange ),
+                            [], // typeArgs
+                            mockRange
+                        ),
+                        new LitNamedObjExpr(
+                            new Identifier( stateDecl.name.text, mockRange ),
+                            fieldExtracts.map( fe => new Identifier( fe.originalName, mockRange ) ),
+                            fieldExtracts.map( fe => new Identifier( fe.extractName, mockRange ) ),
+                            mockRange,
+                            new Identifier( perStateStructName, mockRange )
+                        ), // initExpr
+                        CommonFlags.Const,
+                        mockRange
+                    )
+                ],
+                mockRange
+            );
+
+            const perStateContextVars: RenamedVariables = Object.freeze({
+                ...baseContextVars,
+                state: stateUniqueName,
+            });
+
+            const redeemerStmts = _getMatchedPurposeBlockStatements(
+                compiler,
+                stateDecl.spendMethods,
+                paramsInternalNamesMap,
+                perStateContextVars,
+                `${stateDecl.name.text}Redeemer`,
+                stateDecl.range,
+            );
+            if( !Array.isArray( redeemerStmts ) ) return undefined;
+
+            stateBody = [ stateBindStmt, ...redeemerStmts ];
+        }
+
+        const fieldsMap = new Map<Identifier, VarDecl>(
+            fieldExtracts.map( fe => [
+                new Identifier( fe.originalName, mockRange ),
+                SimpleVarDecl.onlyNameConst( fe.extractName, mockRange )
+            ])
+        );
+
+        datumMatchCases.push(
+            new MatchStmtCase(
+                new NamedDeconstructVarDecl(
+                    new Identifier( stateDecl.name.text, mockRange ),
+                    fieldsMap,
+                    undefined, // rest
+                    undefined, // type
+                    undefined, // initExpr
+                    CommonFlags.Const,
+                    stateDecl.range
+                ),
+                new BlockStmt( stateBody, stateDecl.range ),
+                stateDecl.range
+            )
+        );
+    }
+
+    // bind: const datumUnion: ContractDatum = datum as ContractDatum;
+    // we match on this bound variable so the existing match-narrowing
+    // mechanism narrows it to the matched constructor inside each arm.
+    const datumAsUnionBindStmt = new VarStmt(
+        [
+            new SimpleVarDecl(
+                new Identifier( datumAsUnionName, mockRange ),
+                new AstNamedTypeExpr(
+                    new Identifier( datumTypeName, mockRange ),
+                    [], // typeArgs
+                    mockRange
+                ),
+                new TypeConversionExpr(
+                    new Identifier( datumUniqueName, mockRange ),
+                    new AstNamedTypeExpr(
+                        new Identifier( datumTypeName, mockRange ),
+                        [], // typeArgs
+                        mockRange
+                    ),
+                    mockRange
+                ),
+                CommonFlags.Const,
+                mockRange
+            )
+        ],
+        mockRange
+    );
+
+    const datumMatchStmt = new MatchStmt(
+        new Identifier( datumAsUnionName, mockRange ),
+        datumMatchCases,
+        new MatchStmtElseCase(
+            new BlockStmt( makeFallbackBody(), contractRange ),
+            contractRange
+        ),
+        contractRange
+    );
+
+    // outer match: optionalDatum -> Some{ value: datum } / Nothing
+    const optionalMatch = new MatchStmt(
+        new Identifier( baseContextVars.optionalDatum, mockRange ),
+        [
+            new MatchStmtCase(
+                new NamedDeconstructVarDecl(
+                    new Identifier( "Some", mockRange ),
+                    new Map<Identifier, VarDecl>([
+                        [
+                            new Identifier( "value", mockRange ),
+                            SimpleVarDecl.onlyNameConst( datumUniqueName, mockRange )
+                        ]
+                    ]),
+                    undefined, // rest
+                    undefined, // type
+                    undefined, // initExpr
+                    CommonFlags.Const,
+                    contractRange
+                ),
+                new BlockStmt(
+                    [ datumAsUnionBindStmt, datumMatchStmt ],
+                    contractRange
+                ),
+                contractRange
+            ),
+            new MatchStmtCase(
+                new NamedDeconstructVarDecl(
+                    new Identifier( "None", mockRange ),
+                    new Map(),
+                    undefined, // rest
+                    undefined, // type
+                    undefined, // initExpr
+                    CommonFlags.Const,
+                    contractRange
+                ),
+                new BlockStmt( makeFallbackBody(), contractRange ),
+                contractRange
+            ),
+        ],
+        undefined, // elseCase
+        contractRange
+    );
+
+    const result: BodyStmt[] = [];
+    if( fallbackBindStmt ) result.push( fallbackBindStmt );
+    result.push( optionalMatch );
+    return result;
 }
 
 function _deriveRedeemerTypeDef(

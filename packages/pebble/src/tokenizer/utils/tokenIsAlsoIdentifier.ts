@@ -23,6 +23,7 @@ export function tokenIsAlsoIdentifier(token: Token): boolean {
         case Token.Contract:
         case Token.Param:
         case Token.Spend:
+        case Token.State:
         case Token.Mint:
         case Token.Certify:
         case Token.Withdraw:

@@ -81,6 +81,7 @@ import { Precedence, determinePrecedence } from "./Precedence";
 import { tokenFromKeyword } from "../tokenizer/utils/tokenFromKeyword";
 import { LitFailExpr } from "../ast/nodes/expr/litteral/LitFailExpr";
 import { ContractDecl } from "../ast/nodes/statements/declarations/ContractDecl";
+import { StateDecl } from "../ast/nodes/statements/declarations/StateDecl";
 import { LitContextExpr } from "../ast/nodes/expr/litteral/LitContextExpr";
 import { tokenIsAlsoIdentifier } from "../tokenizer/utils/tokenIsAlsoIdentifier";
 
@@ -334,15 +335,30 @@ export class Parser extends DiagnosticEmitter
         const withdrawMethods: FuncDecl[] = [];
         const proposeMethods: FuncDecl[] = [];
         const voteMethods: FuncDecl[] = [];
+        const stateDecls: StateDecl[] = [];
         while( !tn.skip( Token.CloseBrace ) )
         {
             tn.skip( Token.Semicolon ); // if any
-            
+
             const thisStartPos = tn.tokenPos;
 
             const prevState = tn.mark();
             const nextToken = tn.next();
             switch( nextToken ) {
+                case Token.State: {
+                    const stateDecl = this.parseStateDecl( thisStartPos );
+                    if( !stateDecl ) return undefined;
+
+                    if( stateDecls.some( s => s.name.text === stateDecl.name.text ) )
+                    return this.error(
+                        DiagnosticCode.Duplicate_identifier_0,
+                        stateDecl.name.range, stateDecl.name.text
+                    );
+
+                    stateDecls.push( stateDecl );
+                    continue;
+                }
+                break;
                 case Token.Param: {
                     const varDecl = this._parseVarDecl( CommonFlags.Const );
                     if( !varDecl ) return undefined;
@@ -421,6 +437,112 @@ export class Parser extends DiagnosticEmitter
             withdrawMethods,
             proposeMethods,
             voteMethods,
+            stateDecls,
+            tn.range( startPos, tn.pos )
+        );
+    }
+
+    parseStateDecl( startPos: number ): StateDecl | undefined
+    {
+        const tn = this.tn;
+        startPos = typeof startPos === "number" ? startPos : tn.tokenPos;
+
+        // at 'state': Identifier '{' ... '}'
+
+        if( !tn.skipIdentifier() )
+        return this.error(
+            DiagnosticCode.Identifier_expected,
+            tn.range()
+        );
+
+        const name = new Identifier( tn.readIdentifier(), tn.range() );
+
+        if( !tn.skip( Token.OpenBrace ) )
+        return this.error(
+            DiagnosticCode._0_expected,
+            tn.range(), "{"
+        );
+
+        const fields: SimpleVarDecl[] = [];
+        const spendMethods: FuncDecl[] = [];
+
+        while( !tn.skip( Token.CloseBrace ) )
+        {
+            tn.skip( Token.Comma ); // if any
+            tn.skip( Token.Semicolon ); // if any
+
+            if( tn.skip( Token.CloseBrace ) ) break;
+
+            const memberStartPos = tn.tokenPos;
+            const prevState = tn.mark();
+            const nextToken = tn.next();
+
+            if( nextToken === Token.Spend ) {
+                const funcDecl = this.parseFuncDecl(
+                    CommonFlags.None,
+                    memberStartPos,
+                    new AstVoidType( tn.range() )
+                );
+                if( !funcDecl ) return undefined;
+                if(!( funcDecl.expr.signature.returnType instanceof AstVoidType ))
+                return this.error(
+                    DiagnosticCode.Contract_methods_must_return_void_or_fail,
+                    funcDecl.expr.signature.returnType?.range ?? funcDecl.expr.signature.range
+                );
+                spendMethods.push( funcDecl );
+                continue;
+            }
+
+            if(
+                nextToken === Token.Mint
+                || nextToken === Token.Certify
+                || nextToken === Token.Withdraw
+                || nextToken === Token.Propose
+                || nextToken === Token.Vote
+            ) {
+                return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "spend method or field"
+                );
+            }
+
+            // not a method: parse as field declaration
+            tn.reset( prevState );
+            if( spendMethods.length > 0 ) {
+                // fields must come before spend methods
+                return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "spend method"
+                );
+            }
+
+            const field = this._parseVarDecl( CommonFlags.Const );
+            if( !field ) return undefined;
+            if(!( field instanceof SimpleVarDecl ))
+            return this.error(
+                DiagnosticCode.Invalid_field_declaration,
+                field.range
+            );
+            if( !field.type )
+            return this.error(
+                DiagnosticCode.Type_expected,
+                field.range.atEnd()
+            );
+            if( field.initExpr )
+            return this.error(
+                DiagnosticCode.Initialization_expressions_are_not_allowed_in_a_struct_declaration,
+                SourceRange.join( field.type.range.atEnd(), field.initExpr.range )
+            );
+
+            fields.push( field );
+        }
+
+        tn.skip( Token.Semicolon ); // if any
+
+        return new StateDecl(
+            name,
+            fields,
+            spendMethods,
             tn.range( startPos, tn.pos )
         );
     }
