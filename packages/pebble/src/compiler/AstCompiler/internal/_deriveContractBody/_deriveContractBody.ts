@@ -1340,9 +1340,8 @@ function _deriveContractDatumTypeDef(
     let defFlags = StructDeclAstFlags.onlyDataEncoding;
     if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.untaggedSingleConstructor;
 
-    const uniqueName = getUniqueInternalName( `${contractName}Datum` );
     return new StructDecl(
-        new Identifier( uniqueName, SourceRange.mock ),
+        new Identifier( contractName, contractRange ),
         [], // typeParams
         stateDecls.map( s =>
             new StructConstrDecl(

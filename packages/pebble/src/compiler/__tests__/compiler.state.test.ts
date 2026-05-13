@@ -282,6 +282,128 @@ contract C {
         expect( diagnostics.length ).toBe( 0 );
     });
 
+    test("contract name is usable as the union datum type", async () => {
+        const { diagnostics, output } = await compileSrc(`
+contract OrderBook {
+    state SimpleOrder {
+        value: int
+        spend fill() {
+            const order: OrderBook = OrderBook.SimpleOrder{ value: 0 };
+            assert order is SimpleOrder;
+        }
+    }
+    state PartialOrder {
+        value: int
+        spend fill() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBe( 0 );
+        expect( output instanceof Uint8Array ).toBe( true );
+    });
+
+    test("contract name accepts every state constructor", async () => {
+        const { diagnostics, output } = await compileSrc(`
+contract Multi {
+    state A {
+        x: int
+        spend run() {
+            const a: Multi = Multi.A{ x: 1 };
+            const b: Multi = Multi.B{ y: 2 };
+            assert a is A;
+            assert b is B;
+        }
+    }
+    state B {
+        y: int
+        spend run() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBe( 0 );
+        expect( output instanceof Uint8Array ).toBe( true );
+    });
+
+    test("contract name is usable as `as` cast target", async () => {
+        const { diagnostics, output } = await compileSrc(`
+contract Cast {
+    state A {
+        v: int
+        spend run() {
+            const datum = Cast.A{ v: 0 };
+            const widened = datum as Cast;
+            assert widened is A;
+        }
+    }
+    state B {
+        w: int
+        spend run() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBe( 0 );
+        expect( output instanceof Uint8Array ).toBe( true );
+    });
+
+    test("contract type narrows via `is` to a specific state", async () => {
+        const { diagnostics, output } = await compileSrc(`
+contract Narrow {
+    state A {
+        x: int
+        spend run() {
+            const d: Narrow = Narrow.A{ x: 1 };
+            assert d is A;
+            const { x } = d;
+            assert x > 0;
+        }
+    }
+    state B {
+        y: int
+        spend run() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBe( 0 );
+        expect( output instanceof Uint8Array ).toBe( true );
+    });
+
+    test("constructing a wrong state shape is rejected", async () => {
+        const { diagnostics } = await compileSrc(`
+contract WrongShape {
+    state A {
+        x: int
+        spend run() {
+            // missing field 'x' on A
+            const bad: WrongShape = WrongShape.A{ y: 1 };
+        }
+    }
+    state B {
+        y: int
+        spend run() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBeGreaterThan( 0 );
+    });
+
+    test("referring to a non-existent state constructor is rejected", async () => {
+        const { diagnostics } = await compileSrc(`
+contract NoSuchState {
+    state A {
+        x: int
+        spend run() {
+            const bad: NoSuchState = NoSuchState.Missing{ x: 1 };
+        }
+    }
+    state B {
+        y: int
+        spend run() {}
+    }
+}
+        `);
+        expect( diagnostics.length ).toBeGreaterThan( 0 );
+    });
+
     test("duplicate state names are rejected", async () => {
         const { diagnostics } = await compileSrc(`
 contract DupStates {
