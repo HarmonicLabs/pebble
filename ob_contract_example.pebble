@@ -1,70 +1,68 @@
 
-struct Order {
-    ownerPaymentCreds: PubKeyHash,
-    // token to receive
-    policy: bytes,
-    tokenName: bytes,
-    // amount to receive
-    minReceiveAmount: int
-}
-
 contract SimpleOrderBook
 {
-    spend fillOrder(
-        inputIdx: int,
-        outputIdx: int
-    )
-    {
-        const {
-            tx,
-            spendingInputRef: purposeRef,
-        } = context;
-
-        const {
-            ref: spendingInputRef,
-            resolved: spendingInput
-        } = tx.inputs[ inputIdx ];
-
-        assert purposeRef === spendingInputRef;
-
-        const ownAddr = spendingInput.address;
-        const ownHash = ownAddr.credential.hash();
-        const InlineDatum{
-            datum: {
-                ownerPaymentCreds,
-                policy,
-                tokenName,
-                minReceiveAmount
-            } as Order
-        } = spendingInput.datum;
-
-        // prevents double satisfaction
-        const ownInputs = tx.inputs.filter( input => input.resolved.address.payment.hash() === ownHash );
-        assert ownInputs.length() === 1;
-
-        const userOutput = tx.outputs[ outputIdx ];
- 
-        // assert correct output address
-        assert userOutput.address === Address{
-            credential: ownerPaymentCreds,
-            stakingCredential: ownAddr.stakingCredential
-        };
-
-        // assert paid enough token
-        assert output.value.amountOf( policy, tokenName ) >= minReceiveAmount;
-    }
-
     spend cancelOrder()
     {
         const {
             tx,
-            optionalDatum: Some{ value: { ownerPaymentCreds } as Order },
+            // optionalDatum: Some{ value: order as Order },
+            optionalDatum: Some{ value: order as SimpleOrderBook },
         } = context;
+        
+        /* ... rest of contract ... */
+    }
 
-        assert case ownerPaymentCreds
-            is PubKeyHash{ hash } => tx.signatories.includes( hash ) 
-            is Validator{ hash } => tx.inputs.some(({ resolved: input }) => 
-                input.payment.hash() === hash
-            );
+    state SimpleOrder {
+
+        ownerPaymentCreds: Credential
+        policy: bytes
+        tokenName: bytes
+        minReceiveAmount: int
+    
+        spend fill(
+            inputIdx: int,
+            outputIdx: int
+        )
+        {
+            const {
+                tx,
+                spendingRef: purposeRef,
+                // optionalDatum: Some{ value: Simple{ ... } as Order }
+                state: { ... }
+            } = context;
+            
+            /* ... rest of contract ... */
+        }
+    
+    }
+    
+    state PartialOrder {
+
+        ownerPaymentCreds: Credential
+        policy: bytes
+        tokenName: bytes
+        minReceiveAmountPerTx: int
+
+        spend fill( inputIdx: int, outputIdx: int )
+        {
+            const {
+                tx,
+                spendingRef: purposeRef,
+                // optionalDatum: Some{ value: Partial{ ... } as Order }
+                state: { ... }
+            } = context;
+            
+            /* ... rest of contract ... */
+        }
+    }
+
+    spend allowRecover()
+    {
+        const {
+            tx,
+            optionalDatum
+        } = context;
+        
+        assert optionalDatum is None;
     }
 }
