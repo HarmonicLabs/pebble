@@ -16,6 +16,7 @@
     "dist"
   ],
   "scripts": {
+    "prepublishOnly": "npm run build",
     "buidl": "npm run build",
     "build": "rm -rf ./dist && npm i && npm run build:light",
     "test": "jest",
