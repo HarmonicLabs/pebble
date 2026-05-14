@@ -285,6 +285,12 @@
   "'super' must be called before accessing a property of 'super' in the constructor of a derived class.": 17011,
 
   "Unkonwn AST node.": 20000,
-  
+
+  "Namespace '{0}' has no exported member '{1}'.": 30001,
+  "Namespace path is incomplete; expected a value, type, function, or interface.": 30002,
+  "'private' modifier is only allowed on declarations inside a namespace.": 30003,
+  "Namespaces cannot be declared here.": 30004,
+  "'{0}' is not a namespace.": 30005,
+
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }

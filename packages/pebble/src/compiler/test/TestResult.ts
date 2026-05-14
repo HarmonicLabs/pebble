@@ -7,13 +7,18 @@ export interface TestBudget {
     mem: bigint;
 }
 
+export interface TestInput {
+    name: string;
+    value: unknown;
+}
+
 export interface TestIterationResult {
     passed: boolean;
     budgetSpent: TestBudget;
     logs: string[];
     error?: { msg?: string };
-    /** reserved for property tests; undefined for unit tests */
-    inputs?: unknown[];
+    /** the fuzzed input tuple for this iteration; undefined for unit tests */
+    inputs?: TestInput[];
 }
 
 export interface TestResult {
@@ -29,6 +34,8 @@ export interface TestResult {
     totalBudget: TestBudget;
     /** non-empty when the test could not be executed at all (e.g. unsupported feature) */
     skippedReason?: string;
+    /** seed used by the property runner (only set for property tests) */
+    seed?: number;
 }
 
 export function zeroBudget(): TestBudget

@@ -52,6 +52,7 @@ import { _compileTestStmt } from "./internal/statements/_compileTestStmt";
 import { SourceTypeMap, CheckResult } from "../SourceTypeMap";
 import { isIdentifier } from "../../utils/text";
 import { TestStmt } from "../../ast/nodes/statements/TestStmt";
+import { NamespaceDecl, NamespaceMember } from "../../ast/nodes/statements/declarations/NamespaceDecl";
 
 export interface AstTypeDefCompilationResult {
     sop: TirType | undefined,
@@ -364,6 +365,15 @@ export class AstCompiler extends DiagnosticEmitter
         const topLevelScope = importsScope.newChildScope({ isFunctionDeclScope: false });
 
         const srcExports = this.preludeScope.newChildScope({ isFunctionDeclScope: false });
+
+        // collect namespace declarations (recursively) so that types/interfaces/signatures
+        // can refer to symbols defined inside namespaces.
+        this._collectNamespaceDeclarations(
+            stmts,
+            src.uid,
+            topLevelScope,
+            srcExports
+        );
 
         // collect top level **type** (struct and aliases) declarations
         this._collectTypeDeclarations(
@@ -768,6 +778,108 @@ export class AstCompiler extends DiagnosticEmitter
         ) this.program.contractTirFuncName = tirFuncName;
     }
 
+    /**
+     * walks `stmts` for `NamespaceDecl` (optionally wrapped in `ExportStmt`),
+     * compiles each one into a `NamespaceSymbol`, and registers it on
+     * `enclosingScope` (and `enclosingExports` when exported).
+     *
+     * removes processed `NamespaceDecl` statements from `stmts`.
+     */
+    private _collectNamespaceDeclarations(
+        stmts: TopLevelStmt[],
+        srcUid: string,
+        enclosingScope: AstScope,
+        enclosingExports: AstScope
+    ): void
+    {
+        for( let i = 0; i < stmts.length; i++ )
+        {
+            let stmt = stmts[i];
+            let exported = false;
+            if( stmt instanceof ExportStmt )
+            {
+                exported = true;
+                stmt = stmt.stmt as TopLevelStmt;
+            }
+            if(!( stmt instanceof NamespaceDecl )) continue;
+
+            this._compileNamespaceDecl(
+                stmt,
+                srcUid,
+                enclosingScope,
+                enclosingExports,
+                exported
+            );
+
+            void stmts.splice( i, 1 );
+            i--;
+        }
+    }
+
+    private _compileNamespaceDecl(
+        decl: NamespaceDecl,
+        srcUid: string,
+        enclosingScope: AstScope,
+        enclosingExports: AstScope,
+        isExported: boolean
+    ): void
+    {
+        const nsName = decl.name.text;
+        if( enclosingScope.namespaces.has( nsName ) )
+        return this.error(
+            DiagnosticCode._0_is_already_defined,
+            decl.name.range, nsName
+        );
+
+        const compilationScope = enclosingScope.newChildScope({ isFunctionDeclScope: false });
+        const publicScope = enclosingScope.newChildScope({ isFunctionDeclScope: false });
+        const nsSrcUid = `${srcUid}::${nsName}`;
+
+        // build a synthetic top-level statement list from the namespace's members:
+        // wrap public members in ExportStmt so the existing passes route them
+        // to `publicScope` automatically; leave private members bare so they only
+        // live in `compilationScope`.
+        const fakeStmts: TopLevelStmt[] = decl.members.map( (m: NamespaceMember) =>
+            m.isPrivate
+                ? m.stmt
+                : new ExportStmt( m.stmt, m.range )
+        );
+
+        // recurse into nested namespaces first so subsequent passes can
+        // resolve `Inner.Member` references.
+        this._collectNamespaceDeclarations(
+            fakeStmts,
+            nsSrcUid,
+            compilationScope,
+            publicScope
+        );
+
+        this._collectTypeDeclarations(
+            fakeStmts,
+            nsSrcUid,
+            compilationScope,
+            publicScope
+        );
+
+        this._collectInterfaceDeclarations(
+            fakeStmts,
+            compilationScope,
+            publicScope
+        );
+
+        this._collectAllTopLevelSignatures(
+            fakeStmts,
+            nsSrcUid,
+            compilationScope,
+            publicScope,
+            false
+        );
+
+        enclosingScope.defineNamespace({ name: nsName, publicScope });
+        if( isExported )
+        enclosingExports.defineNamespace({ name: nsName, publicScope });
+    }
+
     private _collectInterfaceDeclarations(
         stmts: TopLevelStmt[],
         topLevelScope: AstScope,
@@ -1058,10 +1170,32 @@ export class AstCompiler extends DiagnosticEmitter
             const stmt = stmts[i];
             if( stmt instanceof ImportStarStmt )
             {
-                this.error(
-                    DiagnosticCode.Not_implemented_0,
-                    stmt.range, "import *"
+                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
+                const importedSymbols = this.program.getExportedSymbols( importAbsPath );
+                if( !importedSymbols )
+                {
+                    this.error(
+                        DiagnosticCode.File_0_not_found,
+                        stmt.fromPath.range,
+                        importAbsPath
+                    );
+                    void stmts.splice( i, 1 );
+                    i--;
+                    continue;
+                }
+
+                const aliasName = stmt.anIdentifier.text;
+                const ok = srcImportsScope.defineNamespace({
+                    name: aliasName,
+                    publicScope: importedSymbols
+                });
+                if( !ok ) this.error(
+                    DiagnosticCode._0_is_already_defined,
+                    stmt.anIdentifier.range, aliasName
                 );
+
+                void stmts.splice( i, 1 );
+                i--;
                 continue;
             }
             if(!(
@@ -1086,12 +1220,14 @@ export class AstCompiler extends DiagnosticEmitter
                 const isType = importedSymbols.types.has( declName );
                 const isFunction = importedSymbols.functions.has( declName );
                 const isInterface = importedSymbols.interfaces.has( declName );
+                const isNamespace = importedSymbols.namespaces.has( declName );
 
                 if(!(
                     isValue
                     || isType
                     || isFunction
                     || isInterface
+                    || isNamespace
                 )) {
                     this.error(
                         DiagnosticCode.Module_0_has_no_exported_member_1,
@@ -1118,7 +1254,8 @@ export class AstCompiler extends DiagnosticEmitter
                     });
                 }
                 if( isType ) srcImportsScope.types.set( declName, importedSymbols.types.get( declName )! );
-                if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! )
+                if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! );
+                if( isNamespace ) srcImportsScope.defineNamespace( importedSymbols.namespaces.get( declName )! );
             }
 
             // remove from array so we don't process it again

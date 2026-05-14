@@ -40,6 +40,36 @@ export function formatTestResults(
             else failed++;
             const cpu = r.totalBudget.cpu.toString();
             const mem = r.totalBudget.mem.toString();
+
+            if( r.kind === "property" )
+            {
+                const ran = r.iterations.length;
+                const seedStr = `seed=${r.seed ?? 0}`;
+                if( r.passed )
+                {
+                    lines.push( `  ${tag}  ${r.name}  (${ran} iterations, ${seedStr}, total cpu=${cpu}, mem=${mem})` );
+                }
+                else
+                {
+                    const failedIter = r.iterations[ r.iterations.length - 1 ];
+                    lines.push( `  ${tag}  ${r.name}  (failed at iteration ${ran}, ${seedStr})` );
+                    if( failedIter?.inputs && failedIter.inputs.length > 0 )
+                    {
+                        const inp = failedIter.inputs
+                            .map( i => `${i.name}=${_renderValue( i.value )}` )
+                            .join( ", " );
+                        lines.push( `        inputs: ${inp}` );
+                    }
+                    if( failedIter?.error?.msg ) lines.push( `        error:  ${failedIter.error.msg}` );
+                    if( failedIter?.logs && failedIter.logs.length > 0 )
+                    {
+                        for( const log of failedIter.logs ) lines.push( `        trace:  ${log}` );
+                    }
+                }
+                continue;
+            }
+
+            // unit test rendering
             lines.push( `  ${tag}  ${r.name}  [cpu: ${cpu}, mem: ${mem}]` );
 
             for( const it of r.iterations )
@@ -60,4 +90,12 @@ export function formatTestResults(
         text: lines.join( "\n" ),
         summary: { totalTests: total, passed, failed, skipped }
     };
+}
+
+function _renderValue( v: unknown ): string
+{
+    if( typeof v === "bigint" ) return v.toString();
+    if( typeof v === "boolean" ) return v ? "true" : "false";
+    if( v instanceof Uint8Array ) return "#" + Array.from( v ).map( b => b.toString( 16 ).padStart( 2, "0" ) ).join( "" );
+    return String( v );
 }

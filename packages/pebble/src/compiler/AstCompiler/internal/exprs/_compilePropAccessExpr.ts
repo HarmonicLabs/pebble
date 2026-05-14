@@ -12,6 +12,7 @@ import { TirType } from "../../../tir/types/TirType";
 import { getOptTypeArg } from "../../../tir/types/utils/getOptTypeArg";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { getPropAccessReturnType } from "../../utils/getPropAccessReturnType";
+import { tryResolveNamespaceChain } from "../../utils/resolveNamespaceChain";
 import { _compileExpr } from "./_compileExpr";
 import { _compileNonNullExpr } from "./_compileNonNullExpr";
 import { TirLitNamedObjExpr } from "../../../tir/expressions/litteral/TirLitNamedObjExpr";
@@ -149,7 +150,7 @@ export function _compileNonNullPropAccessExpr(
     ctx: AstCompilationCtx,
     expr: NonNullPropAccessExpr,
     _typeHint: TirType | undefined
-): TirPropAccessExpr | undefined
+): TirExpr | undefined
 {
     const nonNullObjExpr = _compileNonNullExpr(
         ctx,
@@ -168,8 +169,22 @@ export function _compileDotPropAccessExpr(
     ctx: AstCompilationCtx,
     expr: DotPropAccessExpr,
     _typeHint: TirType | undefined
-): TirPropAccessExpr | undefined
+): TirExpr | undefined
 {
+    // if the LHS is a (chain of) identifier(s) rooted at a namespace, resolve
+    // the entire dotted chain through namespaces.
+    const nsRes = tryResolveNamespaceChain( ctx, expr );
+    if( nsRes )
+    {
+        if( nsRes.kind === "value" ) return nsRes.expr;
+        if( nsRes.kind === "namespace" ) return ctx.error(
+            DiagnosticCode.Namespace_path_is_incomplete,
+            expr.range
+        );
+        // "incomplete" — diagnostic already emitted
+        return undefined;
+    }
+
     const objExpr = _compileExpr( ctx, expr.object, undefined );
     if( !objExpr ) return undefined;
 

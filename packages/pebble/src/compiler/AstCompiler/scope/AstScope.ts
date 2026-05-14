@@ -63,6 +63,20 @@ export interface IVariableInfos {
     isConstant: boolean;
 }
 
+/**
+ * A namespace is a compile-time only construct that groups
+ * symbols (values, types, functions, interfaces, and nested
+ * namespaces) under a single name.
+ *
+ * Members of the namespace marked with `private` are NOT included
+ * in `publicScope`; they only live in the namespace's body-compilation
+ * scope and are unreachable from outside.
+ */
+export interface NamespaceSymbol {
+    name: string;
+    publicScope: AstScope;
+}
+
 export interface PossibleTirTypes {
     sopTirName: string;
     dataTirName: string | undefined;
@@ -112,6 +126,12 @@ export class AstScope
      */
     readonly narrowings: Map<string, TirType> = new Map();
     readonly aviableConstructors: Map<string, IAvaiableConstructor> = new Map();
+    /**
+     * ast name -> namespace symbol
+     *
+     * namespaces are compile-time only; they do not emit IR
+     */
+    readonly namespaces: Map<string, NamespaceSymbol> = new Map();
 
     private _isReadonly = false;
     readonly infos: ScopeInfos;
@@ -311,6 +331,42 @@ export class AstScope
         );
     }
 
+    /** define a namespace in this scope; returns `false` if shadowed in current scope */
+    defineNamespace( ns: NamespaceSymbol ): boolean
+    {
+        if( this._isReadonly ) return false;
+        if( invalidSymbolNames.has( ns.name ) ) return false;
+        if( this.namespaces.has( ns.name ) ) return false;
+        this.namespaces.set( ns.name, ns );
+        return true;
+    }
+
+    /** resolve a namespace by walking the scope chain */
+    resolveNamespace( name: string ): NamespaceSymbol | undefined
+    {
+        return (
+            this.namespaces.get( name )
+            ?? this.parent?.resolveNamespace( name )
+        );
+    }
+
+    /**
+     * `true` if `name` is bound in this scope (or any parent) under any kind.
+     * Used to detect shadowing across symbol categories when defining a new symbol.
+     */
+    hasAnySymbol( name: string ): boolean
+    {
+        if(
+            this.variables.has( name )
+            || this.types.has( name )
+            || this.functions.has( name )
+            || this.interfaces.has( name )
+            || this.namespaces.has( name )
+            || this.aviableConstructors.has( name )
+        ) return true;
+        return this.parent?.hasAnySymbol( name ) ?? false;
+    }
+
     clone(): AstScope
     {
         const cloned = new AstScope(
@@ -350,6 +406,9 @@ export class AstScope
 
         for( const [ name, methods ] of this.interfaces )
             cloned.interfaces.set( name, new Map( methods ) );
+
+        for( const [ name, ns ] of this.namespaces )
+            cloned.namespaces.set( name, ns );
 
         return cloned;
     }

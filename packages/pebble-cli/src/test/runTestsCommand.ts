@@ -10,6 +10,8 @@ export interface CliTestFlags {
     config?: string;
     testPathPattern?: string;
     testNamePattern?: string;
+    propertyRuns?: string;
+    seed?: string;
 }
 
 export async function runTestsCommand(
@@ -42,6 +44,8 @@ export async function runTestsCommand(
 
     const testPathPattern = flags.testPathPattern ? new RegExp( flags.testPathPattern ) : undefined;
     const nameFilter = flags.testNamePattern ? new RegExp( flags.testNamePattern ) : undefined;
+    const propertyIterations = flags.propertyRuns !== undefined ? Math.max( 1, Number( flags.propertyRuns ) | 0 ) : undefined;
+    const seed = flags.seed !== undefined ? ( Number( flags.seed ) | 0 ) : undefined;
 
     const files = await discoverTestFiles( target, testPathPattern, root );
 
@@ -64,7 +68,11 @@ export async function runTestsCommand(
         });
 
         try {
-            const results = await compiler.test({ nameFilter });
+            const results = await compiler.test({
+                nameFilter,
+                propertyIterations,
+                seed,
+            });
             if( results.length > 0 ) resultsByFile.set( file, results );
         } catch ( err ) {
             process.stderr.write(

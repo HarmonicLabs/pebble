@@ -14,7 +14,7 @@ import { MatchStmt } from "../../../../ast/nodes/statements/MatchStmt";
 import { BodyStmt } from "../../../../ast/nodes/statements/PebbleStmt";
 import { ReturnStmt } from "../../../../ast/nodes/statements/ReturnStmt";
 import { TestStmt } from "../../../../ast/nodes/statements/TestStmt";
-import { UsingStmt } from "../../../../ast/nodes/statements/UsingStmt";
+import { UsingAliasStmt, UsingStmt } from "../../../../ast/nodes/statements/UsingStmt";
 import { VarStmt } from "../../../../ast/nodes/statements/VarStmt";
 import { WhileStmt } from "../../../../ast/nodes/statements/WhileStmt";
 import { TirStmt } from "../../../tir/statements/TirStmt";
@@ -32,6 +32,7 @@ import { _compileIfStmt } from "./_compileIfStmt";
 import { _compileMatchStmt } from "./_compileMatchStmt";
 import { _compileReturnStmt } from "./_compileReturnStmt";
 import { _compileUsingStmt } from "./_compileUsingStmt";
+import { _compileUsingAliasStmt } from "./_compileUsingAliasStmt";
 import { _compileVarStmt } from "./_compileVarStmt";
 import { _compileWhileStmt } from "./_compileWhileStmt";
 
@@ -66,6 +67,7 @@ export function _compileStatement(
     if( isAssignmentStmt( stmt ) ) return _compileAssignmentStmt( ctx, stmt );
     // if( stmt instanceof ExprStmt ) return _compileExprStmt( ctx, stmt );
     if( stmt instanceof UsingStmt ) return _compileUsingStmt( ctx, stmt );
+    if( stmt instanceof UsingAliasStmt ) return _compileUsingAliasStmt( ctx, stmt );
 
     const tsEnsureExhautstiveCheck: never = stmt;
     console.error( stmt );

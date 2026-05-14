@@ -116,8 +116,8 @@ export function tokenFromKeyword(text: string): Token {
         case CharCode.n: {
             // if (text === "new") return Token.New;
             // if (text === "undefined") return Token.Null;
-            // if (text === "namespace") return Token.Namespace;
-            
+            if (text === "namespace") return Token.Namespace;
+
             // replaced by "int"
             // if (text === "number") return Token.Number;
             break;
@@ -128,11 +128,8 @@ export function tokenFromKeyword(text: string): Token {
             break;
         }
         case CharCode.p: {
-            // if (len === 7) {
-            //     if (text === "private") return Token.Private;
-            //     if (text === "package") return Token.Package;
-            //     break;
-            // }
+            if (text === "private") return Token.Private;
+            // if (text === "package") return Token.Package;
             // if (text === "public") return Token.Public;
             // if (text === "protected") return Token.Protected;
             if (text === "param") return Token.Param;
@@ -182,6 +179,7 @@ export function tokenFromKeyword(text: string): Token {
         }
         case CharCode.v: {
             if (text === "var") return Token.Var;
+            if (text === "via") return Token.Via;
             if (text === "void") return Token.Void;
             if (text === "vote") return Token.Vote;
             break;

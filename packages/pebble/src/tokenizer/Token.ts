@@ -42,17 +42,17 @@ export enum Token {
     Is,         // case thing is pattern => expression
     // KeyOf,
     Let,
-    // Namespace,
-    // New,          
-    // Null,         
+    Namespace,
+    // New,
+    // Null,
     Int,
     // Number,
     Of,
     // Override,
-    // Package,   
-    // Private,   
-    // Protected, 
-    // Public,    
+    // Package,
+    Private,
+    // Protected,
+    // Public,
     Readonly,
     Return,       
     // Set,
@@ -80,7 +80,8 @@ export enum Token {
 
     Case,           // case thing is Constr{} => expr is Other{} => expr else expr;
 
-    Test,           // test "name" { ... }
+    Test,           // test name( params? ) { ... }
+    Via,            // test name(a: int via someFuzzer()) { ... } — test params only
 
     Fail,       // fail ("message")?
     Assert,     // assert (condition) (else "message")?

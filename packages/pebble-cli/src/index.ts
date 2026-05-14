@@ -98,12 +98,20 @@ program.command("repl")
     .action( pebbleRepl );
 
 program.command("test [path]")
-    .description("Discover and run `test name() { ... }` blocks under [path] (default: current directory). Reports execution costs (cpu/mem) for each test.")
+    .description("Discover and run `test name() { ... }` blocks under [path] (default: current directory). Reports execution costs (cpu/mem) for each test. Property tests (params present) sample N iterations.")
     .option("-c, --config <string>", "The config file path", "./pebble.config.json")
     .option("--testPathPattern <regex>", "Run tests only in files whose path matches this regex")
     .option("-t, --testNamePattern <regex>", "Run only tests whose name matches this regex")
+    .option("--property-runs <n>", "Number of iterations per property test (default 100)")
+    .option("--seed <int>", "Seed for the property-test PRNG (default 0)")
     .action( async ( target, opts ) => {
-        await runTestsCommand( target, opts );
+        await runTestsCommand( target, {
+            config: opts.config,
+            testPathPattern: opts.testPathPattern,
+            testNamePattern: opts.testNamePattern,
+            propertyRuns: opts.propertyRuns,
+            seed: opts.seed,
+        });
     });
 
 program.parse();

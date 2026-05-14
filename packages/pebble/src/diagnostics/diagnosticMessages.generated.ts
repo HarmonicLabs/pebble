@@ -280,6 +280,11 @@ export enum DiagnosticCode {
     _super_must_be_called_before_accessing_this_in_the_constructor_of_a_derived_class = 17009,
     _super_must_be_called_before_accessing_a_property_of_super_in_the_constructor_of_a_derived_class = 17011,
     Unkonwn_AST_node = 20000,
+    Namespace_0_has_no_exported_member_1 = 30001,
+    Namespace_path_is_incomplete = 30002,
+    Private_modifier_only_allowed_inside_namespace = 30003,
+    Namespaces_cannot_be_declared_here = 30004,
+    _0_is_not_a_namespace = 30005,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -564,6 +569,11 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 17009: return "'super' must be called before accessing 'this' in the constructor of a derived class.";
         case 17011: return "'super' must be called before accessing a property of 'super' in the constructor of a derived class.";
         case 20000: return "Unkonwn AST node.";
+        case 30001: return "Namespace '{0}' has no exported member '{1}'.";
+        case 30002: return "Namespace path is incomplete; expected a value, type, function, or interface.";
+        case 30003: return "'private' modifier is only allowed on declarations inside a namespace.";
+        case 30004: return "Namespaces cannot be declared here.";
+        case 30005: return "'{0}' is not a namespace.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

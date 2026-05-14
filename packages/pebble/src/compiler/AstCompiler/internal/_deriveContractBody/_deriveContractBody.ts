@@ -50,7 +50,7 @@ import { MatchStmtCase, MatchStmt, MatchStmtElseCase } from "../../../../ast/nod
 import { BodyStmt } from "../../../../ast/nodes/statements/PebbleStmt";
 import { ReturnStmt } from "../../../../ast/nodes/statements/ReturnStmt";
 import { TraceStmt } from "../../../../ast/nodes/statements/TraceStmt";
-import { UsingStmt } from "../../../../ast/nodes/statements/UsingStmt";
+import { UsingAliasStmt, UsingStmt } from "../../../../ast/nodes/statements/UsingStmt";
 import { VarStmt } from "../../../../ast/nodes/statements/VarStmt";
 import { WhileStmt } from "../../../../ast/nodes/statements/WhileStmt";
 import { SourceRange } from "../../../../ast/Source/SourceRange";
@@ -785,6 +785,7 @@ function _getMatchedRedeemerBlockStatements(
             || stmt instanceof ContinueStmt
             || stmt instanceof EmptyStmt
             || stmt instanceof UsingStmt
+            || stmt instanceof UsingAliasStmt
         ) continue;
 
         if( isImplicitAssignmentStmt( stmt ) ) continue;

@@ -22,11 +22,12 @@ import { WhileStmt } from "./WhileStmt";
 import { AssignmentStmt, isAssignmentStmt } from "./AssignmentStmt";
 import { IncrStmt } from "./IncrStmt";
 import { DecrStmt } from "./DecrStmt";
-import { UsingStmt } from "./UsingStmt";
+import { UsingAliasStmt, UsingStmt } from "./UsingStmt";
 import { FuncDecl } from "./declarations/FuncDecl";
 import { ExportStmt } from "./ExportStmt";
 import { InterfaceDecl } from "./declarations/InterfaceDecl";
 import { ContractDecl } from "./declarations/ContractDecl";
+import { NamespaceDecl } from "./declarations/NamespaceDecl";
 import { TraceStmt } from "./TraceStmt";
 
 /* *
@@ -124,6 +125,8 @@ export type TopLevelStmt
     | ImportStarStmt
     | TypeImplementsStmt
     | UsingStmt
+    | UsingAliasStmt
+    | NamespaceDecl
     | ContractDecl
     ;
 
@@ -142,6 +145,8 @@ export function isTopLevelStmt( stmt: any ): stmt is TopLevelStmt
         || stmt instanceof ImportStarStmt
         || stmt instanceof TypeImplementsStmt
         || stmt instanceof UsingStmt
+        || stmt instanceof UsingAliasStmt
+        || stmt instanceof NamespaceDecl
         || stmt instanceof ContractDecl
     );
 }
@@ -164,6 +169,7 @@ export type BodyStmt
     | AssignmentStmt
     // | ExprStmt // function calls with native side effects (error and/or traces)
     | UsingStmt
+    | UsingAliasStmt
     ;
 
 export function isBodyStmt( stmt: any ): stmt is BodyStmt
@@ -189,5 +195,6 @@ export function isBodyStmt( stmt: any ): stmt is BodyStmt
         || stmt instanceof IncrStmt
         || stmt instanceof DecrStmt
         || stmt instanceof UsingStmt
+        || stmt instanceof UsingAliasStmt
     );
 }

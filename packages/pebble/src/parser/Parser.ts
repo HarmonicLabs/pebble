@@ -49,6 +49,7 @@ import { FailStmt } from "../ast/nodes/statements/FailStmt";
 import { TraceStmt } from "../ast/nodes/statements/TraceStmt";
 import { AssertStmt } from "../ast/nodes/statements/AssertStmt";
 import { TestStmt } from "../ast/nodes/statements/TestStmt";
+import { TestParam } from "../ast/nodes/statements/TestParam";
 import { MatchStmt, MatchStmtCase, MatchStmtElseCase } from "../ast/nodes/statements/MatchStmt";
 import { WhileStmt } from "../ast/nodes/statements/WhileStmt";
 import { CaseExpr, CaseExprMatcher, CaseWildcardMatcher } from "../ast/nodes/expr/CaseExpr";
@@ -71,7 +72,8 @@ import { makeBinaryExpr } from "../ast/nodes/expr/binary/BinaryExpr";
 import { AssignmentStmt, isAssignmentStmt, makeAssignmentStmt } from "../ast/nodes/statements/AssignmentStmt";
 import { AstTypeExpr } from "../ast/nodes/types/AstTypeExpr";
 import { hoistStatementsInplace } from "./hoistStatementsInplace";
-import { UsingStmt, UsingStmtDeclaredConstructor } from "../ast/nodes/statements/UsingStmt";
+import { UsingAliasStmt, UsingPath, UsingRhs, UsingStmt, UsingStmtDeclaredConstructor } from "../ast/nodes/statements/UsingStmt";
+import { NamespaceDecl, NamespaceMember, NamespaceMemberStmt } from "../ast/nodes/statements/declarations/NamespaceDecl";
 import { IncrStmt } from "../ast/nodes/statements/IncrStmt";
 import { DecrStmt } from "../ast/nodes/statements/DecrStmt";
 import { ExportStmt } from "../ast/nodes/statements/ExportStmt";
@@ -210,7 +212,13 @@ export class Parser extends DiagnosticEmitter
                 break;
             }
             case Token.Using: {
+                tn.next(); // skip `using`
                 statement = this.parseUsingDecl();
+                break;
+            }
+            case Token.Namespace: {
+                tn.next(); // skip `namespace`
+                statement = this.parseNamespaceDecl( startPos );
                 break;
             }
             case Token.Enum: {
@@ -546,16 +554,37 @@ export class Parser extends DiagnosticEmitter
             tn.range( startPos, tn.pos )
         );
     }
-    parseUsingDecl(): UsingStmt | undefined
+    parseUsingDecl(): UsingStmt | UsingAliasStmt | undefined
     {
         const tn = this.tn;
         const startPos = tn.tokenPos;
 
-        if( !tn.skip( Token.OpenBrace ) ) return this.error(
-            DiagnosticCode._0_expected,
-            tn.range(), "{"
-        );
+        // alias form: `using <ident> = <NamespacePath>;`
+        if( !tn.skip( Token.OpenBrace ) )
+        {
+            if( !tn.skipIdentifier() ) return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), "{"
+            );
 
+            const alias = new Identifier( tn.readIdentifier(), tn.range() );
+
+            if( !tn.skip( Token.Equals ) ) return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), "="
+            );
+
+            const path = this.parseUsingPath();
+            if( !path ) return undefined;
+
+            return new UsingAliasStmt(
+                alias,
+                path,
+                tn.range( startPos, tn.pos )
+            );
+        }
+
+        // destructure form: `using { a, b: c } = <rhs>;`
         const members = new Array<UsingStmtDeclaredConstructor>();
         while( !tn.skip( Token.CloseBrace ) )
         {
@@ -599,14 +628,235 @@ export class Parser extends DiagnosticEmitter
             tn.range(), "="
         );
 
-        const structTypeExpr = this.parseTypeExpr();
-        if( !structTypeExpr ) return undefined;
+        const rhs = this.parseUsingRhs();
+        if( !rhs ) return undefined;
 
         return new UsingStmt(
             members,
-            structTypeExpr,
+            rhs,
             tn.range( startPos, tn.pos )
         );
+    }
+
+    /**
+     * parse a dotted chain of identifiers: `A`, `A.B`, `A.B.C`, ...
+     * used for namespace paths on the RHS of `using` statements.
+     */
+    parseUsingPath(): UsingPath | undefined
+    {
+        const tn = this.tn;
+        const startPos = tn.tokenPos;
+
+        if( !tn.skipIdentifier() ) return this.error(
+            DiagnosticCode.Identifier_expected,
+            tn.range()
+        );
+
+        const segments: Identifier[] = [
+            new Identifier( tn.readIdentifier(), tn.range() )
+        ];
+
+        while( tn.skip( Token.Dot ) )
+        {
+            if( !tn.skipIdentifier() ) return this.error(
+                DiagnosticCode.Identifier_expected,
+                tn.range()
+            );
+            segments.push( new Identifier( tn.readIdentifier(), tn.range() ) );
+        }
+
+        return new UsingPath( segments, tn.range( startPos, tn.pos ) );
+    }
+
+    /**
+     * parse the RHS of `using { ... } = <rhs>;`:
+     *  - if it begins with a native type keyword (or a generic struct
+     *    with type args), it's parsed as `AstTypeExpr` (legacy
+     *    struct-destructure behavior)
+     *  - if it's a single identifier followed by `<`, it's also parsed as
+     *    a generic type expression
+     *  - otherwise, it's parsed as a dotted `UsingPath`
+     *    (a namespace path; the compiler decides whether it's a struct
+     *    type or a namespace based on what the head identifier resolves to)
+     */
+    parseUsingRhs(): UsingRhs | undefined
+    {
+        const tn = this.tn;
+        const next = tn.peek();
+
+        // native type keywords always go through parseTypeExpr
+        if(
+            next === Token.Void
+            || next === Token.Boolean
+            || next === Token.Int
+            || next === Token.Bytes
+            || next === Token.Optional
+            || next === Token.List
+            || next === Token.LinearMap
+        ) {
+            const t = this.parseTypeExpr();
+            if( !t ) return undefined;
+            return t;
+        }
+
+        const path = this.parseUsingPath();
+        if( !path ) return undefined;
+
+        // single-segment path followed by `<...>` → generic struct type expression
+        if(
+            path.segments.length === 1
+            && tn.peek() === Token.LessThan
+        ) {
+            tn.next(); // consume `<`
+            const tyArgs: AstTypeExpr[] = [];
+            do {
+                const ty = this.parseTypeExpr();
+                if( !ty ) return undefined;
+                tyArgs.push( ty );
+            } while( tn.skip( Token.Comma ) );
+
+            if( !tn.skip( Token.GreaterThan ) ) return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), ">"
+            );
+
+            return new AstNamedTypeExpr(
+                path.segments[0],
+                tyArgs,
+                tn.range( path.range.start, tn.pos )
+            );
+        }
+
+        return path;
+    }
+
+    /**
+     * parse a namespace body: `{ (private? <member-decl>)* }`
+     *
+     * called with `namespace` already consumed; `startPos` is the position
+     * of the `namespace` keyword.
+     */
+    parseNamespaceDecl( startPos: number ): NamespaceDecl | undefined
+    {
+        const tn = this.tn;
+
+        if( !tn.skipIdentifier() ) return this.error(
+            DiagnosticCode.Identifier_expected,
+            tn.range()
+        );
+        const name = new Identifier( tn.readIdentifier(), tn.range() );
+
+        if( !tn.skip( Token.OpenBrace ) ) return this.error(
+            DiagnosticCode._0_expected,
+            tn.range(), "{"
+        );
+
+        const members: NamespaceMember[] = [];
+        while( !tn.skip( Token.CloseBrace ) )
+        {
+            tn.skip( Token.Semicolon );
+            if( tn.skip( Token.CloseBrace ) ) break;
+
+            const memberStartPos = tn.tokenPos;
+            const isPrivate = tn.skip( Token.Private );
+
+            const member = this.parseNamespaceMember();
+            if( !member ) return undefined;
+
+            members.push( new NamespaceMember(
+                isPrivate,
+                member,
+                tn.range( memberStartPos, tn.pos )
+            ) );
+
+            tn.skip( Token.Semicolon );
+        }
+
+        return new NamespaceDecl(
+            name,
+            members,
+            tn.range( startPos, tn.pos )
+        );
+    }
+
+    /**
+     * parse a single namespace body member. delegates to the relevant
+     * top-level-style parser based on the next token, but rejects
+     * declarations that aren't allowed inside a namespace body
+     * (no `export`, no `import`, no `using`, no `contract`, no `test`).
+     */
+    parseNamespaceMember(): NamespaceMemberStmt | undefined
+    {
+        const tn = this.tn;
+        const startPos = tn.tokenPos;
+        const flags = CommonFlags.None;
+        const first = tn.peek();
+
+        switch( first )
+        {
+            case Token.Namespace: {
+                tn.next();
+                return this.parseNamespaceDecl( startPos );
+            }
+            case Token.Function: {
+                tn.next();
+                return this.parseFuncDecl( flags, startPos );
+            }
+            case Token.Interface: {
+                tn.next();
+                return this.parseInterface( flags, startPos );
+            }
+            case Token.Var:
+            case Token.Let:
+            case Token.Const: {
+                tn.next();
+                return this.parseVarStmt(
+                    first === Token.Const ? CommonFlags.Const : CommonFlags.Let,
+                    startPos
+                );
+            }
+            case Token.Enum: {
+                tn.next();
+                return this.parseEnum( flags, startPos );
+            }
+            case Token.Struct: {
+                tn.next();
+                return this.parseStruct( StructDeclAstFlags.none, flags, startPos );
+            }
+            case Token.Data: {
+                tn.next();
+                if( tn.peek() !== Token.Struct ) return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "struct"
+                );
+                tn.next();
+                return this.parseStruct( StructDeclAstFlags.onlyDataEncoding, flags, startPos );
+            }
+            case Token.Runtime: {
+                tn.next();
+                if( tn.peek() !== Token.Struct ) return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "struct"
+                );
+                tn.next();
+                return this.parseStruct( StructDeclAstFlags.onlySopEncoding, flags, startPos );
+            }
+            case Token.Type: {
+                tn.next();
+                const stmt = this.parseTypeStmt( flags, startPos );
+                if( !stmt ) return undefined;
+                if( !( stmt instanceof TypeAliasDecl ) ) return this.error(
+                    DiagnosticCode._0_expected,
+                    stmt.range, "type alias declaration"
+                );
+                return stmt;
+            }
+            default:
+                return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "namespace member declaration"
+                );
+        }
     }
 
     parseTypeParameters(): Identifier[] | undefined
@@ -3688,7 +3938,7 @@ export class Parser extends DiagnosticEmitter
     parseTestStatement(): TestStmt | undefined
     {
         const tn = this.tn;
-        // at 'test': Identifier '(' Parameters? ')' BlockStmt
+        // at 'test': Identifier '(' TestParam (',' TestParam)* ')' '{' BlockStmt
 
         const startPos = tn.pos;
 
@@ -3705,11 +3955,8 @@ export class Parser extends DiagnosticEmitter
             tn.range(), "("
         );
 
-        const params = this.parseParameters();
+        const params = this.parseTestParameters();
         if( !params ) return undefined;
-
-        // property-based tests (params.length > 0) are accepted by the parser
-        // but rejected by the executor with a "not yet supported" TestResult.
 
         if( !tn.skip( Token.OpenBrace ) )
         return this.error(
@@ -3730,6 +3977,65 @@ export class Parser extends DiagnosticEmitter
             body,
             tn.range( startPos, tn.pos )
         );
+    }
+
+    /**
+     * Parses the parameter list of a `test` declaration:
+     * `( <id>: <type> ('via' <expr>)? (, <id>: <type> ('via' <expr>)? )* )?`
+     *
+     * Assumes the opening `(` has already been consumed by the caller.
+     * Consumes the closing `)` on success.
+     *
+     * `via` is recognised here ONLY — function/method/contract parameter
+     * parsing uses `parseParameters()` which never looks for `Token.Via`.
+     */
+    parseTestParameters(): TestParam[] | undefined
+    {
+        const tn = this.tn;
+        const params: TestParam[] = [];
+
+        if( tn.skip( Token.CloseParen ) ) return params;
+
+        while( true )
+        {
+            const paramStart = tn.pos;
+
+            if( !tn.skipIdentifier() )
+            return this.error(
+                DiagnosticCode.Identifier_expected,
+                tn.range()
+            );
+            const name = new Identifier( tn.readIdentifier(), tn.range() );
+
+            if( !tn.skip( Token.Colon ) )
+            return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), ":"
+            );
+
+            const type = this.parseTypeExpr();
+            if( !type ) return undefined;
+
+            let viaExpr: import("../ast/nodes/expr/PebbleExpr").PebbleExpr | undefined = undefined;
+            if( tn.skip( Token.Via ) )
+            {
+                const expr = this.parseExpr();
+                if( !expr ) return undefined;
+                viaExpr = expr;
+            }
+
+            params.push( new TestParam( name, type, viaExpr, tn.range( paramStart, tn.pos ) ) );
+
+            if( tn.skip( Token.Comma ) ) continue;
+            if( tn.skip( Token.CloseParen ) ) break;
+
+            return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), ")"
+            );
+        }
+
+        return params;
     }
 
     parseMatchStatement(): MatchStmt | undefined

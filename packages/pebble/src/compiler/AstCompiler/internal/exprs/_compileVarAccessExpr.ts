@@ -12,6 +12,12 @@ export function _compileVarAccessExpr(
 {
     const resolvedValue = ctx.scope.resolveValue( expr.text );
     if( !resolvedValue ) {
+        if( ctx.scope.resolveNamespace( expr.text ) )
+        return ctx.error(
+            DiagnosticCode.Namespace_path_is_incomplete,
+            expr.range
+        );
+
         console.trace( ctx.scope.allVariables(), expr.text );
         return ctx.error(
             DiagnosticCode._0_is_not_defined,
