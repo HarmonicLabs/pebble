@@ -9,6 +9,7 @@ import { completeExportOptions } from "./export/completeExportOptions";
 import { exportPebbleFunction } from "./export/exportPebbleFunction";
 import { prettyPrintUplcFromFile } from "./uplc/pretty/prettyPrintUplcFromFile";
 import { pebbleRepl } from "./repl/pebbleRepl";
+import { runTestsCommand } from "./test/runTestsCommand";
 
 const program = new Command();
 
@@ -95,5 +96,14 @@ defineVersionManager( program );
 program.command("repl")
     .description("Start an interactive Pebble REPL")
     .action( pebbleRepl );
+
+program.command("test [path]")
+    .description("Discover and run `test name() { ... }` blocks under [path] (default: current directory). Reports execution costs (cpu/mem) for each test.")
+    .option("-c, --config <string>", "The config file path", "./pebble.config.json")
+    .option("--testPathPattern <regex>", "Run tests only in files whose path matches this regex")
+    .option("-t, --testNamePattern <regex>", "Run only tests whose name matches this regex")
+    .action( async ( target, opts ) => {
+        await runTestsCommand( target, opts );
+    });
 
 program.parse();

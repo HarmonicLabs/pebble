@@ -6,6 +6,7 @@ import { TirExpr } from "../expressions/TirExpr";
 import { TirFuncExpr } from "../expressions/TirFuncExpr";
 import { TirInlineClosedIR } from "../expressions/TirInlineClosedIR";
 import { TirSimpleVarDecl } from "../statements/TirVarDecl/TirSimpleVarDecl";
+import { TirTestStmt } from "../statements/TirTestStmt";
 import { isTirType, TirType } from "../types/TirType";
 import { populatePreludeScope, populateStdScope } from "./stdScope/stdScope";
 import { StdTypes } from "./stdScope/StdTypes";
@@ -28,6 +29,9 @@ export class TypedProgram extends DiagnosticEmitter
 
     readonly types: Map<string, TirType>;
     private readonly genericTypes: Map<string, IGenericType>;
+
+    /** Top-level `test name() { ... }` declarations collected from the entry file. */
+    readonly tests: TirTestStmt[];
 
     /** main */
     public contractTirFuncName: string = "";
@@ -58,6 +62,8 @@ export class TypedProgram extends DiagnosticEmitter
         
         this.types = new Map();
         this.genericTypes = new Map();
+
+        this.tests = [];
 
         this.filePrefix = new Map();
 

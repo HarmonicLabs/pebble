@@ -3688,18 +3688,36 @@ export class Parser extends DiagnosticEmitter
     parseTestStatement(): TestStmt | undefined
     {
         const tn = this.tn;
-        // at 'test': string? BlockStmt
+        // at 'test': Identifier '(' Parameters? ')' BlockStmt
 
-        const startPost = tn.pos;
+        const startPos = tn.pos;
 
-        let testName: LitStrExpr | undefined = undefined;
-        if( tn.skip( Token.StringLiteral ) ) 
-        {
-            const value = tn.readString();
-            testName = new LitStrExpr( value, tn.range( startPost, tn.pos ) );
-        }
+        if( !tn.skipIdentifier() )
+        return this.error(
+            DiagnosticCode.Identifier_expected,
+            tn.range()
+        );
+        const testName = new Identifier( tn.readIdentifier(), tn.range() );
 
-        let body = this.parseBlockStmt( true );
+        if( !tn.skip( Token.OpenParen ) )
+        return this.error(
+            DiagnosticCode._0_expected,
+            tn.range(), "("
+        );
+
+        const params = this.parseParameters();
+        if( !params ) return undefined;
+
+        // property-based tests (params.length > 0) are accepted by the parser
+        // but rejected by the executor with a "not yet supported" TestResult.
+
+        if( !tn.skip( Token.OpenBrace ) )
+        return this.error(
+            DiagnosticCode.Tests_must_be_specified_in_a_block_statement,
+            tn.range()
+        );
+
+        let body = this.parseBlockStmt();
         if( !body )
         return this.error(
             DiagnosticCode.Tests_must_be_specified_in_a_block_statement,
@@ -3708,8 +3726,9 @@ export class Parser extends DiagnosticEmitter
 
         return new TestStmt(
             testName,
+            params,
             body,
-            tn.range( startPost, tn.pos )
+            tn.range( startPos, tn.pos )
         );
     }
 

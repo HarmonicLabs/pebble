@@ -48,8 +48,10 @@ import { _deriveContractBody } from "./internal/_deriveContractBody/_deriveContr
 import { DiagnosticCategory } from "../../diagnostics/DiagnosticCategory";
 import { VarStmt } from "../../ast/nodes/statements/VarStmt";
 import { _compileSimpleVarDecl } from "./internal/statements/_compileVarStmt";
+import { _compileTestStmt } from "./internal/statements/_compileTestStmt";
 import { SourceTypeMap, CheckResult } from "../SourceTypeMap";
 import { isIdentifier } from "../../utils/text";
+import { TestStmt } from "../../ast/nodes/statements/TestStmt";
 
 export interface AstTypeDefCompilationResult {
     sop: TirType | undefined,
@@ -423,6 +425,25 @@ export class AstCompiler extends DiagnosticEmitter
                 exported = true;
                 exportRange = stmt.range;
                 stmt = stmt.stmt;
+            }
+
+            if( stmt instanceof TestStmt )
+            {
+                if( isEntryFile )
+                {
+                    const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
+                    _compileTestStmt(
+                        declContext,
+                        stmt,
+                        srcUid,
+                        this.cfg.entry
+                    );
+                }
+                // tests from non-entry files are dropped on the floor:
+                // they will be collected when their own file is the entry.
+                void stmts.splice( i, 1 );
+                i--;
+                continue;
             }
 
             if(!(

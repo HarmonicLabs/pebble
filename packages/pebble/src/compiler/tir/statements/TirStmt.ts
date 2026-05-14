@@ -61,7 +61,6 @@ export type TirStmt
     | TirFailStmt
     | TirAssertStmt
     | TirTraceStmt
-    // | TirTestStmt
     | TirMatchStmt
     | TirAssignmentStmt
     // | TirExprStmt
@@ -82,7 +81,6 @@ export function isTirStmt( thing: any ): thing is TirStmt
         || thing instanceof TirFailStmt
         || thing instanceof TirAssertStmt
         || thing instanceof TirTraceStmt
-        // || thing instanceof TirTestStmt
         || thing instanceof TirMatchStmt
         || thing instanceof TirAssignmentStmt
         // || thing instanceof TirExprStmt
