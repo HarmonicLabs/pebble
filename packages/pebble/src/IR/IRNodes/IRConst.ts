@@ -17,7 +17,7 @@ import { TirDataStructType, TirSoPStructType } from "../../compiler/tir/types/Ti
 import { getListTypeArg } from "../../compiler/tir/types/utils/getListTypeArg";
 import { TirTypeParam } from "../../compiler/tir/types/TirTypeParam";
 import { constT, ConstType, isPair, UPLCConst } from "@harmoniclabs/uplc";
-import { TirPairDataT, TirUnConstrDataResultT } from "../../compiler/tir/types/TirNativeType";
+import { TirBlsG1T, TirBlsG2T, TirMlResultT, TirPairDataT, TirUnConstrDataResultT } from "../../compiler/tir/types/TirNativeType";
 import { TirBoolT } from "../../compiler/tir/types/TirNativeType/native/bool";
 import { TirBytesT } from "../../compiler/tir/types/TirNativeType/native/bytes";
 import { TirDataT } from "../../compiler/tir/types/TirNativeType/native/data";
@@ -266,6 +266,13 @@ function isValueAssignableToType( value: IRConstValue, type: TirType ): boolean
 
     if( type instanceof TirLinearMapEntryT ) return isIRConstPair( value );
 
+    // BLS / ML-result values can't appear as constants in user Pebble code
+    if(
+        type instanceof TirBlsG1T
+        || type instanceof TirBlsG2T
+        || type instanceof TirMlResultT
+    ) return false;
+
     const tsEnsureExsaustiveCheck: never = type;
     return false;
 }
@@ -348,6 +355,9 @@ function serializeIRConstValue( value: any, type: TirType ): Uint8Array
         || type instanceof TirLinearMapEntryT
         || type instanceof TirSoPStructType
         || type instanceof TirTypeParam
+        || type instanceof TirBlsG1T
+        || type instanceof TirBlsG2T
+        || type instanceof TirMlResultT
     ) throw new Error("invalid uplc const type");
 
     const tsEnsureExsaustiveCheck: never = type;
@@ -407,6 +417,9 @@ export function tirTypeToUplcType( t: TirType ): ConstType
         || t instanceof TirSopOptT
         || t instanceof TirSoPStructType
         || t instanceof TirTypeParam
+        || t instanceof TirBlsG1T
+        || t instanceof TirBlsG2T
+        || t instanceof TirMlResultT
     ) throw new Error("invalid uplc const type");
 
     const tsEnsureExsaustiveCheck: never = t;

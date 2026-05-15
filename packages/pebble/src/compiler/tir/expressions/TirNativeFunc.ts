@@ -6,7 +6,7 @@ import type { IRTerm } from "../../../IR/IRTerm";
 import { bool_t, bytes_t, data_t, int_t, void_t } from "../program/stdScope/stdScope";
 import { TirType } from "../types/TirType";
 import { ToIRTermCtx } from "./ToIRTermCtx";
-import { TirUnConstrDataResultT, TirPairDataT, TirIntT, TirBytesT, TirDataT, TirBoolT, TirSopOptT } from "../types/TirNativeType";
+import { TirUnConstrDataResultT, TirPairDataT, TirIntT, TirBytesT, TirDataT, TirBoolT, TirSopOptT, TirBlsG1T, TirBlsG2T, TirMlResultT } from "../types/TirNativeType";
 import { TirFuncT } from "../types/TirNativeType/native/function";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../types/TirNativeType/native/linearMapEntry";
@@ -562,111 +562,109 @@ export class TirNativeFunc
         );
     }
 
-    // BLS12-381 operations
-    /* TODO: add bls supprot
-    get bls12_381_G1_add(): TirNativeFunc {
+    // BLS12-381 operations -- now exposed under `std.crypto.bls12_381`
+    static get bls12_381_G1_add(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_add,
-            new TirFuncT([bytes_t, bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG1T(), new TirBlsG1T() ], new TirBlsG1T())
         );
     }
-    get bls12_381_G1_neg(): TirNativeFunc {
+    static get bls12_381_G1_neg(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_neg,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG1T() ], new TirBlsG1T())
         );
     }
-    get bls12_381_G1_scalarMul(): TirNativeFunc {
+    static get bls12_381_G1_scalarMul(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_scalarMul,
-            new TirFuncT([bytes_t, int_t], bytes_t)
+            new TirFuncT([ int_t, new TirBlsG1T() ], new TirBlsG1T())
         );
     }
-    get bls12_381_G1_equal(): TirNativeFunc {
+    static get bls12_381_G1_equal(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_equal,
-            new TirFuncT([bytes_t, bytes_t], bool_t)
+            new TirFuncT([ new TirBlsG1T(), new TirBlsG1T() ], bool_t)
         );
     }
-    get bls12_381_G1_hashToGroup(): TirNativeFunc {
+    static get bls12_381_G1_hashToGroup(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_hashToGroup,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ bytes_t, bytes_t ], new TirBlsG1T())
         );
     }
-    get bls12_381_G1_compress(): TirNativeFunc {
+    static get bls12_381_G1_compress(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_compress,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG1T() ], bytes_t)
         );
     }
-    get bls12_381_G1_uncompress(): TirNativeFunc {
+    static get bls12_381_G1_uncompress(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G1_uncompress,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ bytes_t ], new TirBlsG1T())
         );
     }
-    get bls12_381_G2_add(): TirNativeFunc {
+    static get bls12_381_G2_add(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_add,
-            new TirFuncT([bytes_t, bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG2T(), new TirBlsG2T() ], new TirBlsG2T())
         );
     }
-    get bls12_381_G2_neg(): TirNativeFunc {
+    static get bls12_381_G2_neg(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_neg,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG2T() ], new TirBlsG2T())
         );
     }
-    get bls12_381_G2_scalarMul(): TirNativeFunc {
+    static get bls12_381_G2_scalarMul(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_scalarMul,
-            new TirFuncT([bytes_t, int_t], bytes_t)
+            new TirFuncT([ int_t, new TirBlsG2T() ], new TirBlsG2T())
         );
     }
-    get bls12_381_G2_equal(): TirNativeFunc {
+    static get bls12_381_G2_equal(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_equal,
-            new TirFuncT([bytes_t, bytes_t], bool_t)
+            new TirFuncT([ new TirBlsG2T(), new TirBlsG2T() ], bool_t)
         );
     }
-    get bls12_381_G2_hashToGroup(): TirNativeFunc {
+    static get bls12_381_G2_hashToGroup(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_hashToGroup,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ bytes_t, bytes_t ], new TirBlsG2T())
         );
     }
-    get bls12_381_G2_compress(): TirNativeFunc {
+    static get bls12_381_G2_compress(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_compress,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG2T() ], bytes_t)
         );
     }
-    get bls12_381_G2_uncompress(): TirNativeFunc {
+    static get bls12_381_G2_uncompress(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_G2_uncompress,
-            new TirFuncT([bytes_t], bytes_t)
+            new TirFuncT([ bytes_t ], new TirBlsG2T())
         );
     }
-    get bls12_381_millerLoop(): TirNativeFunc {
+    static get bls12_381_millerLoop(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_millerLoop,
-            new TirFuncT([bytes_t, bytes_t], bytes_t)
+            new TirFuncT([ new TirBlsG1T(), new TirBlsG2T() ], new TirMlResultT())
         );
     }
-    get bls12_381_mulMlResult(): TirNativeFunc {
+    static get bls12_381_mulMlResult(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_mulMlResult,
-            new TirFuncT([bytes_t, bytes_t], bytes_t)
+            new TirFuncT([ new TirMlResultT(), new TirMlResultT() ], new TirMlResultT())
         );
     }
-    get bls12_381_finalVerify(): TirNativeFunc {
+    static get bls12_381_finalVerify(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag.bls12_381_finalVerify,
-            new TirFuncT([bytes_t, bytes_t], bool_t)
+            new TirFuncT([ new TirMlResultT(), new TirMlResultT() ], bool_t)
         );
     }
-    //*/
 
     // Additional hashing functions
     static get keccak_256(): TirNativeFunc {

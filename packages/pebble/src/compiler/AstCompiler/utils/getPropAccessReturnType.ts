@@ -7,7 +7,7 @@ import { TirTypeParam } from "../../tir/types/TirTypeParam";
 import { int_t, bytes_t, bool_t, string_t } from "../../tir/program/stdScope/stdScope";
 import { AstCompilationCtx } from "../AstCompilationCtx";
 import { AstFuncName, TirFuncName } from "../scope/AstScope";
-import { TirUnConstrDataResultT, TirPairDataT } from "../../tir/types/TirNativeType";
+import { TirBlsG1T, TirBlsG2T, TirMlResultT, TirUnConstrDataResultT, TirPairDataT } from "../../tir/types/TirNativeType";
 import { TirBoolT } from "../../tir/types/TirNativeType/native/bool";
 import { TirBytesT } from "../../tir/types/TirNativeType/native/bytes";
 import { TirDataT } from "../../tir/types/TirNativeType/native/data";
@@ -42,6 +42,28 @@ export function getPropAccessReturnType(
     }
     // if( objType instanceof TirAliasType ) return findPropInImpls( objType.impls, propName ) ?? getPropAccessReturnType( objType.aliased, propId );
 
+    // Universal `.show()` — every (built-in) type implementing the Show
+    // interface has signature `(): bytes`. Struct types fall through to
+    // `getStructPropAccessReturnType`, which checks user-declared
+    // `type X implements Show { ... }` impls first; if absent, the
+    // expressify-time fallback emits a TirShowExpr that auto-derives via
+    // `_showIR` (e.g. for data-encoded structs).
+    if( propName === "show" )
+    {
+        if(
+            objType instanceof TirVoidT
+            || objType instanceof TirBoolT
+            || objType instanceof TirIntT
+            || objType instanceof TirBytesT
+            || objType instanceof TirStringT
+            || objType instanceof TirDataT
+            || objType instanceof TirListT
+            || objType instanceof TirLinearMapT
+            || isTirOptType( objType )
+        )
+        return new TirFuncT([], bytes_t );
+    }
+
     if( isTirStructType( objType ) ) return getStructPropAccessReturnType( ctx, objType, propName );
     if( objType instanceof TirVoidT ) return undefined;
     if( objType instanceof TirBoolT ) return undefined;
@@ -60,6 +82,9 @@ export function getPropAccessReturnType(
     if( objType instanceof TirLinearMapT ) return getLinearMapMethods( objType.keyTypeArg, objType.valTypeArg )[propName];
     if( objType instanceof TirUnConstrDataResultT ) return undefined;
     if( objType instanceof TirPairDataT ) return undefined;
+    if( objType instanceof TirBlsG1T ) return undefined;
+    if( objType instanceof TirBlsG2T ) return undefined;
+    if( objType instanceof TirMlResultT ) return undefined;
 
     const tsEnsureExhaustiveCheck: never = objType;
     console.error( objType );

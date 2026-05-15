@@ -3,7 +3,9 @@ import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
 import { DiagnosticCategory } from "../diagnostics/DiagnosticCategory";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
-import { CompilerOptions, defaultOptions } from "../IR/toUPLC/CompilerOptions";
+import { CompilerOptions } from "../IR/toUPLC/CompilerOptions";
+import { COMPILER_VERSION } from "../version.generated";
+import { semverSatisfies } from "../utils/semverSatisfies";
 import { AstCompiler } from "./AstCompiler/AstCompiler";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "./io/CompilerIoApi";
 import { compileTypedProgram } from "./TirCompiler/compileTirProgram";
@@ -44,11 +46,25 @@ export class Compiler
 {
     constructor(
         readonly io: CompilerIoApi = createMemoryCompilerIoApi({ useConsoleAsOutput: true }),
-        readonly cfg: CompilerOptions = defaultOptions,
+        readonly cfg: CompilerOptions,
         diagnostics?: DiagnosticMessage[]
     )
     {
         super( diagnostics );
+        const range = (cfg as Partial<CompilerOptions> | undefined)?.compilerVersion;
+        if( typeof range !== "string" || range.length === 0 ) {
+            throw new Error(
+                `Pebble compiler config is missing "compilerVersion". ` +
+                `Starting from @harmoniclabs/pebble@0.2.0 this field is required ` +
+                `and must be an npm-style semver range (e.g. "^0.2.0").`
+            );
+        }
+        if( !semverSatisfies( COMPILER_VERSION, range ) ) {
+            throw new Error(
+                `Pebble compiler version ${COMPILER_VERSION} does not satisfy ` +
+                `the configured "compilerVersion" range "${range}".`
+            );
+        }
         if( cfg.silent === true ) {
             this.io.stdout = { write() {} };
         }

@@ -9,4 +9,6 @@ export * from "./IR";
 export * from "./tokenizer";
 export * from "./parser";
 export * from "./compiler";
+export * from "./version.generated";
+export * from "./utils/semverSatisfies";
 // export * from "./ast";

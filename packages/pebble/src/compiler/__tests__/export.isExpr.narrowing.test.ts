@@ -16,13 +16,13 @@ async function exportFunction(srcText: string, functionName: string): Promise<UP
     await jest.isolateModulesAsync(async () => {
         const { Compiler } = require("../Compiler");
         const { createMemoryCompilerIoApi } = require("../io/CompilerIoApi");
-        const { testOptions } = require("../../IR");
+        const { testOptions, COMPILER_VERSION } = require("../../IR");
 
         const ioApi = createMemoryCompilerIoApi({
             sources: new Map([["test.pebble", fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.export({ functionName, entry: "test.pebble", root: "/" });
         diagnosticsLength = compiler.diagnostics.length;

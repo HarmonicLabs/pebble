@@ -8,14 +8,14 @@ async function compileSrc(srcText: string): Promise<{ diagnostics: any[], output
     await jest.isolateModulesAsync(async () => {
         const { Compiler } = require("../Compiler");
         const { createMemoryCompilerIoApi } = require("../io/CompilerIoApi");
-        const { testOptions } = require("../../IR/toUPLC/CompilerOptions");
+        const { testOptions, COMPILER_VERSION } = require("../../IR/toUPLC/CompilerOptions");
 
         const fileName = "test.pebble";
         const ioApi = createMemoryCompilerIoApi({
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler( ioApi, testOptions );
+        const compiler = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
         try {
             await compiler.compile({ entry: fileName, root: "/" });
         } catch {

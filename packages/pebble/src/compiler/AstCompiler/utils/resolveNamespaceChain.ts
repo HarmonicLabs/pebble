@@ -80,7 +80,7 @@ export function tryResolveNamespaceChain(
             {
                 // function-typed member can't be further dotted
                 ctx.error(
-                    DiagnosticCode.Namespace_path_is_incomplete,
+                    DiagnosticCode.Namespace_path_is_incomplete_expected_a_value_type_function_or_interface,
                     seg.range
                 );
                 return { kind: "incomplete" };
@@ -115,7 +115,7 @@ export function tryResolveNamespaceChain(
         if( pub.types.has( name ) || pub.interfaces.has( name ) )
         {
             ctx.error(
-                DiagnosticCode.Namespace_path_is_incomplete,
+                DiagnosticCode.Namespace_path_is_incomplete_expected_a_value_type_function_or_interface,
                 seg.range
             );
             return { kind: "incomplete" };

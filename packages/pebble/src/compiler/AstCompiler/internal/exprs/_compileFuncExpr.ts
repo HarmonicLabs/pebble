@@ -123,11 +123,16 @@ export function _compileFuncExpr(
     });
 
     // if( _hasDuplicateTypeParams( ctx, expr.typeParams ) ) return undefined;
+    // Generic functions are compiled per-instantiation by `monomorphizeGeneric`.
+    // The cloned `FuncExpr` it produces has `typeParams = []`, so we only need
+    // to refuse the (rare) case where someone directly calls `_compileFuncExpr`
+    // on a still-generic AST node (e.g. an anonymous lambda annotated with type
+    // params, which is not supported yet).
     if( expr.typeParams.length > 0 )
     return ctx.error(
         DiagnosticCode.Not_implemented_0,
         expr.typeParams[0].range,
-        "generic functions"
+        "generic lambda expressions (top-level generic functions are supported)"
     );
 
     const destructuredParamsResult = _getDestructuredParamsAsVarDecls(
@@ -208,11 +213,13 @@ function _compileFuncExprInferReturnType(
         isConstant: true,
     });
 
+    // Inferred-return-type variant: generics are not supported here because
+    // signature inference depends on knowing the type-param substitution.
     if( expr.typeParams.length > 0 )
     return ctx.error(
         DiagnosticCode.Not_implemented_0,
         expr.typeParams[0].range,
-        "generic functions"
+        "generic functions with inferred return type — annotate the return type"
     );
 
     const destructuredParamsResult = _getDestructuredParamsAsVarDecls(
@@ -382,10 +389,9 @@ export function getDataFuncSignature(
         signature.returnType
     );
 
-    if(
-        !returnType
-        || returnType instanceof TirTypeParam
-    ) return undefined;
+    if( !returnType ) return undefined;
+    // NOTE: a bare `TirTypeParam` return type is valid here — it marks the
+    // template position. `monomorphizeGeneric` substitutes it at call sites.
 
     return new TirFuncT(
         paramTypes,

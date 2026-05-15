@@ -1,5 +1,8 @@
 import { isObject } from "@harmoniclabs/obj-utils";
 import { defaultUplcVersion, UPLCVersion } from "@harmoniclabs/uplc";
+import { COMPILER_VERSION } from "../../version.generated";
+
+export { COMPILER_VERSION };
 
 export interface CompilerUplcOptimizations {
     /**
@@ -64,6 +67,13 @@ export function completeUplcOptimizations(
 
 export interface CompilerOptions {
     /**
+     * npm-style semver range that the running compiler version must satisfy.
+     * Required since `@harmoniclabs/pebble@0.2.0` — the `Compiler` throws
+     * when this field is missing or when the running compiler version does
+     * not satisfy the range.
+     */
+    compilerVersion: string;
+    /**
      * path to the entry file
      */
     entry: string;
@@ -119,7 +129,14 @@ export interface CompilerOptions {
     addMarker: boolean;
 }
 
-export const extremeOptions: CompilerOptions = Object.freeze({
+/**
+ * Option templates intentionally omit `compilerVersion` — every caller must
+ * set it explicitly so a missing `compilerVersion` always surfaces as an
+ * error from the `Compiler` constructor.
+ */
+export type CompilerDefaults = Omit<CompilerOptions, "compilerVersion">;
+
+export const extremeOptions: CompilerDefaults = Object.freeze({
     entry: "./src/index.pebble",
     root: ".",
     outDir: "./out",
@@ -131,7 +148,7 @@ export const extremeOptions: CompilerOptions = Object.freeze({
     addMarker: true
 });
 
-export const productionOptions: CompilerOptions = Object.freeze({
+export const productionOptions: CompilerDefaults = Object.freeze({
     entry: "./src/index.pebble",
     root: ".",
     outDir: "./out",
@@ -143,7 +160,7 @@ export const productionOptions: CompilerOptions = Object.freeze({
     addMarker: true
 });
 
-export const debugOptions: CompilerOptions = Object.freeze({
+export const debugOptions: CompilerDefaults = Object.freeze({
     entry: "./src/index.pebble",
     root: ".",
     outDir: "./out",
@@ -155,10 +172,10 @@ export const debugOptions: CompilerOptions = Object.freeze({
     addMarker: false
 });
 
-export const defaultOptions: CompilerOptions = Object.freeze({
+export const defaultOptions: CompilerDefaults = Object.freeze({
     ...productionOptions,
 });
-export const testOptions: CompilerOptions = Object.freeze({
+export const testOptions: CompilerDefaults = Object.freeze({
     // ...debugOptions,
     ...productionOptions,
     silent: true
@@ -168,12 +185,12 @@ export const defulatCompilerOptions = defaultOptions;
 
 export function completeCompilerOptions(
     options: Partial<CompilerOptions>,
-    complete: CompilerOptions = defaultOptions
+    complete: Partial<CompilerOptions> = defaultOptions as Partial<CompilerOptions>
 ): CompilerOptions
 {
     let targetUplcVersion = options.targetUplcVersion instanceof UPLCVersion ? complete.targetUplcVersion : defaultUplcVersion;
     complete = {
-        ...defaultOptions,
+        ...(defaultOptions as Partial<CompilerOptions>),
         ...complete
     };
     let uplcOptimizations = options.uplcOptimizations as CompilerUplcOptimizations;
@@ -197,11 +214,13 @@ export function completeCompilerOptions(
     // console.log( "uplcOptimizations", uplcOptimizations );
     // console.log( "completeUplcOptimizations( uplcOptimizations )",completeUplcOptimizations( uplcOptimizations ))
     return {
-        ...complete,
-        targetUplcVersion,
-        removeTraces: options.removeTraces ?? complete.removeTraces,
-        delayHoists: options.delayHoists ?? complete.delayHoists,
+        ...(complete as CompilerOptions),
+        // forward compilerVersion verbatim — no fallback; Compiler throws if missing/invalid
+        compilerVersion: options.compilerVersion ?? (complete as Partial<CompilerOptions>).compilerVersion!,
+        targetUplcVersion: targetUplcVersion as UPLCVersion,
+        removeTraces: options.removeTraces ?? complete.removeTraces!,
+        delayHoists: options.delayHoists ?? complete.delayHoists!,
         uplcOptimizations: completeUplcOptimizations( uplcOptimizations ),
-        addMarker: options.addMarker ?? complete.addMarker
+        addMarker: options.addMarker ?? complete.addMarker!
     };
 }

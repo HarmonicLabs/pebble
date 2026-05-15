@@ -1,4 +1,4 @@
-import { testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
@@ -33,7 +33,7 @@ function main( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "main", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -64,7 +64,7 @@ function useAbs( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useAbs", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -92,7 +92,7 @@ function callFib( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "callFib", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -123,7 +123,7 @@ function addFour( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "addFour", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -154,7 +154,7 @@ function combine( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "combine", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -183,7 +183,7 @@ function useSop( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useSop", entry: "test.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);

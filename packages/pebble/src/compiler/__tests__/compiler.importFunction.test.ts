@@ -1,4 +1,4 @@
-import { defaultOptions, testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { AstCompiler } from "../AstCompiler/AstCompiler";
@@ -39,7 +39,7 @@ function useFib( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useFib", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -70,7 +70,7 @@ function tripleViaDouble( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "tripleViaDouble", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -105,7 +105,7 @@ function combined( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "combined", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -143,7 +143,7 @@ function identity( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "identity", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -174,7 +174,7 @@ function useSquare( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useSquare", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -213,7 +213,7 @@ function top( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "top", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics.length).toBe(0);
@@ -252,7 +252,7 @@ function process( d: MyData ): int {
         });
 
         const astCompiler = new AstCompiler(
-            { ...defaultOptions, entry: "src/main.pebble", root: "/" },
+            { ...defaultOptions, compilerVersion: COMPILER_VERSION, entry: "src/main.pebble", root: "/" },
             ioApi
         );
         const result = await astCompiler.check();

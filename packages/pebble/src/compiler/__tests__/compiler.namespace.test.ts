@@ -1,4 +1,4 @@
-import { defaultOptions, testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { AstCompiler } from "../AstCompiler/AstCompiler";
@@ -23,7 +23,7 @@ function useAdd( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useAdd", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -47,7 +47,7 @@ function useAdd( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useAdd", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -71,7 +71,7 @@ function useAdd( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useAdd", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -96,7 +96,7 @@ function useInner( x: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useInner", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -121,7 +121,7 @@ function callPub( a: int ): int {
         });
 
         // private member used inside the namespace is fine; exported `pub` is reachable
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "callPub", entry: "src/main.pebble", root: "/" });
         expect(compiler.diagnostics).toEqual([]);
     });
@@ -144,7 +144,7 @@ function callSecret( a: int ): int {
         });
 
         const astCompiler = new AstCompiler(
-            { ...defaultOptions, entry: "src/main.pebble", root: "/" },
+            { ...defaultOptions, compilerVersion: COMPILER_VERSION, entry: "src/main.pebble", root: "/" },
             ioApi
         );
         const result = await astCompiler.check();
@@ -175,7 +175,7 @@ function useInc( n: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useInc", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -201,7 +201,7 @@ function combined( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "combined", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);
@@ -227,7 +227,7 @@ function useAdd( a: int, b: int ): int {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.export({ functionName: "useAdd", entry: "src/main.pebble", root: "/" });
 
         expect(compiler.diagnostics).toEqual([]);

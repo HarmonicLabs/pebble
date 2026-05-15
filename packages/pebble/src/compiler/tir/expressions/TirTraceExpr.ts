@@ -4,12 +4,12 @@ import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import { IRForced } from "../../../IR/IRNodes/IRForced";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../IR/IRTerm";
-import { hoisted_intToUtf8Bytes } from "../../../IR/tree_utils/intToUtf8Bytes";
 import { mergeSortedStrArrInplace } from "../../../utils/array/mergeSortedStrArrInplace";
-import { TirIntT } from "../types/TirNativeType";
+import { TirBytesT } from "../types/TirNativeType";
 import { TirType } from "../types/TirType";
 import { getUnaliased } from "../types/utils/getUnaliased";
 import { ITirExpr } from "./ITirExpr";
+import { _showIR } from "./TirShowExpr";
 import { TirExpr } from "./TirExpr";
 import { ToIRTermCtx } from "./ToIRTermCtx";
 
@@ -67,15 +67,19 @@ export class TirTraceExpr
         let bytesIR: IRTerm;
         const exprType = getUnaliased( this.traceExpr.type );
 
-        if( exprType instanceof TirIntT )
+        if( exprType instanceof TirBytesT )
         {
-            // int -> bytes via intToUtf8Bytes
-            bytesIR = _ir_apps( hoisted_intToUtf8Bytes.clone(), this.traceExpr.toIR( ctx ) );
+            // bytes are assumed to already be valid UTF-8 — pass through
+            // unchanged, as documented for the Show interface.
+            bytesIR = this.traceExpr.toIR( ctx );
         }
         else
         {
-            // assume bytes
-            bytesIR = this.traceExpr.toIR( ctx );
+            // any other type implementing Show: dispatch through `_showIR`,
+            // which uses the per-type compile-time table (int → decimal,
+            // bool → "true"/"false", data → serialiseData+hex, struct →
+            // user impl or auto-derive, list/map → recursive, ...).
+            bytesIR = _showIR( exprType, this.traceExpr.toIR( ctx ) );
         }
 
         // Force(trace(msg, Delay(continuation)))

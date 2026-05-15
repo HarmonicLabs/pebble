@@ -14,7 +14,7 @@ export function _compileVarAccessExpr(
     if( !resolvedValue ) {
         if( ctx.scope.resolveNamespace( expr.text ) )
         return ctx.error(
-            DiagnosticCode.Namespace_path_is_incomplete,
+            DiagnosticCode.Namespace_path_is_incomplete_expected_a_value_type_function_or_interface,
             expr.range
         );
 

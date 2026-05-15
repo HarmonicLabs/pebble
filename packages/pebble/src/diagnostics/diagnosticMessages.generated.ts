@@ -281,8 +281,8 @@ export enum DiagnosticCode {
     _super_must_be_called_before_accessing_a_property_of_super_in_the_constructor_of_a_derived_class = 17011,
     Unkonwn_AST_node = 20000,
     Namespace_0_has_no_exported_member_1 = 30001,
-    Namespace_path_is_incomplete = 30002,
-    Private_modifier_only_allowed_inside_namespace = 30003,
+    Namespace_path_is_incomplete_expected_a_value_type_function_or_interface = 30002,
+    _private_modifier_is_only_allowed_on_declarations_inside_a_namespace = 30003,
     Namespaces_cannot_be_declared_here = 30004,
     _0_is_not_a_namespace = 30005,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069

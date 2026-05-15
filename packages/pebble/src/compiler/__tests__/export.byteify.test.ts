@@ -1,4 +1,4 @@
-import { defaultOptions, testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromHex, fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
@@ -26,8 +26,8 @@ function byteify( n: int ): bytes {
             ]),
             useConsoleAsOutput: true,
         });
-        // const complier = new Compiler( ioApi, defaultOptions );
-        const complier = new Compiler(ioApi, testOptions);
+        // const complier = new Compiler( ioApi, { ...defaultOptions, compilerVersion: COMPILER_VERSION } );
+        const complier = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await complier.export({ functionName: "byteify", entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;

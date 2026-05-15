@@ -40,6 +40,7 @@ export function isTirType( thing: any ): thing is TirType
     return isObject( thing ) && (
         isTirNativeType( thing )
         || isTirCustomType( thing )
+        || thing instanceof TirTypeParam
     );
 }
 

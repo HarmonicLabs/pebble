@@ -30,12 +30,14 @@ import { FuncDecl } from "../../ast/nodes/statements/declarations/FuncDecl";
 import { InterfaceMethodImpl, TypeImplementsStmt } from "../../ast/nodes/statements/TypeImplementsStmt";
 import { getUniqueInternalName, PEBBLE_INTERNAL_IDENTIFIER_PREFIX } from "../internalVar";
 import { AstNamedTypeExpr } from "../../ast/nodes/types/AstNamedTypeExpr";
-import { FuncExpr } from "../../ast/nodes/expr/functions/FuncExpr";
+import { FuncExpr, TypeParamDecl } from "../../ast/nodes/expr/functions/FuncExpr";
+import { TypeParamConstraint } from "../tir/program/TypedProgram";
 import { CommonFlags } from "../../common";
 import { SimpleVarDecl } from "../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
 import { Identifier } from "../../ast/nodes/common/Identifier";
 import { ArrowKind } from "../../ast/nodes/expr/functions/ArrowKind";
-import { _compileFuncExpr } from "./internal/exprs/_compileFuncExpr";
+import { _compileFuncExpr, getDataFuncSignature } from "./internal/exprs/_compileFuncExpr";
+import { TirTypeParam } from "../tir/types/TirTypeParam";
 import { BodyStmt, TopLevelStmt } from "../../ast/nodes/statements/PebbleStmt";
 import { ContractDecl } from "../../ast/nodes/statements/declarations/ContractDecl";
 import { BlockStmt } from "../../ast/nodes/statements/BlockStmt";
@@ -715,7 +717,24 @@ export class AstCompiler extends DiagnosticEmitter
         {
             this.program.contractTirFuncName = tirFuncName;
         }
-        
+
+        // Generic function declaration path: do NOT compile the body. Instead,
+        // compile the signature in a scope where each type parameter resolves
+        // to a fresh `TirTypeParam`, then register a `GenericTemplate` on the
+        // program. Call sites instantiate it via `monomorphizeGeneric`.
+        if( astFuncExpr.typeParams.length > 0 )
+        {
+            this._registerGenericTemplate(
+                astFuncExpr,
+                astFuncName,
+                tirFuncName,
+                topLevelScope,
+                srcExports,
+                exportRange
+            );
+            return;
+        }
+
         const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
 
         const funcExpr = _compileFuncExpr(
@@ -776,6 +795,166 @@ export class AstCompiler extends DiagnosticEmitter
             isEntryFile
             && this.program.contractTirFuncName === ""
         ) this.program.contractTirFuncName = tirFuncName;
+    }
+
+    /**
+     * Register a generic function template. Compile only the signature in a
+     * scope where each type parameter is bound to a `TirTypeParam`; the body
+     * is deferred until `monomorphizeGeneric` is invoked at a call site.
+     */
+    private _registerGenericTemplate(
+        astFuncExpr: FuncExpr,
+        astFuncName: string,
+        tirFuncName: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope | undefined,
+        exportRange: SourceRange | undefined
+    ): void
+    {
+        if( topLevelScope.functions.has( astFuncName ) )
+        return this.error(
+            DiagnosticCode._0_is_already_defined,
+            astFuncExpr.name.range,
+            astFuncName
+        );
+
+        // Detect duplicate type-param names on the template
+        const seenParamNames = new Set<string>();
+        const tirTypeParams: TirTypeParam[] = [];
+        for( const decl of astFuncExpr.typeParams )
+        {
+            if( seenParamNames.has( decl.name.text ) )
+            {
+                return this.error(
+                    DiagnosticCode._0_is_already_defined,
+                    decl.name.range,
+                    decl.name.text
+                );
+            }
+            seenParamNames.add( decl.name.text );
+            tirTypeParams.push( new TirTypeParam( decl.name.text ) );
+        }
+
+        // Build a child scope where each type-param name resolves to its
+        // TirTypeParam (via `_compileDataEncodedConcreteType`'s new lookup).
+        const templateScope = topLevelScope.newChildScope({
+            ...topLevelScope.infos,
+            isFunctionDeclScope: false,
+            isMethodScope: false
+        });
+        for( let i = 0; i < astFuncExpr.typeParams.length; i++ )
+        {
+            templateScope.defineTypeParam( astFuncExpr.typeParams[i].name.text, tirTypeParams[i] );
+        }
+
+        // Resolve constraints on each type param (the `implements I` clause).
+        // For each constrained param, record the constraint on the template
+        // so monomorphizeGeneric can inject the matching dictionary at call
+        // sites, and on the template scope so `getPropAccessReturnType` can
+        // resolve method calls on `T`-typed values inside the body.
+        const constraints: ( TypeParamConstraint | undefined )[] =
+            new Array( astFuncExpr.typeParams.length ).fill( undefined );
+        for( let i = 0; i < astFuncExpr.typeParams.length; i++ )
+        {
+            const decl = astFuncExpr.typeParams[i];
+            if( !decl.constraint ) continue;
+            const con = this._resolveTypeParamConstraint( templateScope, decl );
+            if( !con ) return undefined;
+            constraints[i] = con;
+            templateScope.defineTypeParamConstraint( decl.name.text, con );
+        }
+
+        // Compile only the signature: yields a TirFuncT that may contain
+        // TirTypeParams in arg/return positions.
+        const templateCtx = AstCompilationCtx.fromScope( this.program, templateScope );
+        const placeholderFuncType = getDataFuncSignature( templateCtx, astFuncExpr.signature );
+        if( !placeholderFuncType ) return undefined;
+
+        // Register the template on the program
+        this.program.genericTemplates.set( astFuncName, {
+            kind: "user",
+            astFuncName,
+            astFuncExpr,
+            typeParams: tirTypeParams,
+            definingScope: topLevelScope,
+            canonicalTirName: tirFuncName,
+            placeholderFuncType,
+            constraints,
+        });
+
+        // Register the generic placeholder value in the top-level scope so
+        // identifier lookup at call sites finds it. The `genericTemplateName`
+        // field signals to `_compileCallExpr` that this is a template.
+        topLevelScope.functions.set( astFuncName, tirFuncName );
+        topLevelScope.defineValue({
+            name: astFuncName,
+            type: placeholderFuncType,
+            isConstant: true,
+            genericTemplateName: astFuncName,
+        });
+
+        if( exportRange && srcExports )
+        {
+            if(
+                srcExports.functions.has( astFuncName )
+                || srcExports.variables.has( astFuncName )
+            )
+            return this.error(
+                DiagnosticCode._0_is_already_exported,
+                exportRange,
+                astFuncName
+            );
+            srcExports.functions.set( astFuncName, tirFuncName );
+            srcExports.defineValue({
+                name: astFuncName,
+                type: placeholderFuncType,
+                isConstant: true,
+                genericTemplateName: astFuncName,
+            });
+        }
+    }
+
+    /**
+     * Resolve a `<T implements I>` constraint clause to a `TypeParamConstraint`.
+     *
+     * - `decl.constraint` must be a bare `AstNamedTypeExpr` (no type args).
+     * - The named interface must be registered in `scope.interfaces`
+     *   (walking up the parent chain via `resolveInterface`).
+     *
+     * The returned object captures the AST method signatures verbatim so the
+     * monomorphizer doesn't have to re-resolve the interface each time.
+     */
+    private _resolveTypeParamConstraint(
+        scope: AstScope,
+        decl: TypeParamDecl
+    ): TypeParamConstraint | undefined
+    {
+        const constraint = decl.constraint;
+        if( !constraint ) return undefined;
+
+        if( !( constraint instanceof AstNamedTypeExpr ) )
+        return this.error(
+            DiagnosticCode.Type_expected,
+            constraint.range
+        );
+
+        if( constraint.tyArgs.length > 0 )
+        return this.error(
+            DiagnosticCode.Not_implemented_0,
+            constraint.range,
+            "generic interface as a type-parameter constraint"
+        );
+
+        const interfaceName = constraint.name.text;
+        const methods = scope.resolveInterface( interfaceName );
+        if( !methods )
+        return this.error(
+            DiagnosticCode._0_is_not_defined,
+            constraint.name.range,
+            interfaceName
+        );
+
+        return { interfaceName, methods };
     }
 
     /**

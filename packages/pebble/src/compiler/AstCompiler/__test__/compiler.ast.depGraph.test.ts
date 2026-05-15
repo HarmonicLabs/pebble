@@ -1,5 +1,5 @@
 import { Source, SourceKind } from "../../../ast/Source/Source";
-import { defaultOptions } from "../../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, COMPILER_VERSION } from "../../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../../io/CompilerIoApi";
 import { AstCompiler } from "../AstCompiler";
 import { ResolveStackNode } from "../utils/deps/ResolveStackNode";
@@ -52,6 +52,7 @@ const gSrcText =
 const complier = new AstCompiler(
     {
         ...defaultOptions,
+        compilerVersion: COMPILER_VERSION,
         entry: "a.pebble",
         root: "/",
     },

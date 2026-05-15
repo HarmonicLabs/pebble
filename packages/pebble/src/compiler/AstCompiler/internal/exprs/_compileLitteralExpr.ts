@@ -8,6 +8,7 @@ import { LitNamedObjExpr } from "../../../../ast/nodes/expr/litteral/LitNamedObj
 import { LitObjExpr } from "../../../../ast/nodes/expr/litteral/LitObjExpr";
 import { LitStrExpr } from "../../../../ast/nodes/expr/litteral/LitStrExpr";
 import { LitteralExpr } from "../../../../ast/nodes/expr/litteral/LitteralExpr";
+import { TemplateStrExpr } from "../../../../ast/nodes/expr/litteral/TemplateStrExpr";
 import { LitThisExpr } from "../../../../ast/nodes/expr/litteral/LitThisExpr";
 import { LitTrueExpr } from "../../../../ast/nodes/expr/litteral/LitTrueExpr";
 import { LitUndefExpr } from "../../../../ast/nodes/expr/litteral/LitUndefExpr";
@@ -73,6 +74,7 @@ export function _compileLitteralExpr(
     if( expr instanceof LitObjExpr ) return _compileLitteralObjExpr( ctx, expr, typeHint );
     if( expr instanceof LitNamedObjExpr ) return _compileLitteralNamedObjExpr( ctx, expr, typeHint );
     if( expr instanceof LitFailExpr ) return new TirLitFailExpr( expr.range );
+    if( expr instanceof TemplateStrExpr ) return _compileTemplateStrExpr( ctx, expr );
 
     if( expr instanceof LitContextExpr )
     throw new Error("Litteral `context` should have been handled while desugaring.");
@@ -399,4 +401,82 @@ export function _compileLitteralArrayExpr(
         listType,
         expr.range
     );
+}
+
+/**
+ * Compile a template string `` `text ${e1} more ${e2} ...` `` into a chain
+ * of `appendByteString` calls.
+ *
+ * Each text fragment becomes a `TirLitHexBytesExpr` containing its UTF-8
+ * encoding. Each interpolation is compiled and, if its type is not already
+ * `bytes`, wrapped in a `TirShowExpr` so it lowers via the built-in `Show`
+ * interface (or the user's `type X implements Show { ... }` override).
+ *
+ * Empty fragments collapse out — we don't emit `appendByteString("", x)`.
+ */
+function _compileTemplateStrExpr(
+    ctx: AstCompilationCtx,
+    expr: TemplateStrExpr,
+): TirExpr | undefined
+{
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { fromUtf8 } = require( "@harmoniclabs/uint8array-utils" );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { TirShowExpr } = require( "../../../tir/expressions/TirShowExpr" );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { TirCallExpr } = require( "../../../tir/expressions/TirCallExpr" );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { TirNativeFunc } = require( "../../../tir/expressions/TirNativeFunc" );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { TirBytesT } = require( "../../../tir/types/TirNativeType/native/bytes" );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { bytes_t } = require( "../../../tir/program/stdScope/stdScope" );
+
+    const pieces: TirExpr[] = [];
+
+    for( let i = 0; i < expr.parts.length; i++ )
+    {
+        const text = expr.parts[i];
+        if( text.length > 0 )
+        {
+            pieces.push(
+                new TirLitHexBytesExpr( fromUtf8( text ), expr.range )
+            );
+        }
+        if( i < expr.exprs.length )
+        {
+            const sub = _compileExpr( ctx, expr.exprs[i], undefined );
+            if( !sub ) return undefined;
+            const subType = getUnaliased( sub.type );
+            if( subType instanceof TirBytesT )
+            {
+                // Already valid UTF-8 by convention — pass through.
+                pieces.push( sub );
+            }
+            else
+            {
+                // Auto-show via the built-in Show interface dispatch.
+                pieces.push( new TirShowExpr( sub, expr.exprs[i].range ) );
+            }
+        }
+    }
+
+    if( pieces.length === 0 )
+    {
+        // Empty template — emit empty bytes.
+        return new TirLitHexBytesExpr( new Uint8Array(0), expr.range );
+    }
+
+    // Left-fold appendByteString.
+    let acc: TirExpr = pieces[0];
+    for( let i = 1; i < pieces.length; i++ )
+    {
+        acc = new TirCallExpr(
+            TirNativeFunc.appendByteString,
+            [ acc, pieces[i] ],
+            bytes_t,
+            expr.range,
+        );
+    }
+    return acc;
 }

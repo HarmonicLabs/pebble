@@ -14,6 +14,7 @@ import { LitIntExpr } from "../../../../ast/nodes/expr/litteral/LitIntExpr";
 import { LitNamedObjExpr } from "../../../../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../../../../ast/nodes/expr/litteral/LitObjExpr";
 import { LitStrExpr } from "../../../../ast/nodes/expr/litteral/LitStrExpr";
+import { TemplateStrExpr } from "../../../../ast/nodes/expr/litteral/TemplateStrExpr";
 import { isLitteralExpr } from "../../../../ast/nodes/expr/litteral/LitteralExpr";
 import { LitThisExpr } from "../../../../ast/nodes/expr/litteral/LitThisExpr";
 import { LitTrueExpr } from "../../../../ast/nodes/expr/litteral/LitTrueExpr";
@@ -1324,6 +1325,20 @@ function _exprReplaceParamsAndAssertNoLitContext(
             expr.body.range
         );
 
+        return expr;
+    }
+
+    if( expr instanceof TemplateStrExpr ) {
+        for( let i = 0; i < expr.exprs.length; i++ ) {
+            const newSub = _exprReplaceParamsAndAssertNoLitContext(
+                compiler,
+                expr.exprs[i],
+                paramsInternalNamesMap,
+                renamedVariables
+            );
+            if( !newSub ) return undefined;
+            expr.exprs[i] = newSub;
+        }
         return expr;
     }
 

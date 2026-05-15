@@ -33,6 +33,7 @@ import { TirTernaryExpr } from "../../tir/expressions/TirTernaryExpr";
 import { TirToDataExpr } from "../../tir/expressions/TirToDataExpr";
 import { TirTraceIfFalseExpr } from "../../tir/expressions/TirTraceIfFalseExpr";
 import { TirTraceExpr } from "../../tir/expressions/TirTraceExpr";
+import { TirShowExpr } from "../../tir/expressions/TirShowExpr";
 import { TirTypeConversionExpr } from "../../tir/expressions/TirTypeConversionExpr";
 import { TirVariableAccessExpr } from "../../tir/expressions/TirVariableAccessExpr";
 import { TirUnaryExclamation } from "../../tir/expressions/unary/TirUnaryExclamation";
@@ -283,6 +284,15 @@ export function expressifyVars(
 
     if( expr instanceof TirInlineClosedIR ) return expr;
 
+    if( expr instanceof TirShowExpr ) {
+        // recurse into inner so any nested variables / casts get expressified;
+        // the show-bytes lowering happens at IR-emit time inside TirShowExpr.toIR.
+        return new TirShowExpr(
+            expressifyVars( ctx, expr.inner ),
+            expr.range
+        );
+    }
+
     const tsEnsureExhautstiveCheck: never = expr;
     console.error( expr );
     throw new Error("unreachable::expressifyVars");
@@ -325,6 +335,7 @@ function expressifyPropAccess(
         || expr instanceof TirTraceIfFalseExpr
         || expr instanceof TirTraceExpr
         || expr instanceof TirInlineClosedIR
+        || expr instanceof TirShowExpr // result is bytes, properties already handled via .show() returning bytes_t
     ) throw new Error( "Invalid property access expression" );
 
     if( expr instanceof TirLitThisExpr ) {
@@ -638,19 +649,21 @@ function expressifyMethodCall(
 
         const structMethods = objectType.methodNamesPtr;
         const tirMethodName = structMethods.get( methodName );
-        if( !tirMethodName ) throw new Error(
-            `Method '${methodName}' does not exist on type '${objectType.toString()}'`
-        );
+        if( tirMethodName )
+        {
+            const funcExpr = ctx.program.functions.get( tirMethodName );
+            if( !funcExpr ) throw new Error(`Definition of method '${methodName}' on type '${objectType.toString()}' is missing.`);
 
-        const funcExpr = ctx.program.functions.get( tirMethodName );
-        if( !funcExpr ) throw new Error(`Definition of method '${methodName}' on type '${objectType.toString()}' is missing.`);
-
-        return new TirCallExpr(
-            funcExpr,
-            [ objectExpr, ...methodCall.args ],
-            methodCall.type,
-            SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() )
-        );
+            return new TirCallExpr(
+                funcExpr,
+                [ objectExpr, ...methodCall.args ],
+                methodCall.type,
+                SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() )
+            );
+        }
+        // No user impl — fall through to the generic `.show()` fallback at the
+        // end of expressifyMethodCall (which auto-derives via _showIR for
+        // data-encoded structs).
     }
 
     if( objectType instanceof TirListT ) {
@@ -744,6 +757,19 @@ function expressifyMethodCall(
                 exprRange
             );
         }
+    }
+
+    // Generic `.show()` fallback: any value whose type has a built-in
+    // `_showIR` impl can be shown by emitting a TirShowExpr. User types
+    // override this by declaring `type X implements Show { show(self): bytes
+    // { ... } }` — that path is taken earlier (alias/struct method-table
+    // dispatch) and never reaches here.
+    if( methodName === "show" && methodCall.args.length === 0 )
+    {
+        return new TirShowExpr(
+            objectExpr,
+            SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() ),
+        ) as any; // TirShowExpr is in TirExpr union, cast for return-type compat
     }
 
     throw new Error(`not implemented::expressifyMethodCall for type '${objectType.toString()}' (method name: '${methodName}')`);

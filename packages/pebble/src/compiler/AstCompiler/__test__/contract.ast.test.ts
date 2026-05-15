@@ -1,6 +1,6 @@
 import { Source } from "../../../ast/Source/Source";
 import { DiagnosticMessage } from "../../../diagnostics/DiagnosticMessage";
-import { defaultOptions } from "../../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, COMPILER_VERSION } from "../../../IR/toUPLC/CompilerOptions";
 import { parseFile } from "../../../parser/parseFile";
 import { createMemoryCompilerIoApi } from "../../io/CompilerIoApi";
 import { AstCompiler } from "../AstCompiler";
@@ -83,6 +83,7 @@ contract MyContract {
         const complier = new AstCompiler(
             {
                 ...defaultOptions,
+                compilerVersion: COMPILER_VERSION,
                 entry: fileName,
                 root: "/"
             },

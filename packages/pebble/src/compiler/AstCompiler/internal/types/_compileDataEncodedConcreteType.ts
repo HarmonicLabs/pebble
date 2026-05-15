@@ -69,13 +69,39 @@ export function _compileDataEncodedConcreteType(
     if( typeExpr instanceof AstFuncType ) return undefined; // no data encoding for function types
     if( typeExpr instanceof AstNamedTypeExpr ) // struct, aliases and respective params
     {
+        // generic type parameters take precedence: `T` in a generic function
+        // body resolves directly to its TirTypeParam, leaving substitution
+        // to `monomorphizeGeneric` at call time.
+        const typeParam = ctx.scope.resolveTypeParam( typeExpr.name.text );
+        if( typeParam ) return typeParam;
+
         const possibleTirNames = ctx.scope.resolveType( typeExpr.name.text );
         if( !possibleTirNames ) return ctx.error(
             DiagnosticCode._0_is_not_defined,
             typeExpr.name.range, typeExpr.name.text
         );
 
-        if( possibleTirNames.isGeneric ) throw new Error("not implemented: _compileDataEncodedConcreteType for generic types");
+        if( possibleTirNames.isGeneric )
+        {
+            // Generic named type with explicit type-args, e.g. `List<int>` —
+            // compile each arg and apply the generic.
+            if( typeExpr.tyArgs.length === 0 ) return ctx.error(
+                DiagnosticCode._0_is_not_defined,
+                typeExpr.name.range, typeExpr.name.text
+            );
+            const compiledArgs: import("../../../tir/types/TirType").TirType[] = [];
+            for( const aExpr of typeExpr.tyArgs )
+            {
+                const a = _compileDataEncodedConcreteType( ctx, aExpr, optionalsAsSop );
+                if( !a ) return undefined;
+                compiledArgs.push( a );
+            }
+            const applied = ctx.program.getAppliedGeneric(
+                possibleTirNames.dataTirName ?? possibleTirNames.sopTirName,
+                compiledArgs
+            );
+            return applied;
+        }
 
         if( typeof possibleTirNames.dataTirName !== "string" ) return undefined;
 

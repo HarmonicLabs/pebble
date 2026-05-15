@@ -36,6 +36,7 @@ export const data_t = new TirDataT();
 
 export const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
 export const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
+export const getCredentialHashFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "getCredentialHash";
 
 export function populateStdScope( program: TypedProgram ): void
 {
@@ -320,7 +321,6 @@ export function populatePreludeScope( program: TypedProgram ): void
             index: int_t
         }, onlyData
     );
-    const getCredentialHashFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "getCredentialHash";
     const { data: credential_t } = defineMultiConstructorStruct(
         "Credential", {
             PubKey: {

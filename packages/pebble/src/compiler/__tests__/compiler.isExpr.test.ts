@@ -1,5 +1,5 @@
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
-import { testOptions } from "../../IR";
+import { testOptions, COMPILER_VERSION } from "../../IR";
 import { Compiler } from "../Compiler";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 
@@ -25,7 +25,7 @@ function isThird( m: MultiConstr ): boolean {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBeGreaterThan(0);
@@ -52,7 +52,7 @@ function getN( m: MultiConstr ): int {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBeGreaterThan(0);
@@ -75,7 +75,7 @@ function getN( m: MultiConstr ): int {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
@@ -101,7 +101,7 @@ function pick( m: MultiConstr ): bytes {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
@@ -123,7 +123,7 @@ function pick( m: MultiConstr ): int {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
@@ -146,7 +146,7 @@ function getK( m: MultiConstr ): int {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
@@ -169,7 +169,7 @@ function combine( a: MultiConstr, b: MultiConstr ): int {
             sources: new Map([[fileName, fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.check({ entry: fileName, root: "/" });
         expect(compiler.diagnostics.length).toBe(0);

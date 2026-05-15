@@ -1,5 +1,5 @@
 import { TirAliasType } from "../TirAliasType";
-import { TirUnConstrDataResultT, TirPairDataT } from "../TirNativeType";
+import { TirBlsG1T, TirBlsG2T, TirMlResultT, TirUnConstrDataResultT, TirPairDataT } from "../TirNativeType";
 import { TirBoolT } from "../TirNativeType/native/bool";
 import { TirBytesT } from "../TirNativeType/native/bytes";
 import { TirDataT } from "../TirNativeType/native/data";
@@ -256,6 +256,11 @@ function uncheckedGetCanAssign(
         }
         return currentDecision;
     }
+
+    // BLS / ML-result are opaque atomic types: assignable only to themselves
+    if( b instanceof TirBlsG1T ) return a instanceof TirBlsG1T ? CanAssign.Yes : CanAssign.No;
+    if( b instanceof TirBlsG2T ) return a instanceof TirBlsG2T ? CanAssign.Yes : CanAssign.No;
+    if( b instanceof TirMlResultT ) return a instanceof TirMlResultT ? CanAssign.Yes : CanAssign.No;
 
     const tsEnsureExhautstiveCheck: never = b;
     return CanAssign.No;

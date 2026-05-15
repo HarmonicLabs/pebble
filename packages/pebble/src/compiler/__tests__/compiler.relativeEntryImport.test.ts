@@ -1,4 +1,4 @@
-import { defaultOptions, testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { AstCompiler } from "../AstCompiler/AstCompiler";
@@ -51,8 +51,7 @@ contract MyContract {
         });
 
         const compiler = new AstCompiler(
-            {
-                ...defaultOptions,
+            { ...defaultOptions, compilerVersion: COMPILER_VERSION,
                 entry: "./src/index.pebble",
                 root: "/"
             },
@@ -74,7 +73,7 @@ contract MyContract {
             useConsoleAsOutput: true,
         });
 
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await compiler.compile({ entry: "./src/index.pebble", root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
@@ -94,8 +93,7 @@ contract MyContract {
         });
 
         const compiler = new AstCompiler(
-            {
-                ...defaultOptions,
+            { ...defaultOptions, compilerVersion: COMPILER_VERSION,
                 entry: "./src/index.pebble",
                 root: "/my-project"
             },

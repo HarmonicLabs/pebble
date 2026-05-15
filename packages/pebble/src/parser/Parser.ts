@@ -25,13 +25,14 @@ import { LitThisExpr } from "../ast/nodes/expr/litteral/LitThisExpr";
 import { LitTrueExpr } from "../ast/nodes/expr/litteral/LitTrueExpr";
 import { ParentesizedExpr } from "../ast/nodes/expr/ParentesizedExpr";
 import { ArrowKind } from "../ast/nodes/expr/functions/ArrowKind";
-import { FuncExpr } from "../ast/nodes/expr/functions/FuncExpr";
+import { FuncExpr, TypeParamDecl } from "../ast/nodes/expr/functions/FuncExpr";
 import { AstBooleanType, AstBytesType, AstListType, AstIntType, AstNativeOptionalType, AstVoidType, AstLinearMapType, AstFuncType } from "../ast/nodes/types/AstNativeTypeExpr";
 import { AstNamedTypeExpr } from "../ast/nodes/types/AstNamedTypeExpr";
 import { LitArrExpr } from "../ast/nodes/expr/litteral/LitArrExpr";
 import { LitNamedObjExpr } from "../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../ast/nodes/expr/litteral/LitObjExpr";
 import { LitStrExpr } from "../ast/nodes/expr/litteral/LitStrExpr";
+import { TemplateStrExpr } from "../ast/nodes/expr/litteral/TemplateStrExpr";
 import { LitIntExpr } from "../ast/nodes/expr/litteral/LitIntExpr";
 import { LitHexBytesExpr } from "../ast/nodes/expr/litteral/LitHexBytesExpr";
 import { CallExpr } from "../ast/nodes/expr/functions/CallExpr";
@@ -887,6 +888,55 @@ export class Parser extends DiagnosticEmitter
         return typeParams;
     }
 
+    /**
+     * Parses a function's type-parameter list with optional `implements`
+     * interface constraints:
+     *   `<T, U implements ToData, V implements Foo>`
+     *
+     * Returns `TypeParamDecl[]` so the compiler can read each param's
+     * optional constraint at template-registration time. Struct/interface
+     * decls keep using the simpler {@link parseTypeParameters} which
+     * returns bare `Identifier[]`.
+     */
+    parseFuncTypeParameters(): TypeParamDecl[] | undefined
+    {
+        const tn = this.tn;
+        // at '<': TypeParamDecl (',' TypeParamDecl)* '>'
+
+        const typeParams = new Array<TypeParamDecl>();
+        while( !tn.skip( Token.GreaterThan ) )
+        {
+            const startPos = tn.tokenPos;
+            if( !tn.skipIdentifier() )
+            return this.error(
+                DiagnosticCode.Identifier_expected,
+                tn.range()
+            );
+
+            const name = new Identifier( tn.readIdentifier(), tn.range() );
+            let constraint: AstTypeExpr | undefined = undefined;
+            if( tn.skip( Token.Implements ) )
+            {
+                constraint = this.parseTypeExpr();
+                if( !constraint ) return undefined;
+            }
+
+            typeParams.push(
+                new TypeParamDecl( name, constraint, tn.range( startPos, tn.pos ) )
+            );
+
+            if( tn.skip( Token.Comma ) ) continue;
+
+            if( tn.skip( Token.GreaterThan ) ) break;
+            else return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), ">"
+            );
+        }
+
+        return typeParams;
+    }
+
     parseTypeArguments(): AstTypeExpr[] | undefined
     {
         const tn = this.tn;
@@ -1105,7 +1155,10 @@ export class Parser extends DiagnosticEmitter
             members.push(
                 new InterfaceMethodImpl(
                     methodName,
-                    typeParams ?? [],
+                    // InterfaceMethodImpl still uses bare Identifier[];
+                    // strip any constraint clauses (method-decl constraints
+                    // would be a separate feature).
+                    typeParams?.map( p => p.name ) ?? [],
                     sig,
                     body,
                     tn.range( startPos, tn.pos )
@@ -1538,7 +1591,7 @@ export class Parser extends DiagnosticEmitter
         flags: CommonFlags = CommonFlags.None,
         startPos?: number,
         defaultReturnType?: AstTypeExpr | undefined
-    ): [ Identifier, Identifier[] | undefined, AstFuncType ] | undefined
+    ): [ Identifier, TypeParamDecl[] | undefined, AstFuncType ] | undefined
     {
         const tn = this.tn;
 
@@ -1553,11 +1606,11 @@ export class Parser extends DiagnosticEmitter
         const name = new Identifier( tn.readIdentifier(), tn.range() );
         let sigStart = -1;
 
-        let typeParams: Identifier[] | undefined = undefined;
+        let typeParams: TypeParamDecl[] | undefined = undefined;
         if( tn.skip( Token.LessThan ) )
         {
             sigStart = tn.tokenPos;
-            typeParams = this.parseTypeParameters();
+            typeParams = this.parseFuncTypeParameters();
             if( !typeParams || typeParams.length === 0 ) return undefined;
             // flags |= CommonFlags.Generic;
         }
@@ -1604,27 +1657,18 @@ export class Parser extends DiagnosticEmitter
         const namedSig = this.parseNamedFuncSig( flags, startPos, defaultReturnType );
         if( !namedSig ) return undefined;
 
-        const [ name, typeArgs, sig ] = namedSig;
-
-        const nParams = typeArgs?.length ?? 0;
-        const typeParams = new Array<Identifier>( nParams );
-        for( let i = 0; i < nParams; ++i )
-        {
-            const arg = typeArgs![ i ];
-            if( !( arg instanceof AstNamedTypeExpr ) )
-            return this.error(
-                DiagnosticCode.Type_parameters_must_be_identifiers,
-                arg.range
-            );
-            typeParams[i] = arg.name;
-        }
+        const [ name, typeParamsRaw, sig ] = namedSig;
+        // `parseNamedFuncSig` returns `TypeParamDecl[]` (with optional
+        // `implements` constraint per param) — `FuncExpr.typeParams` carries
+        // them through to template registration.
+        const typeParams: TypeParamDecl[] = typeParamsRaw ?? [];
 
         if( !tn.skip( Token.OpenBrace ) )
         return this.error(
             DiagnosticCode.Function_implementation_is_missing_or_not_immediately_following_the_declaration,
             tn.range()
         );
-        
+
         const body = this.parseBlockStmt();
         if( !body ) return undefined;
 
@@ -1635,7 +1679,7 @@ export class Parser extends DiagnosticEmitter
         const expr = new FuncExpr(
             name,
             flags,
-            typeParams ?? [],
+            typeParams,
             sig,
             body,
             ArrowKind.None,
@@ -2167,11 +2211,19 @@ export class Parser extends DiagnosticEmitter
         {
             case Token.Void: return new AstVoidType( currRange );
             // case Token.True:
-            // case Token.False: 
+            // case Token.False:
             case Token.Boolean: return new AstBooleanType( currRange );
             case Token.Int: return new AstIntType( currRange )
             // case Token.Number: return new AstIntType( currRange )
             case Token.Bytes: return new AstBytesType( currRange );
+            // `data` is registered in the prelude as a named type; expose it
+            // as a plain `AstNamedTypeExpr` so it can be written in type
+            // position (e.g. `function f(x: data): ...`).
+            case Token.Data: return new AstNamedTypeExpr(
+                new Identifier( "data", currRange ),
+                [],
+                currRange
+            );
             case Token.Optional: {
 
                 if( !tn.skip( Token.LessThan ) )
@@ -2483,7 +2535,10 @@ export class Parser extends DiagnosticEmitter
                             prop,
                             tn.range( startPos, tn.pos )
                         );
-                        expr = this.tryParseCallExprOrReturnSame( expr );
+                        // pass `true` so we attempt `<TypeArgs>` parsing —
+                        // generic calls on dotted paths (e.g. `std.x.f<T>(a)`)
+                        // need this to consume the type arguments.
+                        expr = this.tryParseCallExprOrReturnSame( expr, true );
                         break;
                     }
 
@@ -2849,12 +2904,7 @@ export class Parser extends DiagnosticEmitter
                 return new LitStrExpr(tn.readString(), tn.range(startPos, tn.pos));
             }
             case Token.StringTemplateLiteralQuote: {
-                this.error(
-                    DiagnosticCode.Not_implemented_0,
-                    tn.range(), "string template literals"
-                )
-                return undefined;
-                // return this.parseTemplateLiteral();
+                return this.parseTemplateLiteral( startPos );
             }
             case Token.IntegerLiteral: {
                 const value = tn.readInteger();
@@ -4176,6 +4226,56 @@ export class Parser extends DiagnosticEmitter
         );
 
         return new TraceStmt( expr, tn.range() );
+    }
+
+    /**
+     * Parse a backtick-delimited template literal:
+     *
+     *   `text ${expr1} more text ${expr2} ...`
+     *
+     * Tokenizer state: on entry, the current token is
+     * `Token.StringTemplateLiteralQuote`; the tokenizer is positioned at
+     * the opening backtick. `readString()` (called with no arg) consumes
+     * the backtick + the first fragment up to `${` or to the closing
+     * backtick; if it stopped at `${` it sets `readingTemplateString = true`
+     * and the parser must consume an expression + `}` and then call
+     * `readString(CharCode.Backtick)` to read the next fragment.
+     */
+    parseTemplateLiteral( startPos: number ): TemplateStrExpr | undefined
+    {
+        const tn = this.tn;
+
+        const parts: string[] = [];
+        const exprs: PebbleExpr[] = [];
+
+        // First fragment — readString advances past the opening backtick.
+        let fragment = tn.readString();
+        parts.push( fragment );
+
+        while( tn.readingTemplateString )
+        {
+            // Just consumed `${`. Parse the interpolated expression.
+            const interp = this.parseExpr();
+            if( !interp )
+            return this.error(
+                DiagnosticCode.Expression_expected,
+                tn.range()
+            );
+            exprs.push( interp );
+
+            if( !tn.skip( Token.CloseBrace ) )
+            return this.error(
+                DiagnosticCode._0_expected,
+                tn.range(), "}"
+            );
+
+            // Read the next fragment up to the next `${` or the closing
+            // backtick. `readingTemplateString` is set inside readString.
+            fragment = tn.readString( CharCode.Backtick );
+            parts.push( fragment );
+        }
+
+        return new TemplateStrExpr( parts, exprs, tn.range( startPos, tn.pos ) );
     }
 
     parseAssertStatement(): AssertStmt | undefined

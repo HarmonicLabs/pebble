@@ -1,5 +1,5 @@
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
-import { testOptions } from "../../IR";
+import { testOptions, COMPILER_VERSION } from "../../IR";
 import { Compiler } from "../Compiler";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 
@@ -17,7 +17,7 @@ trace ExtendedInteger.Finite{ n: 5 }.finite();
             ]),
             useConsoleAsOutput: true,
         });
-        const complier = new Compiler( ioApi, testOptions );
+        const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
     
         const result = await complier.run({ entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;

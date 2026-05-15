@@ -1,4 +1,4 @@
-import { defaultOptions, testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { defaultOptions, testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
@@ -42,7 +42,7 @@ contract RewardVotes {
             ]),
             useConsoleAsOutput: true,
         });
-        const complier = new Compiler( ioApi, testOptions );
+        const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
     
         await complier.compile({ entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;
@@ -85,7 +85,7 @@ contract RewardVotes {
             ]),
             useConsoleAsOutput: true,
         });
-        const complier = new Compiler( ioApi, testOptions );
+        const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
     
         await expect(
             complier.compile({ entry: fileName, root: "/" })
@@ -131,7 +131,7 @@ contract RewardVotes {
             ]),
             useConsoleAsOutput: true,
         });
-        const complier = new Compiler( ioApi, testOptions );
+        const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
     
         await expect(
             complier.compile({ entry: fileName, root: "/" })

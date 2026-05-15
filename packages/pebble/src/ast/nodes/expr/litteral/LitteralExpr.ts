@@ -11,6 +11,7 @@ import { LitThisExpr } from "./LitThisExpr";
 import { LitTrueExpr } from "./LitTrueExpr";
 import { LitUndefExpr } from "./LitUndefExpr";
 import { LitVoidExpr } from "./LitVoidExpr";
+import { TemplateStrExpr } from "./TemplateStrExpr";
 
 export type LitteralExpr
     = LitVoidExpr
@@ -23,6 +24,7 @@ export type LitteralExpr
     | LitObjExpr
     | LitNamedObjExpr
     | LitStrExpr
+    | TemplateStrExpr
     | LitIntExpr
     | LitHexBytesExpr
     | LitFailExpr
@@ -40,6 +42,7 @@ export function isLitteralExpr( thing: any ): thing is LitteralExpr
         || thing instanceof LitObjExpr
         || thing instanceof LitNamedObjExpr
         || thing instanceof LitStrExpr
+        || thing instanceof TemplateStrExpr
         || thing instanceof LitIntExpr
         || thing instanceof LitHexBytesExpr
         || thing instanceof LitFailExpr

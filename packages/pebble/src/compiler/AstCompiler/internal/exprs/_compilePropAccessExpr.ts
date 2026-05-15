@@ -2,12 +2,15 @@ import { kMaxLength } from "buffer";
 import { PropAccessExpr, OptionalPropAccessExpr, NonNullPropAccessExpr, DotPropAccessExpr } from "../../../../ast/nodes/expr/PropAccessExpr";
 import { NonNullExpr } from "../../../../ast/nodes/expr/unary/NonNullExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
+import { TirCallExpr } from "../../../tir/expressions/TirCallExpr";
 import { TirCaseExpr, TirCaseMatcher } from "../../../tir/expressions/TirCaseExpr";
 import { TirExpr } from "../../../tir/expressions/TirExpr";
+import { TirNativeFunc } from "../../../tir/expressions/TirNativeFunc";
 import { TirPropAccessExpr } from "../../../tir/expressions/TirPropAccessExpr";
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
 import { TirNamedDeconstructVarDecl } from "../../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSimpleVarDecl } from "../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
+import { TirUnConstrDataResultT } from "../../../tir/types/TirNativeType";
 import { TirType } from "../../../tir/types/TirType";
 import { getOptTypeArg } from "../../../tir/types/utils/getOptTypeArg";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
@@ -178,7 +181,7 @@ export function _compileDotPropAccessExpr(
     {
         if( nsRes.kind === "value" ) return nsRes.expr;
         if( nsRes.kind === "namespace" ) return ctx.error(
-            DiagnosticCode.Namespace_path_is_incomplete,
+            DiagnosticCode.Namespace_path_is_incomplete_expected_a_value_type_function_or_interface,
             expr.range
         );
         // "incomplete" — diagnostic already emitted
@@ -189,6 +192,37 @@ export function _compileDotPropAccessExpr(
     if( !objExpr ) return undefined;
 
     const objType = objExpr.type;
+
+    // RawConstr (TirUnConstrDataResultT) field access lowers directly to
+    // fstPair / sndPair on the underlying pair(int, list(data)).
+    if( objType instanceof TirUnConstrDataResultT )
+    {
+        if( expr.prop.text === "index" )
+        {
+            const fn = TirNativeFunc.unConstrDataResultIndex;
+            return new TirCallExpr(
+                fn,
+                [ objExpr ],
+                fn.type.returnType,
+                expr.range
+            );
+        }
+        if( expr.prop.text === "fields" )
+        {
+            const fn = TirNativeFunc.unConstrDataResultFields;
+            return new TirCallExpr(
+                fn,
+                [ objExpr ],
+                fn.type.returnType,
+                expr.range
+            );
+        }
+        return ctx.error(
+            DiagnosticCode.Property_0_does_not_exist_on_type_1,
+            expr.prop.range, expr.prop.text, "RawConstr"
+        );
+    }
+
     const returnType = getPropAccessReturnType( ctx, objType, expr.prop );
     if( !returnType ) return ctx.error(
         DiagnosticCode.Property_0_does_not_exist_on_type_1,

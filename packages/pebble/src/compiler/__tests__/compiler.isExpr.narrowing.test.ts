@@ -14,12 +14,12 @@ async function runIsolated(srcText: string): Promise<{ logs: string[]; diagnosti
     await jest.isolateModulesAsync(async () => {
         const { Compiler } = require("../Compiler");
         const { createMemoryCompilerIoApi } = require("../io/CompilerIoApi");
-        const { testOptions } = require("../../IR");
+        const { testOptions, COMPILER_VERSION } = require("../../IR");
         const ioApi = createMemoryCompilerIoApi({
             sources: new Map([["test.pebble", fromUtf8(srcText)]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(ioApi, testOptions);
+        const compiler = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
         result = await compiler.run({ entry: "test.pebble", root: "/" });
         diagnosticsLength = compiler.diagnostics.length;
     });

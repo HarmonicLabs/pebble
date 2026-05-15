@@ -49,12 +49,15 @@ export type TirNativeType
     | TirFuncT
     | TirUnConstrDataResultT
     | TirPairDataT
+    | TirBlsG1T
+    | TirBlsG2T
+    | TirMlResultT
     ;
 
 export function isTirNativeType( t: any ): t is TirNativeType
 {
     return (
-        t instanceof TirVoidT 
+        t instanceof TirVoidT
         || t instanceof TirBoolT
         || t instanceof TirIntT
         || t instanceof TirBytesT
@@ -68,6 +71,9 @@ export function isTirNativeType( t: any ): t is TirNativeType
         || t instanceof TirFuncT // =>
         || t instanceof TirUnConstrDataResultT
         || t instanceof TirPairDataT
+        || t instanceof TirBlsG1T
+        || t instanceof TirBlsG2T
+        || t instanceof TirMlResultT
     );
 }
 
@@ -148,4 +154,68 @@ export class TirPairDataT
             constT.data
         );
     }
+}
+
+/**
+ * BLS12-381 G1 element. Opaque native scalar; cannot be constructed from
+ * Pebble source directly — values are produced by `std.crypto.bls12_381.*`
+ * builtins (typically `g1Uncompress` or `g1HashToGroup`).
+ */
+export class TirBlsG1T
+    implements ITirType
+{
+    constructor() {}
+
+    hasDataEncoding(): boolean { return false; }
+
+    static toTirTypeKey(): string { return "#bls12_381_g1#"; }
+    toTirTypeKey(): string { return TirBlsG1T.toTirTypeKey(); }
+    toConcreteTirTypeName(): string { return this.toTirTypeKey(); }
+    toString(): string { return "G1"; }
+    toAstName(): string { return "G1"; }
+    isConcrete(): boolean { return true; }
+    clone(): TirBlsG1T { return new TirBlsG1T(); }
+    toUplcConstType(): ConstType { return constT.bls12_381_G1_element; }
+}
+
+/**
+ * BLS12-381 G2 element. Opaque native scalar.
+ */
+export class TirBlsG2T
+    implements ITirType
+{
+    constructor() {}
+
+    hasDataEncoding(): boolean { return false; }
+
+    static toTirTypeKey(): string { return "#bls12_381_g2#"; }
+    toTirTypeKey(): string { return TirBlsG2T.toTirTypeKey(); }
+    toConcreteTirTypeName(): string { return this.toTirTypeKey(); }
+    toString(): string { return "G2"; }
+    toAstName(): string { return "G2"; }
+    isConcrete(): boolean { return true; }
+    clone(): TirBlsG2T { return new TirBlsG2T(); }
+    toUplcConstType(): ConstType { return constT.bls12_381_G2_element; }
+}
+
+/**
+ * BLS12-381 Miller-loop result. Opaque native scalar produced by
+ * `bls12_381_millerLoop` and consumed by `bls12_381_finalVerify` /
+ * `bls12_381_mulMlResult`.
+ */
+export class TirMlResultT
+    implements ITirType
+{
+    constructor() {}
+
+    hasDataEncoding(): boolean { return false; }
+
+    static toTirTypeKey(): string { return "#bls12_381_ml_result#"; }
+    toTirTypeKey(): string { return TirMlResultT.toTirTypeKey(); }
+    toConcreteTirTypeName(): string { return this.toTirTypeKey(); }
+    toString(): string { return "MlResult"; }
+    toAstName(): string { return "MlResult"; }
+    isConcrete(): boolean { return true; }
+    clone(): TirMlResultT { return new TirMlResultT(); }
+    toUplcConstType(): ConstType { return constT.bls12_381_MlResult; }
 }

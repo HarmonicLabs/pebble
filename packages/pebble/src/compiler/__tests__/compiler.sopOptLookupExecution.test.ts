@@ -1,4 +1,4 @@
-import { testOptions } from "../../IR/toUPLC/CompilerOptions";
+import { testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
@@ -73,7 +73,7 @@ contract VoteLookup {
 }`) ]]),
             useConsoleAsOutput: true,
         });
-        const compiler = new Compiler(io, testOptions);
+        const compiler = new Compiler(io, { ...testOptions, compilerVersion: COMPILER_VERSION });
         await compiler.compile({ entry: "t.pebble", root: "/" });
         expect(compiler.diagnostics.length).toBe(0);
         const flat = io.outputs.get("out/out.flat")! as Uint8Array;

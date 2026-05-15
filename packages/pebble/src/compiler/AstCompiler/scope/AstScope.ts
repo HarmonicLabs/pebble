@@ -1,6 +1,7 @@
 import { AstFuncType } from "../../../ast/nodes/types/AstNativeTypeExpr";
-import { TypedProgram } from "../../tir/program/TypedProgram";
+import { TypedProgram, TypeParamConstraint } from "../../tir/program/TypedProgram";
 import { TirType } from "../../tir/types/TirType";
+import { TirTypeParam } from "../../tir/types/TirTypeParam";
 import { getStructType } from "../../tir/types/utils/canAssignTo";
 
 export interface ScopeInfos {
@@ -61,6 +62,16 @@ export interface IVariableInfos {
     name: string;
     type: TirType;
     isConstant: boolean;
+    /**
+     * If set, this binding is a placeholder for a generic function template.
+     * The actual TIR function does not exist yet; it must be instantiated
+     * at the call site by `monomorphizeGeneric` using the template stored in
+     * `TypedProgram.genericTemplates` under this name.
+     *
+     * `type` for a generic placeholder is the *un-substituted* TirFuncT —
+     * i.e. it may contain `TirTypeParam` nodes for each declared type param.
+     */
+    genericTemplateName?: string;
 }
 
 /**
@@ -132,6 +143,19 @@ export class AstScope
      * namespaces are compile-time only; they do not emit IR
      */
     readonly namespaces: Map<string, NamespaceSymbol> = new Map();
+
+    /**
+     * Generic type parameters in scope, e.g. while compiling the signature
+     * (and later the body) of a generic function `function f<T>(...)`. These
+     * are NOT real types — they only mark positions that must be substituted
+     * by `monomorphizeGeneric` at each call site.
+     *
+     * When `_compileDataEncodedConcreteType` / `_compileSopEncodedConcreteType`
+     * encounter an `AstNamedTypeExpr` whose name is here, it returns the
+     * corresponding `TirTypeParam` directly instead of going through the
+     * regular `resolveType` path.
+     */
+    readonly typeParams: Map<string, TirTypeParam> = new Map();
 
     private _isReadonly = false;
     readonly infos: ScopeInfos;
@@ -347,6 +371,60 @@ export class AstScope
         return (
             this.namespaces.get( name )
             ?? this.parent?.resolveNamespace( name )
+        );
+    }
+
+    /** define a generic type parameter in this scope; returns `false` if shadowed */
+    defineTypeParam( name: string, param: TirTypeParam ): boolean
+    {
+        if( this._isReadonly ) return false;
+        if( this.typeParams.has( name ) ) return false;
+        this.typeParams.set( name, param );
+        return true;
+    }
+
+    /** resolve a generic type parameter by walking the scope chain */
+    resolveTypeParam( name: string ): TirTypeParam | undefined
+    {
+        return (
+            this.typeParams.get( name )
+            ?? this.parent?.resolveTypeParam( name )
+        );
+    }
+
+    /**
+     * Type-parameter constraints declared via `<T implements I>` syntax.
+     * Populated by `AstCompiler._registerGenericTemplate` for the function
+     * template's compilation scope. `resolveTypeParamConstraint` walks the
+     * parent chain like the other resolvers.
+     */
+    readonly typeParamConstraints: Map<string, TypeParamConstraint> = new Map();
+
+    defineTypeParamConstraint( name: string, constraint: TypeParamConstraint ): boolean
+    {
+        if( this._isReadonly ) return false;
+        if( this.typeParamConstraints.has( name ) ) return false;
+        this.typeParamConstraints.set( name, constraint );
+        return true;
+    }
+
+    resolveTypeParamConstraint( name: string ): TypeParamConstraint | undefined
+    {
+        return (
+            this.typeParamConstraints.get( name )
+            ?? this.parent?.resolveTypeParamConstraint( name )
+        );
+    }
+
+    /**
+     * Walk the scope chain to resolve an interface by name. Returns the
+     * method-name -> AstFuncType signature map.
+     */
+    resolveInterface( name: string ): Map<string, AstFuncType> | undefined
+    {
+        return (
+            this.interfaces.get( name )
+            ?? this.parent?.resolveInterface( name )
         );
     }
 

@@ -1,6 +1,6 @@
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
 import { Delay, parseUPLC, prettyUPLC, showUPLC, UPLCConst } from "@harmoniclabs/uplc";
-import { IRConst, testOptions } from "../../IR";
+import { IRConst, testOptions, COMPILER_VERSION } from "../../IR";
 import { Compiler } from "../Compiler";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 
@@ -21,8 +21,8 @@ function noArgFunc(): int {
             ]),
             useConsoleAsOutput: true,
         });
-        // const complier = new Compiler( ioApi, defaultOptions );
-        const complier = new Compiler(ioApi, testOptions);
+        // const complier = new Compiler( ioApi, { ...defaultOptions, compilerVersion: COMPILER_VERSION } );
+        const complier = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await complier.export({ functionName: "noArgFunc", entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;
@@ -67,8 +67,8 @@ function noArgFunc(): int {
             ]),
             useConsoleAsOutput: true,
         });
-        // const complier = new Compiler( ioApi, defaultOptions );
-        const complier = new Compiler(ioApi, testOptions);
+        // const complier = new Compiler( ioApi, { ...defaultOptions, compilerVersion: COMPILER_VERSION } );
+        const complier = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await complier.export({ functionName: "noArgFunc", entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;
@@ -107,8 +107,8 @@ function noArgFunc(): int {
             ]),
             useConsoleAsOutput: true,
         });
-        // const complier = new Compiler( ioApi, defaultOptions );
-        const complier = new Compiler(ioApi, testOptions);
+        // const complier = new Compiler( ioApi, { ...defaultOptions, compilerVersion: COMPILER_VERSION } );
+        const complier = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await complier.export({ functionName: "noArgFunc", entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;
@@ -148,8 +148,8 @@ function noArgFunc( choice: boolean ): int {
             ]),
             useConsoleAsOutput: true,
         });
-        // const complier = new Compiler( ioApi, defaultOptions );
-        const complier = new Compiler(ioApi, testOptions);
+        // const complier = new Compiler( ioApi, { ...defaultOptions, compilerVersion: COMPILER_VERSION } );
+        const complier = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
 
         await complier.export({ functionName: "noArgFunc", entry: fileName, root: "/" });
         const diagnostics = complier.diagnostics;

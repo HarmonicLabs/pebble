@@ -17,7 +17,7 @@ import { TirDataStructType, TirSoPStructType } from "../../../compiler/tir/types
 import { TirAliasType } from "../../../compiler/tir/types/TirAliasType";
 import { getListTypeArg } from "../../../compiler/tir/types/utils/getListTypeArg";
 import { TirTypeParam } from "../../../compiler/tir/types/TirTypeParam";
-import { TirPairDataT, TirUnConstrDataResultT } from "../../../compiler/tir/types/TirNativeType";
+import { TirBlsG1T, TirBlsG2T, TirMlResultT, TirPairDataT, TirUnConstrDataResultT } from "../../../compiler/tir/types/TirNativeType";
 import { TirBoolT } from "../../../compiler/tir/types/TirNativeType/native/bool";
 import { TirBytesT } from "../../../compiler/tir/types/TirNativeType/native/bytes";
 import { TirDataT } from "../../../compiler/tir/types/TirNativeType/native/data";
@@ -288,6 +288,11 @@ export class IRNative
         if( type instanceof TirLinearMapEntryT ) return IRNative._equalPairData;
         if( type instanceof TirUnConstrDataResultT ) return getEqUnConstr();
         if( type instanceof TirVoidT ) return getEqVoid();
+        if(
+            type instanceof TirBlsG1T
+            || type instanceof TirBlsG2T
+            || type instanceof TirMlResultT
+        ) throw new Error("invalid type for std equality");
 
         const tsEnsureExsaustiveCheck: TirSopOptT | TirFuncT | TirSoPStructType | TirTypeParam = type;
         throw new Error("invalid type for std equality");
