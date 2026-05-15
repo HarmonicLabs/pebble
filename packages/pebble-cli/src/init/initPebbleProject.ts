@@ -173,6 +173,7 @@ ${includeOffchain ? "- `offchain/`: optional offchain scaffolding\n" : ""}
     // pebble config
     const configPath = path.join(projectRoot, "pebble.config.json");
     const pebbleConfig = {
+        compilerVersion: "^0.2.0",
         entry: "./src/index.pebble",
         outDir: "./out",
         removeTraces: true,

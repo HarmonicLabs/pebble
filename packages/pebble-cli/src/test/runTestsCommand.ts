@@ -23,7 +23,9 @@ export async function runTestsCommand(
 
     // load pebble.config.json if present, otherwise use defaults
     const configPath = path.resolve( root, flags.config ?? "./pebble.config.json" );
-    let baseConfig: CompilerOptions = productionOptions;
+    // compilerVersion is intentionally not set here — it must come from the
+    // user's pebble.config.json. If missing/invalid, the Compiler throws.
+    let baseConfig: CompilerOptions = productionOptions as CompilerOptions;
     if( existsSync( configPath ) )
     {
         try {

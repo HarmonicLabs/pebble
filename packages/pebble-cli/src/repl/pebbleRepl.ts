@@ -3,6 +3,7 @@ import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import {
     Compiler,
+    COMPILER_VERSION,
     createMemoryCompilerIoApi,
     defaultOptions,
     fromUtf8,
@@ -332,6 +333,7 @@ export async function pebbleRepl(): Promise<void>
 
         const compiler = new Compiler(ioApi, {
             ...defaultOptions,
+            compilerVersion: COMPILER_VERSION,
             silent: true,
         });
 
