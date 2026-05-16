@@ -77,6 +77,43 @@ export const hoisted_isTwo = new IRHoisted(
 );
 hoisted_isTwo.hash;
 
+// negateValue = (scaleValue -1)
+//   the scaleValue builtin is `(int, Value) -> Value`; partially applying
+//   -1 yields a unary `Value -> Value` negation. Cheaper than running a
+//   user-level multiply over the entire map.
+export const hoisted_negateValue = new IRHoisted(
+    new IRApp( IRNative.scaleValue, IRConst.int( -1 ) )
+);
+hoisted_negateValue.hash;
+
+// valueEq a b = if valueContains(a, b) then valueContains(b, a) else false
+//   Bidirectional containment is equality for canonical V4 Values (the
+//   only form the runtime ever produces). Short-circuits on the first
+//   non-containment to save the second `valueContains` traversal.
+export const hoisted_valueEq = new IRHoisted(
+    (() => {
+        const a = Symbol("valueEq_a");
+        const b = Symbol("valueEq_b");
+        return new IRFunc(
+            [ a, b ],
+            _ir_lazyIfThenElse(
+                _ir_apps(
+                    IRNative.valueContains,
+                    new IRVar( a ),
+                    new IRVar( b )
+                ),
+                _ir_apps(
+                    IRNative.valueContains,
+                    new IRVar( b ),
+                    new IRVar( a )
+                ),
+                IRConst.bool( false )
+            )
+        );
+    })()
+);
+hoisted_valueEq.hash;
+
 export const hoisted_isThree = new IRHoisted(
     new IRApp( IRNative.equalsInteger, IRConst.int( 3 ) )
 );
@@ -957,6 +994,8 @@ export function nativeToIR( native: IRNative ): IRTerm
         case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         case IRNativeTag._negateInt: return hoisted_negateInteger.clone();
         case IRNativeTag._lookupLinearMap: return hoisted_lookupLinearMap.clone();
+        case IRNativeTag._negateValue: return hoisted_negateValue.clone();
+        case IRNativeTag._valueEq: return hoisted_valueEq.clone();
         // case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         default:
         throw new Error(

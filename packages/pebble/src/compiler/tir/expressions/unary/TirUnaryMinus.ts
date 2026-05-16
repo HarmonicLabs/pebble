@@ -3,6 +3,8 @@ import { SourceRange } from "../../../../ast/Source/SourceRange";
 import { TirExpr } from "../TirExpr";
 import { ITirUnaryExpression } from "./ITirUnaryExpression";
 import { TirType } from "../../types/TirType";
+import { TirValueT } from "../../types/TirNativeType/native/value";
+import { getUnaliased } from "../../types/utils/getUnaliased";
 import { ToIRTermCtx } from "../ToIRTermCtx";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
@@ -44,8 +46,9 @@ export class TirUnaryMinus
 
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
+        const operandTy = getUnaliased( this.operand.type );
         return _ir_apps(
-            IRNative._negateInt,
+            operandTy instanceof TirValueT ? IRNative._negateValue : IRNative._negateInt,
             this.operand.toIR( ctx )
         );
     }

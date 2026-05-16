@@ -10,6 +10,8 @@ import { TirDataT } from "../../types/TirNativeType/native/data";
 import { TirIntT } from "../../types/TirNativeType/native/int";
 import { TirLinearMapT } from "../../types/TirNativeType/native/linearMap";
 import { TirListT } from "../../types/TirNativeType/native/list";
+import { TirArrayT } from "../../types/TirNativeType/native/array";
+import { TirValueT } from "../../types/TirNativeType/native/value";
 import { TirDataOptT } from "../../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../../types/TirNativeType/native/Optional/sop";
 import { TirStringT } from "../../types/TirNativeType/native/string";
@@ -26,6 +28,7 @@ import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRVar } from "../../../../IR/IRNodes/IRVar";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
+import { IRConst } from "../../../../IR/IRNodes/IRConst";
 
 export const void_t = new TirVoidT();
 export const int_t = new TirIntT();
@@ -34,8 +37,16 @@ export const bytes_t = new TirBytesT();
 export const bool_t = new TirBoolT();
 export const data_t = new TirDataT();
 
-export const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
-export const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
+export const valueMapLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
+export const valueMapAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
+// V4 native Value (ConstTyTag.value); methods route to v4 builtins.
+export const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueLovelaces";
+export const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueAmountOf";
+export const valueInsertCoinName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueInsertCoin";
+export const valueUnionName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueUnion";
+export const valueContainsName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueContains";
+export const valueScaleName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueScale";
+export const valueToDataName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueToData";
 export const getCredentialHashFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "getCredentialHash";
 
 export function populateStdScope( program: TypedProgram ): void
@@ -55,6 +66,32 @@ export function populateStdScope( program: TypedProgram ): void
     _defineStdUnambigous( bytes_t );
     _defineStdUnambigous( string_t );
     _defineStdUnambigous( data_t );
+    // Register native Value (ConstTyTag.value) in program.types so the prelude
+    // alias can wrap it. The user-facing `Value` name is defined in the
+    // prelude scope (with methods routed to v4 builtins).
+    {
+        const value_native_t = new TirValueT();
+        program.types.set( value_native_t.toTirTypeKey(), value_native_t );
+    }
+
+    const array_name = TirArrayT.toTirTypeKey();
+    program.defineGenericType(
+        array_name,
+        1,
+        ([ arg ]) => new TirArrayT( arg )
+    );
+    stdScope.defineType(
+        array_name,
+        {
+            sopTirName: array_name,
+            dataTirName: array_name,
+            allTirNames: new Set([
+                array_name
+            ]),
+            methodsNames: new Map(),
+            isGeneric: true
+        }
+    );
 
     const opt_data_name = TirDataOptT.toTirTypeKey();
     program.defineGenericType(
@@ -745,7 +782,7 @@ export function populatePreludeScope( program: TypedProgram ): void
             stake: opt_stakeCredential_t
         }, onlyData
     );
-    // type Value = LinearMap<PolicyId, LinearMap<TokenName, int>>
+    // type ValueMap = LinearMap<PolicyId, LinearMap<TokenName, int>>
     const map_tokenName_int_t = program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(),
         [ tokenName_t, int_t ]
@@ -756,36 +793,36 @@ export function populatePreludeScope( program: TypedProgram ): void
         [ policyId_t, map_tokenName_int_t ]
     );
     if(!map_policyId_map_tokenName_int_t) throw new Error("expected map_policyId_map_tokenName_int_t");
-    const value_t = _defineUnambigousAlias(
-        "Value",
+    const valueMap_t = _defineUnambigousAlias(
+        "ValueMap",
         map_policyId_map_tokenName_int_t,
         new Map([
             [
                 "lovelaces",
-                valueLovelacesName
+                valueMapLovelacesName
             ],
             [
                 "amountOf",
-                valueAmountOfName
+                valueMapAmountOfName
             ],
         ])
     );
     preludeScope.program.functions.set(
-        valueLovelacesName,
+        valueMapLovelacesName,
         new TirInlineClosedIR(
-            new TirFuncT([ value_t ], int_t ),
+            new TirFuncT([ valueMap_t ], int_t ),
             ( ctx ) => IRNative._sortedValueLovelaces,
             SourceRange.unknown
         )
     );
-    // Value.amountOf( policy: PolicyId, name: bytes ): int
+    // ValueMap.amountOf( policy: PolicyId, name: bytes ): int
     // The IR native _amountOfValue is curried as: (isPolicy)(value)(isTokenName) => int
     // where isPolicy and isTokenName are equality-check predicates.
     // This wrapper adapts (self, policy, tokenName) => _amountOfValue(p => equalsByteString(p, policy))(self)(tn => equalsByteString(tn, tokenName))
     preludeScope.program.functions.set(
-        valueAmountOfName,
+        valueMapAmountOfName,
         new TirInlineClosedIR(
-            new TirFuncT([ value_t, policyId_t, bytes_t ], int_t ),
+            new TirFuncT([ valueMap_t, policyId_t, bytes_t ], int_t ),
             ( ctx ) => {
                 const self = Symbol("amtOf_self");
                 const policy = Symbol("amtOf_policy");
@@ -819,37 +856,135 @@ export function populatePreludeScope( program: TypedProgram ): void
         )
     );
 
-    /* // TODO
-    untagged struct FlatValueEntry {
-        policy: PolicyId,
-        name: bytes,
-        amount: int
-    }
-
-    type FlatValue = List<FlatValueEntry>;
-
-    type Value implements {
-        amountOf( policy: PolicyId, name: bytes ): int
-        {
-            return native.valueAmountOf( this, policy, name );
-        }
-        lovelaces(): int
-        {
-            return this.amountOf( #, # );
-        }
-        flatten(): FlatValue
-        {
-            return native.flattenValue( this );
-        }
-    }
-
-    type FlatValue implements {
-        unflatten(): Value
-        {
-            return native.unflattenValue( this );
-        }
-    }
-    */
+    // Native V4 `Value` (ConstTyTag.value). Methods route to v4 builtins.
+    const value_native_t = program.types.get( TirValueT.toTirTypeKey() );
+    if(!value_native_t) throw new Error("expected native Value type registered");
+    const value_t = _defineUnambigousAlias(
+        "Value",
+        value_native_t,
+        new Map([
+            [ "lovelaces", valueLovelacesName ],
+            [ "amountOf",  valueAmountOfName  ],
+            [ "insert",    valueInsertCoinName ],
+            [ "union",     valueUnionName    ],
+            [ "contains",  valueContainsName ],
+            [ "scale",     valueScaleName    ],
+            [ "toData",    valueToDataName   ],
+        ])
+    );
+    // Value.lovelaces(): int  -- lookupCoin "" "" self
+    preludeScope.program.functions.set(
+        valueLovelacesName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t ], int_t ),
+            ( ctx ) => {
+                const self = Symbol("value_lovelaces_self");
+                return new IRFunc(
+                    [ self ],
+                    _ir_apps(
+                        IRNative.lookupCoin,
+                        IRConst.bytes( new Uint8Array(0) ),
+                        IRConst.bytes( new Uint8Array(0) ),
+                        new IRVar( self )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.amountOf( policy, name ): int  -- lookupCoin policy name self
+    preludeScope.program.functions.set(
+        valueAmountOfName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, policyId_t, bytes_t ], int_t ),
+            ( ctx ) => {
+                const self = Symbol("value_amountOf_self");
+                const policy = Symbol("value_amountOf_policy");
+                const tokenName = Symbol("value_amountOf_tokenName");
+                return new IRFunc(
+                    [ self, policy, tokenName ],
+                    _ir_apps(
+                        IRNative.lookupCoin,
+                        new IRVar( policy ),
+                        new IRVar( tokenName ),
+                        new IRVar( self )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.insert( policy, name, amount ): Value -- insertCoin policy name amount self
+    preludeScope.program.functions.set(
+        valueInsertCoinName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, policyId_t, bytes_t, int_t ], value_t ),
+            ( ctx ) => {
+                const self = Symbol("value_insert_self");
+                const policy = Symbol("value_insert_policy");
+                const tokenName = Symbol("value_insert_tokenName");
+                const amount = Symbol("value_insert_amount");
+                return new IRFunc(
+                    [ self, policy, tokenName, amount ],
+                    _ir_apps(
+                        IRNative.insertCoin,
+                        new IRVar( policy ),
+                        new IRVar( tokenName ),
+                        new IRVar( amount ),
+                        new IRVar( self )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.union( other ): Value -- unionValue self other
+    preludeScope.program.functions.set(
+        valueUnionName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], value_t ),
+            ( ctx ) => IRNative.unionValue,
+            SourceRange.unknown
+        )
+    );
+    // Value.contains( other ): bool -- valueContains self other
+    preludeScope.program.functions.set(
+        valueContainsName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], bool_t ),
+            ( ctx ) => IRNative.valueContains,
+            SourceRange.unknown
+        )
+    );
+    // Value.scale( factor ): Value -- scaleValue factor self
+    preludeScope.program.functions.set(
+        valueScaleName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, int_t ], value_t ),
+            ( ctx ) => {
+                const self = Symbol("value_scale_self");
+                const factor = Symbol("value_scale_factor");
+                return new IRFunc(
+                    [ self, factor ],
+                    _ir_apps(
+                        IRNative.scaleValue,
+                        new IRVar( factor ),
+                        new IRVar( self )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.toData(): data -- valueData self
+    preludeScope.program.functions.set(
+        valueToDataName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t ], data_t ),
+            ( ctx ) => IRNative.valueData,
+            SourceRange.unknown
+        )
+    );
     
     // struct OutputDatum {
     //     NoDatum {}

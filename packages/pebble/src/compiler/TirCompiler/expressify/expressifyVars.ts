@@ -41,7 +41,7 @@ import { TirUnaryMinus } from "../../tir/expressions/unary/TirUnaryMinus";
 import { TirUnaryPlus } from "../../tir/expressions/unary/TirUnaryPlus";
 import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
-import { bool_t, bytes_t, data_t, int_t, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
+import { bool_t, bytes_t, data_t, int_t, valueMapAmountOfName } from "../../tir/program/stdScope/stdScope";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
@@ -539,7 +539,7 @@ function expressifyMethodCall(
         // `_amountOfValue(eqByteString(policy))(value)(eqByteString(name))`
         // skipping the wrapper function indirection.
         if(
-            tirMethodName === valueAmountOfName
+            tirMethodName === valueMapAmountOfName
             && methodCall.args.length === 2
         ) {
             const [ policyArg, nameArg ] = methodCall.args;

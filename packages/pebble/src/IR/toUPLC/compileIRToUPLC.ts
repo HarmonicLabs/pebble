@@ -18,6 +18,7 @@ import { IRApp, IRCase, IRConstr, IRFunc, IRNative, IRVar } from "../IRNodes";
 import { replaceForcedNativesWithHoisted } from "./subRoutines/replaceForcedNativesWithHoisted";
 import { performUplcOptimizationsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/performUplcOptimizationsAndReturnRoot";
 import { rewriteNativesAppliedToConstantsAndReturnRoot } from "./subRoutines/rewriteNativesAppliedToConstantsAndReturnRoot";
+import { rewriteToCaseOverConstAndReturnRoot } from "./subRoutines/rewriteToCaseOverConstAndReturnRoot";
 import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
@@ -75,6 +76,14 @@ export function compileIRToUPLC(
     term = replaceNativesAndReturnRoot( term );
     // re-call rewrite to optimize introduced hoisted
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
+
+    // V4: lower `strictIfThenElse` / `strictChooseList` triple-apps to
+    // `IRCase` BEFORE `replaceForcedNativesWithHoisted` would otherwise
+    // hoist `(force ifThenElse)` into a shared variable that's no longer
+    // pattern-matchable as a native.
+    if( options.targetUplcVersion.isV4Friendly() ) {
+        term = rewriteToCaseOverConstAndReturnRoot( term );
+    }
 
     // debugAsserts && _debug_assertions( term );
 
@@ -192,13 +201,18 @@ export function compileIRToUPLC(
 
     term = removeUnusedVarsAndReturnRoot( term );
     term = performUplcOptimizationsAndReturnRoot( term, options );
+
+    // V4: rewrite strictIfThenElse into IRCase-over-Const, and prune
+    // trailing IRError continuations from any IRCase.
+    if( options.targetUplcVersion.isV4Friendly() ) {
+        term = rewriteToCaseOverConstAndReturnRoot( term );
+    }
+
     term = ensureProperlyForcedBuiltinsAndReturnRoot( term );
 
     if(
         options.addMarker &&
-        options.targetUplcVersion.major >= 1 &&
-        options.targetUplcVersion.minor >= 1 &&
-        options.targetUplcVersion.patch >= 0
+        options.targetUplcVersion.isV3Friendly()
     )
     {
         term = new IRCase(

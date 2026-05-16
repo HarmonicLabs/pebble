@@ -13,6 +13,8 @@ import { TirBytesT } from "../../tir/types/TirNativeType/native/bytes";
 import { TirDataT } from "../../tir/types/TirNativeType/native/data";
 import { TirFuncT } from "../../tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../tir/types/TirNativeType/native/int";
+import { TirArrayT } from "../../tir/types/TirNativeType/native/array";
+import { TirValueT } from "../../tir/types/TirNativeType/native/value";
 import { TirLinearMapT } from "../../tir/types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../tir/types/TirNativeType/native/list";
@@ -85,6 +87,10 @@ export function getPropAccessReturnType(
     if( objType instanceof TirBlsG1T ) return undefined;
     if( objType instanceof TirBlsG2T ) return undefined;
     if( objType instanceof TirMlResultT ) return undefined;
+    // V4 natives — methods are reached through prelude/std aliases, not via
+    // direct prop-access on the native type.
+    if( objType instanceof TirValueT ) return undefined;
+    if( objType instanceof TirArrayT ) return undefined;
 
     const tsEnsureExhaustiveCheck: never = objType;
     console.error( objType );

@@ -1,4 +1,5 @@
 export * from "./Optional";
+export * from "./array";
 export * from "./bool";
 export * from "./bytes";
 export * from "./data";
@@ -8,4 +9,5 @@ export * from "./linearMap";
 export * from "./linearMapEntry";
 export * from "./list";
 export * from "./string";
+export * from "./value";
 export * from "./void";

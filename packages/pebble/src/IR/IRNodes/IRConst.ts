@@ -23,6 +23,8 @@ import { TirBytesT } from "../../compiler/tir/types/TirNativeType/native/bytes";
 import { TirDataT } from "../../compiler/tir/types/TirNativeType/native/data";
 import { TirFuncT } from "../../compiler/tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../compiler/tir/types/TirNativeType/native/int";
+import { TirArrayT } from "../../compiler/tir/types/TirNativeType/native/array";
+import { TirValueT } from "../../compiler/tir/types/TirNativeType/native/value";
 import { TirLinearMapT } from "../../compiler/tir/types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../../compiler/tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../compiler/tir/types/TirNativeType/native/list";
@@ -273,6 +275,13 @@ function isValueAssignableToType( value: IRConstValue, type: TirType ): boolean
         || type instanceof TirMlResultT
     ) return false;
 
+    // V4 native `Value` and `Array<T>` are never IRConst literals — they
+    // only appear at runtime as results of v4 builtins.
+    if(
+        type instanceof TirValueT
+        || type instanceof TirArrayT
+    ) return false;
+
     const tsEnsureExsaustiveCheck: never = type;
     return false;
 }
@@ -358,6 +367,8 @@ function serializeIRConstValue( value: any, type: TirType ): Uint8Array
         || type instanceof TirBlsG1T
         || type instanceof TirBlsG2T
         || type instanceof TirMlResultT
+        || type instanceof TirValueT
+        || type instanceof TirArrayT
     ) throw new Error("invalid uplc const type");
 
     const tsEnsureExsaustiveCheck: never = type;
@@ -398,6 +409,14 @@ export function tirTypeToUplcType( t: TirType ): ConstType
         const elemsT = tirTypeToUplcType( getListTypeArg( t )! );
         return constT.listOf( elemsT );
     }
+
+    if( t instanceof TirArrayT )
+    {
+        const elemsT = tirTypeToUplcType( (t as TirArrayT).typeArg );
+        return constT.arrayOf( elemsT );
+    }
+
+    if( t instanceof TirValueT ) return constT.value;
 
     if(
         t instanceof TirDataT

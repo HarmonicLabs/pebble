@@ -109,6 +109,22 @@ export enum IRNativeTag {
     findFirstSetBit                 = 85,
     ripemd_160                      = 86,
 
+    // Chang2 / Plutus V4
+    expModInteger                   = 87,
+    dropList                        = 88,
+    lengthOfArray                   = 89,
+    listToArray                     = 90,
+    indexArray                      = 91,
+    bls12_381_G1_multiScalarMul     = 92,
+    bls12_381_G2_multiScalarMul     = 93,
+    insertCoin                      = 94,
+    lookupCoin                      = 95,
+    unionValue                      = 96,
+    valueContains                   = 97,
+    valueData                       = 98,
+    unValueData                     = 99,
+    scaleValue                      = 100,
+
     ////////////////////////////////////////////////////////////////////////////////
     // -------------------------------------------------------------------------- //
     // -------------------------- here starts the fun  -------------------------- //
@@ -162,6 +178,13 @@ export enum IRNativeTag {
     _increment            = -46,
     _decrement            = -47,
     _lookupLinearMap       = -48,
+    /** partial application of `scaleValue` with -1 — negates a native Value. */
+    _negateValue           = -49,
+    /**
+     * `\a b -> valueContains(a, b) && valueContains(b, a)` — equality on
+     * canonical V4 Values. Short-circuits on the first inequality.
+     */
+    _valueEq               = -50,
 }
 Object.freeze( IRNativeTag );
 
@@ -210,6 +233,8 @@ export function nativeTagToString( nativeTag: IRNativeTag ): string
         case IRNativeTag._increment     : return "increment";
         case IRNativeTag._decrement     : return "decrement";
         case IRNativeTag._lookupLinearMap : return "lookupLinearMap";
+        case IRNativeTag._negateValue   : return "negateValue";
+        case IRNativeTag._valueEq       : return "valueEq";
 
         default: return ""
     }

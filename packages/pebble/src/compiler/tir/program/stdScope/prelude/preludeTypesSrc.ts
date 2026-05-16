@@ -152,9 +152,9 @@ export struct Address {
     stake: Optional<Credential>
 }
 
-export type Value = LinearMap<PolicyId, LinearMap<TokenName, int>>
+export type ValueMap = LinearMap<PolicyId, LinearMap<TokenName, int>>
 
-type Value implements {
+type ValueMap implements {
     amountOf( policy: PolicyId, name: bytes ): int
     {
         // todo
@@ -163,6 +163,39 @@ type Value implements {
     lovelaces(): int
     {
         return this.amountOf( #, # );
+    }
+}
+
+// `Value` is a native Plutus V4 built-in value (ConstTyTag.value).
+// It is reached from `data` via `unValueData`; the ledger always passes data.
+type Value implements {
+    amountOf( policy: PolicyId, name: bytes ): int
+    {
+        return native.lookupCoin( policy, name, this );
+    }
+    lovelaces(): int
+    {
+        return this.amountOf( #, # );
+    }
+    insert( policy: PolicyId, name: bytes, amount: int ): Value
+    {
+        return native.insertCoin( policy, name, amount, this );
+    }
+    union( other: Value ): Value
+    {
+        return native.unionValue( this, other );
+    }
+    contains( other: Value ): bool
+    {
+        return native.valueContains( this, other );
+    }
+    scale( factor: int ): Value
+    {
+        return native.scaleValue( factor, this );
+    }
+    toData(): data
+    {
+        return native.valueData( this );
     }
 }
 

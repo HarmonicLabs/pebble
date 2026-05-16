@@ -21,6 +21,8 @@ import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
 import { TirStringT } from "../types/TirNativeType/native/string";
 import { TirVoidT } from "../types/TirNativeType/native/void";
+import { TirValueT } from "../types/TirNativeType/native/value";
+import { TirArrayT } from "../types/TirNativeType/native/array";
 import { TirDataStructType, TirSoPStructType } from "../types/TirStructType";
 import { isTirType, TirType } from "../types/TirType";
 import { getListTypeArg } from "../types/utils/getListTypeArg";
@@ -100,6 +102,34 @@ export function _inlineFromData(
 
     // LinearMapEntry is Pair<Data,Data> at runtime — no conversion needed
     if( to_t instanceof TirLinearMapEntryT ) return dataExprIR;
+
+    // V4 native Value: data -> Value via `unValueData`
+    if( to_t instanceof TirValueT )
+    return _ir_apps(
+        IRNative.unValueData,
+        dataExprIR
+    );
+
+    // V4 native Array<T>: data -> [data] (unListData) -> Array<T>
+    // for non-data element types we map elements through their fromData first.
+    if( to_t instanceof TirArrayT )
+    {
+        const elems_t = getUnaliased( (to_t as TirArrayT).typeArg );
+        const listOfDataExpr = _ir_apps( IRNative.unListData, dataExprIR );
+        if( elems_t instanceof TirDataStructType
+            || elems_t instanceof TirDataOptT
+            || elems_t instanceof TirDataT
+        ) return _ir_apps( IRNative.listToArray, listOfDataExpr );
+        return _ir_apps(
+            IRNative.listToArray,
+            _ir_apps(
+                IRNative._mkMapList,
+                IRConst.listOf( elems_t )([]),
+                _fromDataUplcFunc( elems_t ),
+                listOfDataExpr
+            )
+        );
+    }
 
     if( to_t instanceof TirListT )
     {
@@ -190,6 +220,8 @@ export function _fromDataUplcFunc(
     if( target_t instanceof TirVoidT ) return _mkUnit.clone();
     if( target_t instanceof TirBoolT ) return _boolFromData.clone();
     if( target_t instanceof TirStringT ) return _strFromData.clone();
+    // V4 native Value: data -> Value via `unValueData`
+    if( target_t instanceof TirValueT ) return IRNative.unValueData;
 
     if( target_t instanceof TirLinearMapT )
     // linear maps only have pairs as elements

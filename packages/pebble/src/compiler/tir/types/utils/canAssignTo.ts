@@ -5,6 +5,8 @@ import { TirBytesT } from "../TirNativeType/native/bytes";
 import { TirDataT } from "../TirNativeType/native/data";
 import { TirFuncT } from "../TirNativeType/native/function";
 import { TirIntT } from "../TirNativeType/native/int";
+import { TirArrayT } from "../TirNativeType/native/array";
+import { TirValueT } from "../TirNativeType/native/value";
 import { TirLinearMapT } from "../TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../TirNativeType/native/linearMapEntry";
 import { TirListT } from "../TirNativeType/native/list";
@@ -261,6 +263,12 @@ function uncheckedGetCanAssign(
     if( b instanceof TirBlsG1T ) return a instanceof TirBlsG1T ? CanAssign.Yes : CanAssign.No;
     if( b instanceof TirBlsG2T ) return a instanceof TirBlsG2T ? CanAssign.Yes : CanAssign.No;
     if( b instanceof TirMlResultT ) return a instanceof TirMlResultT ? CanAssign.Yes : CanAssign.No;
+    // V4 native Value / Array<T>
+    if( b instanceof TirValueT ) return a instanceof TirValueT ? CanAssign.Yes : CanAssign.No;
+    if( b instanceof TirArrayT ) {
+        if( !( a instanceof TirArrayT ) ) return CanAssign.No;
+        return uncheckedGetCanAssign( (a as TirArrayT).typeArg, (b as TirArrayT).typeArg, symbols );
+    }
 
     const tsEnsureExhautstiveCheck: never = b;
     return CanAssign.No;

@@ -23,6 +23,8 @@ import { TirBytesT } from "../../../compiler/tir/types/TirNativeType/native/byte
 import { TirDataT } from "../../../compiler/tir/types/TirNativeType/native/data";
 import { TirFuncT } from "../../../compiler/tir/types/TirNativeType/native/function";
 import { TirIntT } from "../../../compiler/tir/types/TirNativeType/native/int";
+import { TirArrayT } from "../../../compiler/tir/types/TirNativeType/native/array";
+import { TirValueT } from "../../../compiler/tir/types/TirNativeType/native/value";
 import { TirLinearMapT } from "../../../compiler/tir/types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../../../compiler/tir/types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../../compiler/tir/types/TirNativeType/native/list";
@@ -227,6 +229,21 @@ export class IRNative
     static get countSetBits() { return new IRNative( IRNativeTag.countSetBits ); }
     static get findFirstSetBit() { return new IRNative( IRNativeTag.findFirstSetBit ); }
     static get ripemd_160() { return new IRNative( IRNativeTag.ripemd_160 ); }
+    // Chang2 / Plutus V4
+    static get expModInteger() { return new IRNative( IRNativeTag.expModInteger ); }
+    static get dropList() { return new IRNative( IRNativeTag.dropList ); }
+    static get lengthOfArray() { return new IRNative( IRNativeTag.lengthOfArray ); }
+    static get listToArray() { return new IRNative( IRNativeTag.listToArray ); }
+    static get indexArray() { return new IRNative( IRNativeTag.indexArray ); }
+    static get bls12_381_G1_multiScalarMul() { return new IRNative( IRNativeTag.bls12_381_G1_multiScalarMul ); }
+    static get bls12_381_G2_multiScalarMul() { return new IRNative( IRNativeTag.bls12_381_G2_multiScalarMul ); }
+    static get insertCoin() { return new IRNative( IRNativeTag.insertCoin ); }
+    static get lookupCoin() { return new IRNative( IRNativeTag.lookupCoin ); }
+    static get unionValue() { return new IRNative( IRNativeTag.unionValue ); }
+    static get valueContains() { return new IRNative( IRNativeTag.valueContains ); }
+    static get valueData() { return new IRNative( IRNativeTag.valueData ); }
+    static get unValueData() { return new IRNative( IRNativeTag.unValueData ); }
+    static get scaleValue() { return new IRNative( IRNativeTag.scaleValue ); }
 
     static get _dropList() { return new IRNative( IRNativeTag._dropList ); }
     static get _foldr() { return new IRNative( IRNativeTag._foldr ); }
@@ -267,6 +284,8 @@ export class IRNative
     static get _increment() { return new IRNative( IRNativeTag._increment ); }
     static get _decrement() { return new IRNative( IRNativeTag._decrement ); }
     static get _isZero() { return new IRNative( IRNativeTag._isZero ); }
+    static get _negateValue() { return new IRNative( IRNativeTag._negateValue ); }
+    static get _valueEq() { return new IRNative( IRNativeTag._valueEq ); }
 
 
     static equals( type: TirType ): IRTerm
@@ -288,10 +307,13 @@ export class IRNative
         if( type instanceof TirLinearMapEntryT ) return IRNative._equalPairData;
         if( type instanceof TirUnConstrDataResultT ) return getEqUnConstr();
         if( type instanceof TirVoidT ) return getEqVoid();
+        // V4 native Value: equality via bidirectional valueContains
+        if( type instanceof TirValueT ) return IRNative._valueEq;
         if(
             type instanceof TirBlsG1T
             || type instanceof TirBlsG2T
             || type instanceof TirMlResultT
+            || type instanceof TirArrayT
         ) throw new Error("invalid type for std equality");
 
         const tsEnsureExsaustiveCheck: TirSopOptT | TirFuncT | TirSoPStructType | TirTypeParam = type;

@@ -14,12 +14,15 @@ import { TirDataOptT } from "./native/Optional/data";
 import { TirSopOptT } from "./native/Optional/sop";
 import { TirStringT } from "./native/string";
 import { TirVoidT } from "./native/void";
+import { TirArrayT } from "./native/array";
+import { TirValueT } from "./native/value";
 
 export type TirNamedDestructableNativeType
     = TirDataT
     | TirDataOptT<TirType>
     | TirSopOptT<TirType>
     | TirListT<TirType>
+    | TirArrayT<TirType>
     | TirLinearMapT<TirType,TirType>
     ;
 
@@ -30,6 +33,7 @@ export function isTirNamedDestructableNativeType( t: any ): t is TirNamedDestruc
         || t instanceof TirDataOptT
         || t instanceof TirSopOptT
         || t instanceof TirListT
+        || t instanceof TirArrayT
         || t instanceof TirLinearMapT
     );
 }
@@ -44,6 +48,8 @@ export type TirNativeType
     | TirDataOptT<TirType>
     | TirSopOptT<TirType>
     | TirListT<TirType>
+    | TirArrayT<TirType>
+    | TirValueT
     | TirLinearMapT<TirType,TirType>
     | TirLinearMapEntryT<TirType,TirType>
     | TirFuncT
@@ -66,6 +72,8 @@ export function isTirNativeType( t: any ): t is TirNativeType
         || t instanceof TirDataOptT
         || t instanceof TirSopOptT
         || t instanceof TirListT
+        || t instanceof TirArrayT
+        || t instanceof TirValueT
         || t instanceof TirLinearMapT
         || t instanceof TirLinearMapEntryT
         || t instanceof TirFuncT // =>

@@ -10,7 +10,9 @@ import { TirUnaryPlus } from "../../../tir/expressions/unary/TirUnaryPlus";
 import { TirUnaryPrefixExpr } from "../../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../../tir/expressions/unary/TirUnaryTilde";
 import { TirType } from "../../../tir/types/TirType";
+import { TirValueT } from "../../../tir/types/TirNativeType/native/value";
 import { canAssignTo, canAssignToOptional } from "../../../tir/types/utils/canAssignTo";
+import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "./_compileExpr";
 
@@ -49,9 +51,20 @@ export function _compileUnaryPrefixExpr(
         || expr instanceof UnaryMinus
     )
     {
-        const operand = _compileExpr( ctx, expr.operand, int_t );
+        // Probe without hint so we can spot `-Value` (TirValueT) before
+        // failing the int check.
+        const operand = _compileExpr( ctx, expr.operand, undefined );
         if( !operand ) return undefined;
         const operandType = operand.type;
+        const unaliasedTy = getUnaliased( operandType );
+
+        if( unaliasedTy instanceof TirValueT )
+        {
+            // unary plus on Value is the identity; unary minus negates it.
+            if( expr instanceof UnaryPlus ) return new TirUnaryPlus( operand, operandType, expr.range );
+            if( expr instanceof UnaryMinus ) return new TirUnaryMinus( operand, operandType, expr.range );
+        }
+
         if( !canAssignTo( operandType, int_t ) ) {
             return ctx.error(
                 DiagnosticCode.Type_0_is_not_assignable_to_type_1,

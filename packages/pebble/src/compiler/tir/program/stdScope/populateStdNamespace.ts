@@ -19,13 +19,19 @@ import {
 import { TirLinearMapT } from "../../types/TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../../types/TirNativeType/native/linearMapEntry";
 import { TirListT } from "../../types/TirNativeType/native/list";
+import { TirArrayT } from "../../types/TirNativeType/native/array";
+import { TirValueT } from "../../types/TirNativeType/native/value";
 import { TirSopOptT } from "../../types/TirNativeType/native/Optional/sop";
 import { TirTypeParam } from "../../types/TirTypeParam";
 import { TirType } from "../../types/TirType";
 import { TypedProgram } from "../TypedProgram";
 import {
     bool_t, bytes_t, data_t, int_t, string_t, void_t,
-    valueLovelacesName, valueAmountOfName, getCredentialHashFuncName,
+    valueLovelacesName, valueAmountOfName,
+    valueMapLovelacesName, valueMapAmountOfName,
+    valueInsertCoinName, valueUnionName, valueContainsName,
+    valueScaleName, valueToDataName,
+    getCredentialHashFuncName,
 } from "./stdScope";
 
 /**
@@ -347,6 +353,17 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( builtinsNsScope, "equalsData",     IRNativeTag.equalsData,     new TirFuncT([ data_t, data_t ], bool_t), blt );
     defineBuiltin( builtinsNsScope, "serialiseData",  IRNativeTag.serialiseData,  new TirFuncT([ data_t ], bytes_t), blt );
 
+    // Chang2 / Plutus V4
+    const value_native_t = new TirValueT();
+    defineBuiltin( builtinsNsScope, "expModInteger",  IRNativeTag.expModInteger,  new TirFuncT([ int_t, int_t, int_t ], int_t), blt );
+    defineBuiltin( builtinsNsScope, "insertCoin",     IRNativeTag.insertCoin,     new TirFuncT([ bytes_t, bytes_t, int_t, value_native_t ], value_native_t), blt );
+    defineBuiltin( builtinsNsScope, "lookupCoin",     IRNativeTag.lookupCoin,     new TirFuncT([ bytes_t, bytes_t, value_native_t ], int_t), blt );
+    defineBuiltin( builtinsNsScope, "unionValue",     IRNativeTag.unionValue,     new TirFuncT([ value_native_t, value_native_t ], value_native_t), blt );
+    defineBuiltin( builtinsNsScope, "valueContains",  IRNativeTag.valueContains,  new TirFuncT([ value_native_t, value_native_t ], bool_t), blt );
+    defineBuiltin( builtinsNsScope, "valueData",      IRNativeTag.valueData,      new TirFuncT([ value_native_t ], data_t), blt );
+    defineBuiltin( builtinsNsScope, "unValueData",    IRNativeTag.unValueData,    new TirFuncT([ data_t ], value_native_t), blt );
+    defineBuiltin( builtinsNsScope, "scaleValue",     IRNativeTag.scaleValue,     new TirFuncT([ int_t, value_native_t ], value_native_t), blt );
+
     // ------------------------------------------------------------------
     // 5b. std.builtins -- polymorphic intrinsics via native generic templates
     // ------------------------------------------------------------------
@@ -572,12 +589,14 @@ export function populateStdNamespace( program: TypedProgram ): void
     //    Method-call surface (e.g. `xs.map(f)`) is unchanged.
     // ------------------------------------------------------------------
     const listNsScope       = new AstScope( stdNsScope, program, {} );
+    const arrayNsScope      = new AstScope( stdNsScope, program, {} );
     const linearMapNsScope  = new AstScope( stdNsScope, program, {} );
     const bytesNsScope      = new AstScope( stdNsScope, program, {} );
     const intNsScope        = new AstScope( stdNsScope, program, {} );
     const boolNsScope       = new AstScope( stdNsScope, program, {} );
     const dataNsScope       = new AstScope( stdNsScope, program, {} );
     const valueNsScope      = new AstScope( stdNsScope, program, {} );
+    const valueMapNsScope   = new AstScope( stdNsScope, program, {} );
     const credentialNsScope = new AstScope( stdNsScope, program, {} );
 
     // ---------- std.list (polymorphic) ----------
@@ -786,9 +805,36 @@ export function populateStdNamespace( program: TypedProgram ): void
         }
         scope.functions.set( astName, existingTirFuncName );
     }
+    // std.value.* — methods on the V4 native Value
     defineAliasFromProgram( valueNsScope,      "amountOf",  valueAmountOfName );
     defineAliasFromProgram( valueNsScope,      "lovelaces", valueLovelacesName );
+    defineAliasFromProgram( valueNsScope,      "insert",    valueInsertCoinName );
+    defineAliasFromProgram( valueNsScope,      "union",     valueUnionName );
+    defineAliasFromProgram( valueNsScope,      "contains",  valueContainsName );
+    defineAliasFromProgram( valueNsScope,      "scale",     valueScaleName );
+    defineAliasFromProgram( valueNsScope,      "toData",    valueToDataName );
+    // std.valueMap.* — methods on the V3-style AssocMap-of-AssocMap representation
+    defineAliasFromProgram( valueMapNsScope,   "amountOf",  valueMapAmountOfName );
+    defineAliasFromProgram( valueMapNsScope,   "lovelaces", valueMapLovelacesName );
     defineAliasFromProgram( credentialNsScope, "hash",      getCredentialHashFuncName );
+
+    // ---------- std.array (polymorphic; V4 native array) ----------
+    const arrayNs = "array";
+    defineGenericBuiltin( arrayNsScope, "length", 1,
+        ( [ T ] ) => new TirFuncT([ new TirArrayT( T ) ], int_t),
+        () => new IRNative( IRNativeTag.lengthOfArray ),
+        arrayNs
+    );
+    defineGenericBuiltin( arrayNsScope, "at", 1,
+        ( [ T ] ) => new TirFuncT([ new TirArrayT( T ), int_t ], T),
+        () => new IRNative( IRNativeTag.indexArray ),
+        arrayNs
+    );
+    defineGenericBuiltin( arrayNsScope, "fromList", 1,
+        ( [ T ] ) => new TirFuncT([ new TirListT( T ) ], new TirArrayT( T )),
+        () => new IRNative( IRNativeTag.listToArray ),
+        arrayNs
+    );
 
     // ---------- top-level std.id<T> / std.equals<T> ----------
     // id<T>(x: T): T  -- the polymorphic identity. Useful as a default
@@ -829,23 +875,27 @@ export function populateStdNamespace( program: TypedProgram ): void
 
     builtinsNsScope.readonly();
     listNsScope.readonly();
+    arrayNsScope.readonly();
     linearMapNsScope.readonly();
     bytesNsScope.readonly();
     intNsScope.readonly();
     boolNsScope.readonly();
     dataNsScope.readonly();
     valueNsScope.readonly();
+    valueMapNsScope.readonly();
     credentialNsScope.readonly();
 
     stdNsScope.defineNamespace({ name: "crypto",     publicScope: cryptoNsScope }     as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "builtins",   publicScope: builtinsNsScope }   as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "list",       publicScope: listNsScope }       as NamespaceSymbol);
+    stdNsScope.defineNamespace({ name: "array",      publicScope: arrayNsScope }      as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "linearMap",  publicScope: linearMapNsScope }  as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "bytes",      publicScope: bytesNsScope }      as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "int",        publicScope: intNsScope }        as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "boolean",    publicScope: boolNsScope }       as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "data",       publicScope: dataNsScope }       as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "value",      publicScope: valueNsScope }      as NamespaceSymbol);
+    stdNsScope.defineNamespace({ name: "valueMap",   publicScope: valueMapNsScope }   as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "credential", publicScope: credentialNsScope } as NamespaceSymbol);
     stdNsScope.readonly();
 

@@ -10,6 +10,7 @@ import { getUnaliased } from "../../types/utils/getUnaliased";
 import { CEKConst, Machine } from "@harmoniclabs/plutus-machine";
 import { TirBytesT } from "../../types/TirNativeType/native/bytes";
 import { TirIntT } from "../../types/TirNativeType/native/int";
+import { TirValueT } from "../../types/TirNativeType/native/value";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../../IR/IRTerm";
 import { IRConst } from "../../../../IR/IRNodes/IRConst";
@@ -457,6 +458,7 @@ export class TirAddExpr
     get type(): TirType
     {
         const leftType = getUnaliased( this.left.type );
+        if( leftType instanceof TirValueT ) return this.left.type;
         if(
             leftType instanceof TirIntT
             || leftType instanceof TirBytesT
@@ -500,6 +502,7 @@ export class TirAddExpr
         const irFunc = (
             type instanceof TirIntT ? IRNative.addInteger :
             type instanceof TirBytesT ? IRNative.appendByteString :
+            type instanceof TirValueT ? IRNative.unionValue :
             undefined
         );
         if( !irFunc ) throw new Error("invalid left type for TirAddExpr");
@@ -521,7 +524,12 @@ export class TirAddExpr
 export class TirSubExpr
     implements ITirBinaryExpr
 {
-    readonly type: TirType = int_t;
+    get type(): TirType
+    {
+        const leftType = getUnaliased( this.left.type );
+        if( leftType instanceof TirValueT ) return this.left.type;
+        return int_t;
+    }
     constructor(
         public left: TirExpr,
         public right: TirExpr,
@@ -538,7 +546,7 @@ export class TirSubExpr
         const indent_base = singleIndent.repeat(indent);
         return `(${this.left.pretty(indent)} - ${this.right.pretty(indent)})`;
     }
-    
+
     clone(): TirExpr
     {
         return new TirSubExpr(
@@ -549,9 +557,21 @@ export class TirSubExpr
     }
 
     get isConstant(): boolean { return this.left.isConstant && this.right.isConstant; }
-    
+
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
+        const type = getUnaliased( this.left.type );
+        if( type instanceof TirValueT ) {
+            // a - b  →  unionValue a (negateValue b)
+            return _ir_apps(
+                IRNative.unionValue,
+                this.left.toIR( ctx ),
+                _ir_apps(
+                    IRNative._negateValue,
+                    this.right.toIR( ctx )
+                )
+            );
+        }
         return _ir_apps(
             IRNative.subtractInteger,
             this.left.toIR( ctx ),
@@ -570,7 +590,14 @@ export class TirSubExpr
 export class TirMultExpr
     implements ITirBinaryExpr
 {
-    readonly type: TirType = int_t;
+    get type(): TirType
+    {
+        const leftTy  = getUnaliased( this.left.type );
+        const rightTy = getUnaliased( this.right.type );
+        if( leftTy instanceof TirValueT ) return this.left.type;
+        if( rightTy instanceof TirValueT ) return this.right.type;
+        return int_t;
+    }
     constructor(
         public left: TirExpr,
         public right: TirExpr,
@@ -587,7 +614,7 @@ export class TirMultExpr
         const indent_base = singleIndent.repeat(indent);
         return `(${this.left.pretty(indent)} * ${this.right.pretty(indent)})`;
     }
-    
+
     clone(): TirExpr
     {
         return new TirMultExpr(
@@ -598,9 +625,30 @@ export class TirMultExpr
     }
 
     get isConstant(): boolean { return this.left.isConstant && this.right.isConstant; }
-    
+
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
+        const leftTy  = getUnaliased( this.left.type );
+        const rightTy = getUnaliased( this.right.type );
+
+        // scaleValue :: int -> Value -> Value
+        if( leftTy instanceof TirValueT ) {
+            // Value * int  →  scaleValue int Value
+            return _ir_apps(
+                IRNative.scaleValue,
+                this.right.toIR( ctx ),
+                this.left.toIR( ctx ),
+            );
+        }
+        if( rightTy instanceof TirValueT ) {
+            // int * Value  →  scaleValue int Value
+            return _ir_apps(
+                IRNative.scaleValue,
+                this.left.toIR( ctx ),
+                this.right.toIR( ctx ),
+            );
+        }
+
         return _ir_apps(
             IRNative.multiplyInteger,
             this.left.toIR( ctx ),
