@@ -143,45 +143,19 @@ export const hoisted_isNonNegative = new IRHoisted(
 );
 hoisted_isNonNegative.hash;
 
-export const hoisted_matchList = new IRHoisted(
-    (() => {
-        // callers still pass `matchNil` pre-delayed (so it can close over
-        // a recursive self-reference without forcing immediately); the
-        // case-nil branch forces it. The case-cons branch binds h/t
-        // directly — no `headList`/`tailList` calls needed.
-        const delayed_matchNil = Symbol("delayed_matchNil");
-        const matchCons = Symbol("matchCons");
-        const list = Symbol("list");
-        const h = Symbol("h");
-        const t = Symbol("t");
-        return new IRFunc(
-            [ delayed_matchNil, matchCons, list ],
-            new IRCase(
-                new IRVar( list ),
-                [
-                    new IRFunc(
-                        [ h, t ],
-                        _ir_apps(
-                            new IRVar( matchCons ),
-                            new IRVar( h ),
-                            new IRVar( t ),
-                        )
-                    ),
-                    new IRForced( new IRVar( delayed_matchNil ) )
-                ]
-            )
-        );
-    })()
-);
-hoisted_matchList.hash;
-
-
-//*
 // hoisted_recursiveList (needed by hoisted_foldr)
+//   λ matchNil matchCons → recurse self → λ lst →
+//     case lst of
+//       cons h t -> (matchCons self) h t
+//       nil      -> force (matchNil self)
+// `matchNil` is expected to return a delayed value (so it can close over
+// recursive state without forcing eagerly); the nil branch forces it.
 const recList_matchNil = Symbol("matchNil");
 const recList_matchCons = Symbol("matchCons");
 const recList_self = Symbol("recursiveList_self");
 const recList_lst = Symbol("lst");
+const recList_h = Symbol("h");
+const recList_t = Symbol("t");
 export const hoisted_recursiveList = new IRHoisted(
     new IRFunc(
         [ recList_matchNil, recList_matchCons ],
@@ -189,18 +163,27 @@ export const hoisted_recursiveList = new IRHoisted(
             recList_self,
             new IRFunc(
                 [ recList_lst ],
-                _ir_apps(
-                    hoisted_matchList.clone(),
-                    new IRApp( new IRVar( recList_matchNil ), new IRSelfCall( recList_self ) ),
-                    new IRApp( new IRVar( recList_matchCons ), new IRSelfCall( recList_self ) ),
+                new IRCase(
                     new IRVar( recList_lst ),
+                    [
+                        new IRFunc(
+                            [ recList_h, recList_t ],
+                            _ir_apps(
+                                new IRApp( new IRVar( recList_matchCons ), new IRSelfCall( recList_self ) ),
+                                new IRVar( recList_h ),
+                                new IRVar( recList_t ),
+                            )
+                        ),
+                        new IRForced(
+                            new IRApp( new IRVar( recList_matchNil ), new IRSelfCall( recList_self ) )
+                        )
+                    ]
                 )
             )
         )
     )
 );
 hoisted_recursiveList.hash;
-//*/
 
 // hoisted_foldr
 const foldr_reducer = Symbol("reduceFunc");
@@ -233,31 +216,6 @@ export const hoisted_foldr = new IRHoisted(
     )
 );
 hoisted_foldr.hash;
-
-export const hosited_lazyChooseList = new IRHoisted(
-    (() => {
-        const list = Symbol("list");
-        const delayed_caseNil = Symbol("delayed_caseNil");
-        const delayed_caseCons = Symbol("delayed_caseCons");
-        const h = Symbol("_h");
-        const t = Symbol("_t");
-        return new IRFunc(
-            [ list, delayed_caseNil, delayed_caseCons ],
-            new IRCase(
-                new IRVar( list ),
-                [
-                    new IRFunc(
-                        [ h, t ],
-                        new IRForced( new IRVar( delayed_caseCons ) )
-                    ),
-                    new IRForced( new IRVar( delayed_caseNil ) )
-                ]
-            )
-        );
-    })()
-);
-hosited_lazyChooseList.hash;
-//*/
 
 export const hoisted_isMoreThanOrEqualTo4 = new IRHoisted(
     _ir_apps(
@@ -336,9 +294,14 @@ export const hoisted_dropList = new IRHoisted(
 );
 hoisted_dropList.hash;
 
+//   λ reduce → recurse self → λ acc → λ list →
+//     case list of
+//       cons h t -> self (reduce acc h) t
+//       nil      -> acc
 const foldl_reduce = Symbol("reduceFunc");
 const foldl_self = Symbol("foldl_self");
 const foldl_acc = Symbol("accum");
+const foldl_list = Symbol("list");
 const foldl_head = Symbol("head");
 const foldl_tail = Symbol("tail");
 const hoiseted_foldl = new IRHoisted(
@@ -347,22 +310,24 @@ const hoiseted_foldl = new IRHoisted(
         new IRRecursive(
             foldl_self,
             new IRFunc(
-                [ foldl_acc ],
-                _ir_apps(
-                    hoisted_matchList.clone(),
-                    new IRDelayed( new IRVar( foldl_acc ) ),
-                    new IRFunc(
-                        [ foldl_head, foldl_tail ],
-                        _ir_apps(
-                            new IRSelfCall( foldl_self ),
+                [ foldl_acc, foldl_list ],
+                new IRCase(
+                    new IRVar( foldl_list ),
+                    [
+                        new IRFunc(
+                            [ foldl_head, foldl_tail ],
                             _ir_apps(
-                                new IRVar( foldl_reduce ),
-                                new IRVar( foldl_acc ),
-                                new IRVar( foldl_head ),
-                            ),
-                            new IRVar( foldl_tail )
-                        )
-                    )
+                                new IRSelfCall( foldl_self ),
+                                _ir_apps(
+                                    new IRVar( foldl_reduce ),
+                                    new IRVar( foldl_acc ),
+                                    new IRVar( foldl_head ),
+                                ),
+                                new IRVar( foldl_tail )
+                            )
+                        ),
+                        new IRVar( foldl_acc )
+                    ]
                 )
             )
         )

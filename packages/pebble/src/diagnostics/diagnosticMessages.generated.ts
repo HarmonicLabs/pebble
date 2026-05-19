@@ -583,7 +583,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 30101: return "Duplicate enum member '{0}'.";
         case 30102: return "Enum must have at least one member.";
         case 30103: return "Property '{0}' is not a member of enum '{1}'.";
-        case 30104: return "Enum member pattern cannot have fields; enum members carry no data.";
+        case 30104: return "Enum member pattern cannot have fields.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

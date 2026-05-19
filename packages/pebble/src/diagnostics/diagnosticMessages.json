@@ -296,7 +296,7 @@
   "Duplicate enum member '{0}'.": 30101,
   "Enum must have at least one member.": 30102,
   "Property '{0}' is not a member of enum '{1}'.": 30103,
-  "Enum member pattern cannot have fields; enum members carry no data.": 30104,
+  "Enum member pattern cannot have fields.": 30104,
 
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }
