@@ -21,6 +21,7 @@ import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
 import { TirBoolT } from "../../tir/types/TirNativeType";
 import { TirFuncT } from "../../tir/types/TirNativeType/native/function";
 import { TirSoPStructType } from "../../tir/types/TirStructType";
+import { TirType } from "../../tir/types/TirType";
 import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { expressifyFuncBody, LoopReplacements } from "./expressify";
 import { ExpressifyCtx, isExpressifyFuncParam } from "./ExpressifyCtx";
@@ -133,8 +134,17 @@ export function expressifyForStmt(
     returnType: TirSoPStructType,
     bodyStateType: TirSoPStructType,
     initState: TirLitNamedObjExpr,
+    // Optimization: when the loop has exactly one reassigned variable
+    // and no user-written `return` inside its body, the SoP wrap
+    // (`Reassigns{var}`) on every iteration is unnecessary. The caller
+    // can opt into a bare-value lowering by passing the variable's type
+    // here; the loop function then returns that type directly, and the
+    // call site is expected to bind the result without a case-match.
+    bareReturnType?: TirType,
 ): TirCallExpr
 {
+    const effectiveReturnType: TirSoPStructType | TirType = bareReturnType ?? returnType;
+    const isBareMode = bareReturnType !== undefined;
     let loopBody = stmt.body instanceof TirBlockStmt ? stmt.body : new TirBlockStmt( [ stmt.body ], stmt.range );
     loopBody = new TirBlockStmt(
         loopBody.stmts.slice(),
@@ -171,11 +181,33 @@ export function expressifyForStmt(
 
     const loopFuncType = new TirFuncT(
         bodyStateType.constructors[0].fields.map( f => f.type ),
-        returnType
+        effectiveReturnType
     );
 
     const loopReplacements: LoopReplacements = {
         compileBreak( ctx, stmt ) {
+            if( isBareMode )
+            {
+                // Bare-value mode: the loop's return type IS the single
+                // user variable's type. `break` yields that var's current
+                // value directly, no SoP construction.
+                const userVarField = bodyStateType.constructors[0].fields[0];
+                const resolved = ctx.getVariable( userVarField.name );
+                if( isExpressifyFuncParam( resolved ) ) {
+                    return new TirVariableAccessExpr(
+                        {
+                            variableInfos: {
+                                name: resolved.name,
+                                type: resolved.type,
+                                isConstant: false
+                            },
+                            isDefinedOutsideFuncScope: false
+                        },
+                        stmt.range
+                    );
+                }
+                return resolved;
+            }
             // return first constructor of the return type
             const ctor = returnType.constructors[0];
             return new TirLitNamedObjExpr(
@@ -205,10 +237,21 @@ export function expressifyForStmt(
             )
         },
         replaceReturnValue( ctx, stmt ) {
-            // return second constructor of the return type
+            // Synthetic returns inserted by `expressifyIfBranch` (and
+            // analogous callers) carry the inner-if's SoP value as the
+            // continuation of the ternary they participate in — they are
+            // NOT user-written returns escaping the loop. When the loop
+            // has no user-written `return` in its body, `returnType` has
+            // only the "break/continue" constructor: in that case the
+            // value flowing through is already the right type and we
+            // must leave it untouched. (Previously this threw "No return
+            // constructor found in return type" when a for-of body
+            // contained an `if` that mutated a captured `let` — the
+            // synthesized branch-tail returns hit this path even though
+            // the user had no `return` inside the loop.)
             const ctor = returnType.constructors[1];
             if( !ctor ) {
-                throw new Error("No return constructor found in return type");
+                return stmt.value!;
             }
             return new TirLitNamedObjExpr(
                 new Identifier( ctor.name, stmt.range ),
@@ -257,7 +300,7 @@ export function expressifyForStmt(
                     }
                     return resolved;
                 }),
-                returnType,
+                effectiveReturnType,
                 stmt.range
             );
         },
@@ -284,7 +327,7 @@ export function expressifyForStmt(
             stmt.range
         )),
         // func return type
-        returnType,
+        effectiveReturnType,
         // func body
         new TirBlockStmt([
             new TirReturnStmt(
@@ -306,7 +349,7 @@ export function expressifyForStmt(
         loopFuncExpr,
         // loop call init args
         initState.values.map( v => expressifyVars( ctx, v.clone() ) ),
-        returnType,
+        effectiveReturnType,
         stmt.range
     );
 }

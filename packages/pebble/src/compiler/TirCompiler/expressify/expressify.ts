@@ -708,14 +708,57 @@ export function expressifyFuncBody(
                 returnTypeAndInvalidInit,
                 forStmt
             );
+
+            // Optimization: when the loop reassigns exactly one variable
+            // and has no user-written `return` inside, skip the SoP wrap
+            // around the loop's result. The recursive loop function then
+            // returns the bare variable's type, saving one `Reassigns{…}`
+            // constructor build per iteration and one IRCase at the exit.
+            // Requires the loop to be non-terminating (terminating loops
+            // are tail-positioned and their value must match the outer
+            // function's expected return type — we don't try to reconcile
+            // that here).
+            const canBareLower = (
+                reassignedAndFlow.reassigned.length === 1
+                && !reassignedAndFlow.returns
+                && !definitelyTerminates
+            );
+
             const loopExprCtx = ctx.newChild();
+            const bareReturnType = canBareLower
+                ? bodyStateType.constructors[0].fields[0].type
+                : undefined;
             const loopExpr = expressifyForStmt(
                 loopExprCtx,
                 forStmt,
                 returnTypeAndInvalidInit.sop,
                 bodyStateType,
-                initState
+                initState,
+                bareReturnType,
             );
+
+            if( canBareLower )
+            {
+                // Bind the loop's bare result as the variable's new SSA
+                // name, then evaluate the rest of the body. No outer
+                // case-match needed. Use a fresh internal name so the
+                // existing `letted[varName] = initialValue` binding (from
+                // the original `let varName = ...` statement) isn't
+                // shadowed by a no-op `introduceLettedConstant` call.
+                const [ varName ] = reassignedAndFlow.reassigned;
+                const loopResultName = getUniqueInternalName( varName );
+                const lettedExpr = ctx.introduceLettedConstant(
+                    loopResultName,
+                    loopExpr,
+                    stmt.range
+                );
+                ctx.setNewVariableName( varName, lettedExpr.varName );
+
+                return TirAssertAndContinueExpr.fromStmtsAndContinuation(
+                    assertions,
+                    expressifyFuncBody( ctx, bodyStmts, loopReplacements )
+                );
+            }
 
             const result = TirAssertAndContinueExpr.fromStmtsAndContinuation(
                 assertions,

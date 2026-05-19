@@ -62,7 +62,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
         hasFunctions = hasFunctions || stmt instanceof FuncDecl || isVarStmt( stmt );
     }
     // hoist exports
-    if( hasExports)
+    if( hasExports )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
         const stmt = stmts[i];

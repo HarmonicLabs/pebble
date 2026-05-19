@@ -167,6 +167,47 @@ export function main( xs: List<int> ): int {
         {
             const { uplc, sizeBytes } = await compileExport(`
 export function main( xs: List<int> ): int {
+    let count = 0;
+    for( const _x of xs ) {
+        count = count + 1;
+    }
+    return count;
+}
+`, "main");
+            rows.push(evalAndRow("for-of length (n=20)", uplc, sizeBytes, xs20));
+        }
+
+        {
+            const { uplc, sizeBytes } = await compileExport(`
+export function main( xs: List<int> ): int {
+    let positives = 0;
+    for( const x of xs ) {
+        if( x > 0 ) { positives = positives + 1; }
+    }
+    return positives;
+}
+`, "main");
+            rows.push(evalAndRow("for-of count-positives (n=20)", uplc, sizeBytes, xs20));
+        }
+
+        {
+            const { uplc, sizeBytes } = await compileExport(`
+export function main( xs: List<int> ): int {
+    let total = 0;
+    for( const x of xs ) {
+        for( const y of xs ) {
+            total = total + x * y;
+        }
+    }
+    return total;
+}
+`, "main");
+            rows.push(evalAndRow("for-of nested (n=20)", uplc, sizeBytes, xs20));
+        }
+
+        {
+            const { uplc, sizeBytes } = await compileExport(`
+export function main( xs: List<int> ): int {
     return std.list.foldr<int,int>( std.int.add, 0, xs );
 }
 `, "main");

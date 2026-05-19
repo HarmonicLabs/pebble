@@ -81,10 +81,26 @@ export class ToIRTermCtx
         const accessSym = this.getVarAccessSym( name );
         if( typeof accessSym !== "symbol" ) return undefined;
 
-        if(
-            this._firstVariableIsRecursive
-            && name === this.localVars.keys().next().value
-        ) return new IRSelfCall( accessSym );
+        // Recursive accesses must use IRSelfCall (the recursive symbol is
+        // bound by an IRRecursive, not an IRFunc — IRVar references would
+        // not find a binder during the unused-var pass). Walk the parent
+        // chain to find the ctx that owns `name`; that ctx may not be the
+        // current one when we're deep inside the recursive function's body
+        // (e.g. inside a `case` continuation that newChild'd from it).
+        let cur: ToIRTermCtx | undefined = this;
+        while( cur )
+        {
+            const localSym = cur.localVars.get( name );
+            if( localSym !== undefined )
+            {
+                if(
+                    cur._firstVariableIsRecursive
+                    && name === cur.localVars.keys().next().value
+                ) return new IRSelfCall( accessSym );
+                break;
+            }
+            cur = cur.parent;
+        }
 
         return new IRVar( accessSym );
     }
