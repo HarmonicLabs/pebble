@@ -6,9 +6,23 @@ import { SimpleVarDecl } from "./VarDecl/SimpleVarDecl";
 export enum StructDeclAstFlags {
     none = 0 << 0,
 
-    untaggedSingleConstructor = 1 << 0,
+    /**
+     * Hint that the user used the shortcut single-constructor syntax
+     * (`struct Foo { x: int }` rather than `struct Foo { Foo { x: int } }`).
+     * Whether the resulting Data encoding is tagged (`constrData(0, ...)`)
+     * or untagged (`listData(...)`) is decided by the compiler's
+     * `encodingStrategy` option — `"default"` keeps the tagged form for
+     * backwards compatibility; `"minimal"` opts shortcut forms in to the
+     * untagged form.
+     */
+    shortcutSingleConstructor = 1 << 0,
     onlyDataEncoding = 1 << 1,
     onlySopEncoding = 1 << 2,
+    /**
+     * Explicit `untagged` modifier. Forces the untagged listData encoding
+     * regardless of `encodingStrategy`. Requires a single constructor.
+     */
+    untagged = 1 << 3,
 }
 
 export class StructDecl

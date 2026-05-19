@@ -4,6 +4,7 @@ import { TirGreaterThanExpr } from "../../../../tir/expressions/binary/TirBinary
 import { TirAliasType } from "../../../../tir/types/TirAliasType";
 import { TirType } from "../../../../tir/types/TirType";
 import { canAssignTo } from "../../../../tir/types/utils/canAssignTo";
+import { normalizeEnumToInt } from "../../../../tir/types/utils/normalizeEnumToInt";
 import { AstCompilationCtx } from "../../../AstCompilationCtx";
 import { _compileExpr } from "../_compileExpr";
 
@@ -27,7 +28,7 @@ export function _compileGreaterThanExpr(
         expr.left.range, left.type.toString(), int_t.toString()
     );
 
-    let leftType = left.type;
+    let leftType = normalizeEnumToInt( left.type, int_t );
     while( leftType instanceof TirAliasType ) leftType = leftType.aliased;
 
     const right = _compileExpr( ctx, expr.right, leftType );

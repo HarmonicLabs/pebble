@@ -19,8 +19,10 @@ import { tryResolveNamespaceChain } from "../../utils/resolveNamespaceChain";
 import { _compileExpr } from "./_compileExpr";
 import { _compileNonNullExpr } from "./_compileNonNullExpr";
 import { TirLitNamedObjExpr } from "../../../tir/expressions/litteral/TirLitNamedObjExpr";
+import { TirLitEnumMemberExpr } from "../../../tir/expressions/litteral/TirLitEnumMemberExpr";
 import { Identifier } from "../../../../ast/nodes/common/Identifier";
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
+import { TirEnumType } from "../../../tir/types/TirEnumType";
 
 export function _compilePropAccessExpr(
     ctx: AstCompilationCtx,
@@ -174,6 +176,15 @@ export function _compileDotPropAccessExpr(
     _typeHint: TirType | undefined
 ): TirExpr | undefined
 {
+    // Enum member access: `EnumName.Member`
+    if( expr.object instanceof Identifier )
+    {
+        const enumRes = _tryResolveEnumMemberAccess(
+            ctx, expr.object, expr.prop, expr
+        );
+        if( enumRes ) return enumRes;
+    }
+
     // if the LHS is a (chain of) identifier(s) rooted at a namespace, resolve
     // the entire dotted chain through namespaces.
     const nsRes = tryResolveNamespaceChain( ctx, expr );
@@ -234,5 +245,50 @@ export function _compileDotPropAccessExpr(
         expr.prop,
         returnType,
         expr.range
+    );
+}
+/**
+ * Returns a `TirLitEnumMemberExpr` if `objId` resolves to an enum type
+ * in scope and `propId` is one of its members.
+ * Emits a diagnostic and returns a placeholder failure (undefined) if the
+ * type is an enum but `propId` is not a member.
+ * Returns `undefined` (silently) if `objId` is not an enum-typed identifier
+ * — caller falls back to other resolution strategies.
+ */
+function _tryResolveEnumMemberAccess(
+    ctx: AstCompilationCtx,
+    objId: Identifier,
+    propId: Identifier,
+    fullExpr: DotPropAccessExpr
+): TirExpr | undefined
+{
+    // skip if the identifier names a value in scope (variables shadow types)
+    if( ctx.scope.resolveValue( objId.text ) ) return undefined;
+
+    const possibleTirTypes = ctx.scope.resolveType( objId.text );
+    if( !possibleTirTypes ) return undefined;
+
+    const tirType =
+        ctx.program.types.get( possibleTirTypes.sopTirName )
+        ?? ( possibleTirTypes.dataTirName
+            ? ctx.program.types.get( possibleTirTypes.dataTirName )
+            : undefined );
+
+    if( !( tirType instanceof TirEnumType ) ) return undefined;
+
+    const memberIdx = tirType.indexOf( propId.text );
+    if( memberIdx < 0 )
+    {
+        ctx.error(
+            DiagnosticCode.Property_0_is_not_a_member_of_enum_1,
+            propId.range, propId.text, tirType.name
+        );
+        return undefined;
+    }
+
+    return new TirLitEnumMemberExpr(
+        tirType,
+        memberIdx,
+        fullExpr.range
     );
 }

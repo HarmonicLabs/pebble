@@ -15,6 +15,7 @@ import { TirSopOptT } from "../TirNativeType/native/Optional/sop";
 import { TirStringT } from "../TirNativeType/native/string";
 import { TirVoidT } from "../TirNativeType/native/void";
 import { isTirStructType, TirDataStructType, TirSoPStructType, TirStructConstr, TirStructType } from "../TirStructType";
+import { TirEnumType } from "../TirEnumType";
 import { isTirNamedDestructableType, TirNamedDestructableType, TirType } from "../TirType";
 import { TirTypeParam } from "../TirTypeParam";
 import { canCastToData } from "./canCastTo";
@@ -125,6 +126,9 @@ function uncheckedGetCanAssign(
     }
     if( b instanceof TirIntT  ) {
         if( a instanceof TirIntT  ) return CanAssign.Yes;
+        // enum runtime representation is a plain int, so an enum value can
+        // flow directly into any int operation.
+        if( a instanceof TirEnumType ) return CanAssign.Yes;
         if( a instanceof TirDataT ) return CanAssign.RequiresExplicitCast;
         return CanAssign.No;
     }
@@ -239,6 +243,20 @@ function uncheckedGetCanAssign(
         return CanAssign.No;
     }
     if( isTirStructType( a ) ) return CanAssign.No;
+
+    if( b instanceof TirEnumType )
+    {
+        if(
+            a instanceof TirEnumType
+            && a.toTirTypeKey() === b.toTirTypeKey()
+        ) return CanAssign.Yes;
+        // `data` (e.g. datum/redeemer) can be decoded to an enum with an
+        // explicit cast; plain `int` cannot — there is no way to statically
+        // verify it is a valid tag.
+        if( a instanceof TirDataT ) return CanAssign.RequiresExplicitCast;
+        return CanAssign.No;
+    }
+    if( a instanceof TirEnumType ) return CanAssign.No;
 
     if( b instanceof TirFuncT )
     {

@@ -1,6 +1,5 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
-import { IRSelfCall } from "../../../IR/IRNodes/IRSelfCall";
-import { IRVar } from "../../../IR/IRNodes/IRVar";
+import type { IRTerm } from "../../../IR/IRTerm";
 import { ResolveValueResult } from "../../AstCompiler/scope/AstScope";
 import { TirType } from "../types/TirType";
 import type { ITirExpr } from "./ITirExpr";
@@ -54,13 +53,10 @@ export class TirVariableAccessExpr
 
     deps(): string[] { return [ this.varName ]; }
 
-    toIR( ctx: ToIRTermCtx ): IRVar | IRSelfCall
+    toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const ir = ctx.getVarAccessIR( this.varName );
-        if(!(
-            ir instanceof IRVar
-            || ir instanceof IRSelfCall
-        )) {
+        if( !ir ) {
             throw new Error(`variable '${this.varName}' is missing in [${ctx.allVariables().join(", ")}]`);
         }
         return ir;

@@ -10,6 +10,7 @@ import type { IRTerm } from "../../../IR/IRTerm";
 import { data_t } from "../program/stdScope/stdScope";
 import { TirAliasType } from "../types/TirAliasType";
 import { TirDataStructType, TirSoPStructType } from "../types/TirStructType";
+import { TirEnumType } from "../types/TirEnumType";
 import { isTirType, TirType } from "../types/TirType";
 import { getListTypeArg } from "../types/utils/getListTypeArg";
 import { getOptTypeArg } from "../types/utils/getOptTypeArg";
@@ -178,6 +179,7 @@ export function _toDataUplcFunc( origin_t: TirType ): IRTerm
     ) return IRNative._id;
 
     if( from_t instanceof TirIntT ) return IRNative.iData;
+    if( from_t instanceof TirEnumType ) return IRNative.iData;
     if( from_t instanceof TirBytesT ) return IRNative.bData;
     if( from_t instanceof TirVoidT ) return _mkUnitData;
     if( from_t instanceof TirBoolT ) return _boolToData;

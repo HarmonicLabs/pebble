@@ -319,20 +319,6 @@ export class TirNativeFunc
             ], returnT)
         );
     }
-    static strictChooseList(elemT: TirType, returnT: TirType): TirNativeFunc {
-        return new TirNativeFunc(
-            IRNativeTag.strictChooseList,
-            new TirFuncT([
-                // list
-                new TirListT(elemT),
-                // caseNil
-                returnT,
-                // caseCons
-                returnT
-            ], returnT)
-        );
-    }
-
     // List operations with type parameters
     static mkCons(elemT: TirType): TirNativeFunc {
         return new TirNativeFunc(

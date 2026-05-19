@@ -175,6 +175,7 @@ export function tokenFromKeyword(text: string): Token {
         case CharCode.u: {
             if (text === "undefined") return Token.Undefined;
             if (text === "using") return Token.Using;
+            if (text === "untagged") return Token.Untagged;
             break;
         }
         case CharCode.v: {

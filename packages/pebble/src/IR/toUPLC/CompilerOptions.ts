@@ -120,13 +120,25 @@ export interface CompilerOptions {
      **/
     delayHoists: boolean;
     /**
-     * 
+     *
      **/
     uplcOptimizations: /* boolean |*/ Partial<CompilerUplcOptimizations>;
     /**
-     * 
+     *
      **/
     addMarker: boolean;
+    /**
+     * Controls the default Data encoding for single-constructor shortcut
+     * struct declarations (`struct Foo { x: int }`).
+     *
+     * - `"default"`: shortcut single-constructor structs are encoded as
+     *   `constrData(0, fields)` (backwards-compatible). Use the explicit
+     *   `untagged` keyword to opt a specific struct in to the minimal form.
+     * - `"minimal"`: shortcut single-constructor structs are encoded as
+     *   `listData(fields)` (smaller / cheaper). The explicit `untagged`
+     *   keyword still forces minimal regardless.
+     */
+    encodingStrategy: "default" | "minimal";
 }
 
 /**
@@ -145,7 +157,8 @@ export const extremeOptions: CompilerDefaults = Object.freeze({
     removeTraces: true,
     delayHoists: true,
     uplcOptimizations: productionUplcOptimizations,
-    addMarker: true
+    addMarker: true,
+    encodingStrategy: "minimal"
 });
 
 export const productionOptions: CompilerDefaults = Object.freeze({
@@ -157,7 +170,8 @@ export const productionOptions: CompilerDefaults = Object.freeze({
     removeTraces: true,
     delayHoists: true,
     uplcOptimizations: productionUplcOptimizations,
-    addMarker: true
+    addMarker: true,
+    encodingStrategy: "default"
 });
 
 export const debugOptions: CompilerDefaults = Object.freeze({
@@ -169,7 +183,8 @@ export const debugOptions: CompilerDefaults = Object.freeze({
     removeTraces: false,
     delayHoists: false,
     uplcOptimizations: debugUplcOptimizations,
-    addMarker: false
+    addMarker: false,
+    encodingStrategy: "default"
 });
 
 export const defaultOptions: CompilerDefaults = Object.freeze({
@@ -221,6 +236,7 @@ export function completeCompilerOptions(
         removeTraces: options.removeTraces ?? complete.removeTraces!,
         delayHoists: options.delayHoists ?? complete.delayHoists!,
         uplcOptimizations: completeUplcOptimizations( uplcOptimizations ),
-        addMarker: options.addMarker ?? complete.addMarker!
+        addMarker: options.addMarker ?? complete.addMarker!,
+        encodingStrategy: options.encodingStrategy ?? complete.encodingStrategy ?? "default"
     };
 }

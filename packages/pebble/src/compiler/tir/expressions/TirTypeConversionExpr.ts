@@ -9,6 +9,7 @@ import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirStringT } from "../types/TirNativeType/native/string";
 import { TirDataStructType } from "../types/TirStructType";
+import { TirEnumType } from "../types/TirEnumType";
 import { TirType } from "../types/TirType";
 import { getUnaliased } from "../types/utils/getUnaliased";
 import { ITirExpr } from "./ITirExpr";
@@ -76,6 +77,8 @@ export class TirTypeConversionExpr
         if( to_t instanceof TirIntT )
         {
             if( from_t instanceof TirIntT ) return exprIR;
+            // enum is already an int at runtime; identity conversion.
+            if( from_t instanceof TirEnumType ) return exprIR;
             if( from_t instanceof TirBytesT ) return _ir_apps(
                 IRNative._bytesToIntBE,
                 exprIR
@@ -84,6 +87,12 @@ export class TirTypeConversionExpr
                 IRNative._boolToInt,
                 exprIR
             );
+            throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
+        }
+        if( to_t instanceof TirEnumType )
+        {
+            // identity at runtime — same enum type.
+            if( from_t instanceof TirEnumType ) return exprIR;
             throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
         }
         if( to_t instanceof TirBytesT )

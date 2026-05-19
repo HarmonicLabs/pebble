@@ -1,4 +1,5 @@
 import { TirLitArrExpr } from "./TirLitArrExpr";
+import { TirLitEnumMemberExpr } from "./TirLitEnumMemberExpr";
 import { TirLitFailExpr } from "./TirLitFailExpr";
 import { TirLitFalseExpr } from "./TirLitFalseExpr";
 import { TirLitHexBytesExpr } from "./TirLitHexBytesExpr";
@@ -23,8 +24,9 @@ export type TirLitteralExpr
     | TirLitArrExpr
     | TirLitObjExpr
     | TirLitNamedObjExpr
+    | TirLitEnumMemberExpr
     | TirLitFailExpr
-    
+
 
 export function isTirLitteralExpr( thing: any ): thing is TirLitteralExpr
 {
@@ -37,6 +39,7 @@ export function isTirLitteralExpr( thing: any ): thing is TirLitteralExpr
         || thing instanceof TirLitArrExpr
         || thing instanceof TirLitObjExpr
         || thing instanceof TirLitNamedObjExpr
+        || thing instanceof TirLitEnumMemberExpr
         || thing instanceof TirLitStrExpr
         || thing instanceof TirLitIntExpr
         || thing instanceof TirLitHexBytesExpr

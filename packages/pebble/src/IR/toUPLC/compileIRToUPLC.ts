@@ -77,10 +77,12 @@ export function compileIRToUPLC(
     // re-call rewrite to optimize introduced hoisted
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
 
-    // V4: lower `strictIfThenElse` / `strictChooseList` triple-apps to
-    // `IRCase` BEFORE `replaceForcedNativesWithHoisted` would otherwise
-    // hoist `(force ifThenElse)` into a shared variable that's no longer
-    // pattern-matchable as a native.
+    // V4: lower `strictIfThenElse` triple-apps to `IRCase` BEFORE
+    // `replaceForcedNativesWithHoisted` would otherwise hoist
+    // `(force ifThenElse)` into a shared variable that's no longer
+    // pattern-matchable as a native. (`strictChooseList` is already
+    // lowered to `IRCase` unconditionally by the earlier
+    // `rewriteNativesAppliedToConstantsAndReturnRoot` pass.)
     if( options.targetUplcVersion.isV4Friendly() ) {
         term = rewriteToCaseOverConstAndReturnRoot( term );
     }

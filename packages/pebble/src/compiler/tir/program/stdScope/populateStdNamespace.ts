@@ -1,5 +1,6 @@
 import { SourceRange } from "../../../../ast/Source/SourceRange";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
+import { IRCase } from "../../../../IR/IRNodes/IRCase";
 import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import { IRNativeTag } from "../../../../IR/IRNodes/IRNative/IRNativeTag";
@@ -377,7 +378,7 @@ export function populateStdNamespace( program: TypedProgram ): void
         astName: string,
         nTypeParams: number,
         buildSig: ( typeArgs: TirType[] ) => TirFuncT,
-        buildIr: ( typeArgs: TirType[] ) => IRNative,
+        buildIr: ( typeArgs: TirType[] ) => IRTerm,
         /**
          * Distinguishing path segment so multiple namespaces can each have a
          * `length` (etc.) without colliding in `program.genericTemplates`.
@@ -562,10 +563,28 @@ export function populateStdNamespace( program: TypedProgram ): void
         () => new IRNative( IRNativeTag.nullList )
     );
 
-    // chooseList<A,B>( xs: List<A>, caseNil: B, caseCons: B ): B  -- strict
+    // chooseList<A,B>( xs: List<A>, caseNil: B, caseCons: B ): B
+    // Lowered to a UPLC `Case` on the list: the cons branch ignores h/t
+    // (matching the `chooseList` builtin contract — head/tail aren't bound).
     defineGenericBuiltin( builtinsNsScope, "chooseList", 2,
         ( [ A, B ] ) => new TirFuncT([ new TirListT( A ), B, B ], B),
-        () => new IRNative( IRNativeTag.strictChooseList )
+        () => {
+            const xs = Symbol("xs");
+            const caseNil = Symbol("caseNil");
+            const caseCons = Symbol("caseCons");
+            const h = Symbol("_h");
+            const t = Symbol("_t");
+            return new IRFunc(
+                [ xs, caseNil, caseCons ],
+                new IRCase(
+                    new IRVar( xs ),
+                    [
+                        new IRFunc( [ h, t ], new IRVar( caseCons ) ),
+                        new IRVar( caseNil )
+                    ]
+                )
+            );
+        }
     );
 
     // chooseData<T>( d: data, caseConstr: T, caseMap: T, caseList: T,

@@ -4,10 +4,9 @@ import { prettyIRInline, prettyIRText } from "../../../IR";
 import { IRApp, _ir_apps } from "../../../IR/IRNodes/IRApp";
 import { IRCase } from "../../../IR/IRNodes/IRCase";
 import { IRConst } from "../../../IR/IRNodes/IRConst";
-import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import { IRError } from "../../../IR/IRNodes/IRError";
-import { IRForced } from "../../../IR/IRNodes/IRForced";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
+import { IRLetted } from "../../../IR/IRNodes/IRLetted";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import { IRVar } from "../../../IR/IRNodes/IRVar";
 import type { IRTerm } from "../../../IR/IRTerm";
@@ -20,8 +19,8 @@ import { TirSimpleVarDecl } from "../statements/TirVarDecl/TirSimpleVarDecl";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
 import { TirDataStructType, TirSoPStructType } from "../types/TirStructType";
+import { TirEnumType } from "../types/TirEnumType";
 import { TirType } from "../types/TirType";
-import { getOptTypeArg } from "../types/utils/getOptTypeArg";
 import { getUnaliased } from "../types/utils/getUnaliased";
 import { ITirExpr } from "./ITirExpr";
 import { TirExpr } from "./TirExpr";
@@ -118,14 +117,129 @@ export class TirCaseExpr
 
         if(
             matchExprType instanceof TirDataStructType
+            && matchExprType.untagged
+        ) return this._untaggedDataStructToIR( matchExprType, ctx );
+
+        if(
+            matchExprType instanceof TirDataStructType
             || matchExprType instanceof TirDataOptT
         ) return this._dataStructToIR( matchExprType, ctx );
+
+        if( matchExprType instanceof TirEnumType )
+        return this._enumToIR( matchExprType, ctx );
 
         console.error( this );
         throw new Error(
             "`case` expressions are only supported on Sum-of-Products or Data Struct types; got: "
             + this.matchExpr.type.toString()
         );
+    }
+
+    /**
+     * Lowers a `case` over an untagged data struct (single constructor;
+     * runtime form is `listData(fields)`). No constructor dispatch is
+     * needed — there's only one possible ctor — so the lowering is just
+     * "find the matching arm (or wildcard), extract any bound fields, run
+     * the body".
+     */
+    private _untaggedDataStructToIR(
+        matchExprType: TirDataStructType,
+        ctx: ToIRTermCtx
+    ): IRTerm
+    {
+        if( matchExprType.constructors.length !== 1 ) {
+            throw new Error(
+                "untagged data struct must have exactly one constructor"
+            );
+        }
+        const ctor = matchExprType.constructors[0];
+
+        const wildcardBodyIR = this.wildcardCase?.body.toIR( ctx ) ?? new IRError();
+
+        const matchedArm = this.cases.find(
+            c => c.pattern.constrName === ctor.name
+        );
+        if( !matchedArm ) {
+            // no matching arm: just run the wildcard body (the scrutinee is
+            // evaluated for side-effects via `unListData` only if any field
+            // would have been bound; here, nothing).
+            return wildcardBodyIR;
+        }
+
+        const pattern = matchedArm.pattern;
+        const usedFields = ctor.fields
+            .map( ( f, idx ) => ({ name: f.name, type: f.type, idx }))
+            .filter( f => pattern.fields.has( f.name ));
+
+        // 0 bound fields → just run the body; no extraction.
+        if( usedFields.length === 0 ) return matchedArm.body.toIR( ctx );
+
+        // fields-list = unListData(scrutinee), bound once and reused via
+        // IRLetted so the let-handling pass elides or shares as appropriate.
+        const fieldsListLetted = new IRLetted(
+            Symbol("untaggedFields"),
+            _ir_apps(
+                IRNative.unListData,
+                this.matchExpr.toIR( ctx )
+            )
+        );
+
+        const branchCtx = ctx.newChild();
+
+        // bind each used field with a let in declaration order.
+        // sort by ctor field index so earlier extractions don't need to
+        // re-drop past already-bound fields.
+        usedFields.sort( ( a, b ) => a.idx - b.idx );
+
+        const bindings: { sym: symbol, extract: IRTerm }[] = usedFields.map( f => {
+            const varDecl = pattern.fields.get( f.name );
+            if(!( varDecl instanceof TirSimpleVarDecl ))
+                throw new Error("case pattern not expressified.");
+            const sym = branchCtx.defineVar( varDecl.name );
+            return {
+                sym,
+                extract: _inlineFromData(
+                    f.type,
+                    _ir_apps(
+                        IRNative.headList,
+                        _ir_apps(
+                            IRNative._dropList,
+                            IRConst.int( f.idx ),
+                            fieldsListLetted.clone()
+                        )
+                    )
+                )
+            };
+        });
+
+        // build nested let-bindings around the body
+        let result: IRTerm = matchedArm.body.toIR( branchCtx );
+        for( let i = bindings.length - 1; i >= 0; i-- ) {
+            const { sym, extract } = bindings[i];
+            result = _ir_let_sym( sym, extract, result );
+        }
+        return result;
+    }
+
+    private _enumToIR(
+        enumType: TirEnumType,
+        ctx: ToIRTermCtx
+    ): IRTerm
+    {
+        const wildcardBodyIR = this.wildcardCase?.body.toIR( ctx ) ?? new IRError();
+        const branches: IRTerm[] = enumType.members.map( memberName => {
+            const branch = this.cases.find(
+                c => c.pattern.constrName === memberName
+            );
+            return branch ? branch.body.toIR( ctx ) : wildcardBodyIR;
+        });
+
+        while( branches.length > 0 && branches[ branches.length - 1 ] instanceof IRError )
+            branches.pop();
+
+        return branches.length > 0
+            ? new IRCase( this.matchExpr.toIR( ctx ), branches )
+            : new IRError();
     }
 
     private _sopStructToIR(
@@ -267,80 +381,27 @@ export class TirCaseExpr
         ctx: ToIRTermCtx
     ): IRTerm
     {
-        if( matchExprType instanceof TirDataOptT )
-        {
-            const stmtCtx = ctx.newChild();
-            stmtCtx.pushUnusedVar(); // debrujin un constr data result
-
-            const wildcardBodyIR = this.wildcardCase?.body.toIR( stmtCtx ) ?? new IRError();
-
-            const someBranch = this.cases.find(
-                c => c.pattern.constrName === "Some"
-            );
-            let someBranchIR: ( unConstrMatchSym: symbol ) => IRTerm = () => new IRFunc([Symbol("unused_some_value")], wildcardBodyIR);
-            if( someBranch ) {
-
-                const pattern = someBranch.pattern;
-                const valueDecl = pattern.fields.get("value");
-                if(
-                    valueDecl
-                    && !( valueDecl instanceof TirSimpleVarDecl )
-                ) throw new Error("case pattern not expressified.");
-
-                const someBranchCtx = stmtCtx.newChild();
-                const someBranchVarSym: symbol = valueDecl ? someBranchCtx.defineVar( valueDecl.name ) : Symbol("some_value_unused");
-
-                someBranchIR = ( unConstrMatchSym ) =>  new IRApp(
-                    new IRFunc([ someBranchVarSym ], someBranch.body.toIR( someBranchCtx ) ),
-                    _inlineFromData(
-                        getOptTypeArg( matchExprType )!,
-                        _ir_apps(
-                            IRNative.sndPair,
-                            new IRVar( unConstrMatchSym ) // unConstrData result
-                        )
-                    )
-                );
-            }
-
-            const noneBranchIR = this.cases.find(
-                c => c.pattern.constrName === "None"
-            )?.body.toIR( stmtCtx ) ?? wildcardBodyIR;
-
-            return _ir_let(
-                    _ir_apps(
-                        IRNative.unConstrData,
-                        this.matchExpr.toIR( ctx )
-                    ),
-                    unConstrMatchSym => _ir_lazyIfThenElse(
-                        // condition
-                        _ir_apps(
-                            IRNative.equalsInteger,
-                            IRConst.int( 0 ),
-                            _ir_apps(
-                                IRNative.fstPair,
-                                new IRVar( unConstrMatchSym ) // unConstrData result
-                            )
-                        ),
-                        // then Just{ value }
-                        someBranchIR( unConstrMatchSym ),
-                        // else None
-                        noneBranchIR
-                    )
-            );
-        }
-
-        // TirDataStructType
-
-        const stmtCtx = ctx.newChild();
-        const unConstrStructSym = stmtCtx.pushUnusedVar("unconstrStruct"); // unconstrStruct
-        const isConstrIdxSym = stmtCtx.pushUnusedVar("isConstrIdx"); // isConstrIdx
-
-        const noVarsWildcardBodyIR = (
-            this.wildcardCase?.body.toIR( stmtCtx )
-            ?? new IRError()
-        );
-        const delayedNoVarWildcardBodyIR = new IRDelayed( noVarsWildcardBodyIR );
-        let ifThenElseMatchingStatements: IRTerm = noVarsWildcardBodyIR;
+        // TirDataOptT extends TirDataStructType (constructors Some{value}, None{}),
+        // so the same logic handles it.
+        //
+        // V4 lowering structure (UPLC v1.2.0 `Case` accepts pair / int
+        // scrutinees as untagged constructors):
+        //
+        //   Case (unConstrData scrutinee) [
+        //       \idxSym fieldsSym ->
+        //           Case idxSym [body_0, body_1, ..., body_(maxParent)]
+        //   ]
+        //
+        // - The outer `Case` over the `pair(int, list<data>)` returned by
+        //   `unConstrData` extracts both halves via a single 2-arg branch
+        //   (pair is treated as `constr 0 [fst, snd]`).
+        // - The inner `Case` over `idxSym` dispatches by tag in O(1) —
+        //   no `equalsInteger` chain, no `lazyIfThenElse`.
+        // - Each inner branch takes 0 args (an int N is treated as
+        //   `constr N []`). The branch body extracts fields lazily from
+        //   `fieldsSym` via deferred access on `thenCtx`, wrapped in
+        //   `IRLetted` so the letted-handling pass dedups, inlines or
+        //   elides as appropriate.
 
         if(
             this.cases.some(({ pattern }) =>
@@ -348,178 +409,101 @@ export class TirCaseExpr
             )
         ) throw new Error("case expression includes unknown constructor.");
 
-        const cases = this.cases.sort((a, b) => {
-            const a_idx = matchExprType.constructors.findIndex( ctor => ctor.name === a.pattern.constrName );
-            const b_idx = matchExprType.constructors.findIndex( ctor => ctor.name === b.pattern.constrName );
-            return a_idx - b_idx;
-        });
+        const stmtCtx = ctx.newChild();
+        const wildcardBodyIR = this.wildcardCase?.body.toIR( stmtCtx ) ?? new IRError();
 
-        for( let i = cases.length - 1; i >= 0; i-- )
-        {
-            const { pattern, body } = cases[i];
-            const ctorIdx = matchExprType.constructors.findIndex( ctor => ctor.name === pattern.constrName );
-            if( ctorIdx < 0 ) throw new Error("case expression includes unknown constructor."); // unreachable
+        // outer destructuring binders — symbols allocated up-front so
+        // per-arm deferred accesses (closures) reference the same syms
+        const idxSym = Symbol("ctorIdx");
+        const fieldsListSym = Symbol("fieldsList");
 
-            const ctor = matchExprType.constructors[ ctorIdx ];
-            const usedFieldsCtorNames = (
-                ctor.fields.map( f => f.name )
-                .filter( fName => pattern.fields.has( fName ) )
+        // The runtime value's ctor tag spans all parent indices known to
+        // this type — not just the indices that appear as arm patterns.
+        // Size the inner-Case branch array to cover all of them and fill
+        // missing slots with the wildcard.
+        const armsByParentIdx = new Map<number, IRTerm>();
+        // TirDataOptT extends TirDataStructType, so both have parentCtorIdx
+        const allParentIdxs: number[] = matchExprType.constructors.map(
+            ( _, i ) => matchExprType.parentCtorIdx( i )
+        );
+        let maxParentIdx = allParentIdxs.reduce( ( m, x ) => x > m ? x : m, -1 );
+
+        for( const matchCase of this.cases ) {
+            const { pattern, body } = matchCase;
+            const ctorIdx = matchExprType.constructors.findIndex(
+                ctor => ctor.name === pattern.constrName
             );
+            const ctor = matchExprType.constructors[ ctorIdx ];
 
-            if( usedFieldsCtorNames.length <= 0 ) {
-                ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                    // condition (compare against the PARENT ctor index — the
-                    // value's runtime tag is unaffected by narrowing)
-                    _ir_apps(
-                        new IRVar( isConstrIdxSym ), // isConstrIdx
-                        IRConst.int(
-                            matchExprType instanceof TirDataStructType
-                                ? matchExprType.parentCtorIdx( ctorIdx )
-                                : ctorIdx
-                        )
-                    ),
-                    // then
-                    body.toIR( stmtCtx ),
-                    // else
-                    ifThenElseMatchingStatements
-                );
-                continue;
-            }
+            const parentCtorIdx =
+                matchExprType instanceof TirDataStructType
+                    ? matchExprType.parentCtorIdx( ctorIdx )
+                    : ctorIdx;
 
-            function indexOfField( fieldName: string ): number
-            {
-                const idx = ctor.fields.findIndex( f => f.name === fieldName );
-                if( idx < 0 ) throw new Error("case pattern not expressified.");
-                return idx;
-            }
+            // bind each pattern-named field as a deferred access on
+            // `fieldsListSym`. Each access produces an `IRLetted`
+            // wrapping `_inlineFromData(type, headList(_dropList(idx, fields)))`.
+            const armCtx = stmtCtx.newChild();
+            const usedFieldsCtorNames = ctor.fields
+                .map( f => f.name )
+                .filter( fName => pattern.fields.has( fName ) );
 
-            if( usedFieldsCtorNames.length === 1 ) {
-                const thenCtx = stmtCtx.newChild();
-
-                const fName = usedFieldsCtorNames[0];
-
+            for( const fName of usedFieldsCtorNames ) {
                 const patternVarDecl = pattern.fields.get( fName );
                 if(!( patternVarDecl instanceof TirSimpleVarDecl ))
-                throw new Error("case pattern not expressified.");
-                const introVar = thenCtx.defineVar( patternVarDecl.name );
-
-                const thenCase = _ir_let_sym(
-                    introVar,
-                    _inlineFromData(
-                        patternVarDecl.type,
-                        _ir_apps(
-                            IRNative.headList,
+                    throw new Error("case pattern not expressified.");
+                const fieldIdx = ctor.fields.findIndex( f => f.name === fName );
+                if( fieldIdx < 0 ) throw new Error("case pattern not expressified.");
+                const fieldType = patternVarDecl.type;
+                armCtx.defineDeferredAccess( patternVarDecl.name, () =>
+                    new IRLetted(
+                        Symbol(`${ctor.name}_${fName}`),
+                        _inlineFromData(
+                            fieldType,
                             _ir_apps(
-                                IRNative._dropList,
-                                IRConst.int( indexOfField( fName ) ), // constr field index
-                                _ir_apps( // fileds as data list
-                                    IRNative.sndPair,
-                                    new IRVar( unConstrStructSym ) // unconstrStruct
+                                IRNative.headList,
+                                _ir_apps(
+                                    IRNative._dropList,
+                                    IRConst.int( fieldIdx ),
+                                    new IRVar( fieldsListSym )
                                 )
                             )
                         )
-                    ),
-                    body.toIR( thenCtx )
+                    )
                 );
-                ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                    // condition (compare against the PARENT ctor index — the
-                    // value's runtime tag is unaffected by narrowing)
-                    _ir_apps(
-                        new IRVar( isConstrIdxSym ), // isConstrIdx
-                        IRConst.int(
-                            matchExprType instanceof TirDataStructType
-                                ? matchExprType.parentCtorIdx( ctorIdx )
-                                : ctorIdx
-                        )
-                    ),
-                    // then
-                    thenCase,
-                    // else
-                    ifThenElseMatchingStatements
-                );
-                continue;
-            } // single field used edge case
-
-            // multiple fields used
-            const thenCtx = stmtCtx.newChild();
-            const fieldsAsDataList = thenCtx.pushUnusedVar(); // fileds as data list
-
-            const sortedUsedFields = [ ...usedFieldsCtorNames ].sort((a, b) =>
-                indexOfField( a ) - indexOfField( b )
-            );
-
-            const introducedVars: symbol[] = new Array( sortedUsedFields.length );
-            for( let fIdx = 0; fIdx < sortedUsedFields.length; fIdx++ ) {
-                const fName = sortedUsedFields[fIdx]
-                const patternVarDecl = pattern.fields.get( fName );
-                if(!( patternVarDecl instanceof TirSimpleVarDecl ))
-                throw new Error("case pattern not expressified.");
-                introducedVars[fIdx] = thenCtx.defineVar( patternVarDecl.name );
             }
 
-            const extractedFields: IRTerm[] = sortedUsedFields.map( fName =>
-                _inlineFromData(
-                    ctor.fields.find( f => f.name === fName )!.type,
-                    _ir_apps(
-                        IRNative.headList,
-                        _ir_apps(
-                            IRNative._dropList,
-                            IRConst.int( indexOfField( fName ) ), // constr field index
-                            new IRVar( fieldsAsDataList ) // fileds as data list
-                        )
-                    )
-                )
-            );
-            const thenCase = _ir_let_sym(
-                fieldsAsDataList,
-                _ir_apps(
-                    IRNative.sndPair,
-                    new IRVar( unConstrStructSym ) // unconstrStruct
-                ), // fileds as data list
-                _ir_apps(
-                    new IRFunc(
-                        introducedVars,
-                        body.toIR( thenCtx )
-                    ),
-                    ...(extractedFields as [IRTerm, IRTerm, ...IRTerm[]])
-                )
-            );
-            ifThenElseMatchingStatements = _ir_lazyIfThenElse(
-                // condition (compare against the PARENT ctor index — the
-                // value's runtime tag is unaffected by narrowing)
-                _ir_apps(
-                    new IRVar( isConstrIdxSym ), // isConstrIdx
-                    IRConst.int(
-                        matchExprType instanceof TirDataStructType
-                            ? matchExprType.parentCtorIdx( ctorIdx )
-                            : ctorIdx
-                    )
-                ),
-                // then
-                thenCase,
-                // else
-                ifThenElseMatchingStatements
-            );
+            armsByParentIdx.set( parentCtorIdx, body.toIR( armCtx ) );
         }
 
-        return _ir_let_sym(
-            unConstrStructSym,
-            _ir_apps(
-                IRNative.unConstrData,
-                this.matchExpr.toIR( ctx )
-            ), // unconstrStruct
-            _ir_let_sym(
-                isConstrIdxSym,
-                _ir_apps(
-                    IRNative.equalsInteger,
-                    _ir_apps(
-                        IRNative.fstPair,
-                        new IRVar( unConstrStructSym ) // unConstrData result
-                    )
-                ), // isConstrIdx
-                ifThenElseMatchingStatements
-            )
-        )
+        // build inner-Case branches sized to `maxParentIdx + 1`, filling
+        // missing slots with the wildcard body
+        const innerBranches: IRTerm[] = new Array( maxParentIdx + 1 );
+        for( let i = 0; i < innerBranches.length; i++ ) {
+            innerBranches[i] = armsByParentIdx.get( i ) ?? wildcardBodyIR;
+        }
+
+        // trailing `IRError` branches can be omitted — the CEK machine
+        // fails naturally if no branch exists for the runtime tag
+        while(
+            innerBranches.length > 0
+            && innerBranches[ innerBranches.length - 1 ] instanceof IRError
+        ) innerBranches.pop();
+
+        const innerCase: IRTerm = innerBranches.length > 0
+            ? new IRCase( new IRVar( idxSym ), innerBranches )
+            : new IRError();
+
+        // outer Case over the pair: single branch destructures (idx, fields)
+        return new IRCase(
+            _ir_apps( IRNative.unConstrData, this.matchExpr.toIR( ctx ) ),
+            [
+                new IRFunc(
+                    [ idxSym, fieldsListSym ],
+                    innerCase
+                )
+            ]
+        );
     }
 }
 

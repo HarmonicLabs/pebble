@@ -219,6 +219,7 @@ export enum Token {
 
     // taggedModifier,     // `tagged` data struct
     Runtime,    // `runtime` struct (SoP encoding)
+    Untagged,   // `untagged` data struct (listData encoding, single constructor)
     
     // literals
   

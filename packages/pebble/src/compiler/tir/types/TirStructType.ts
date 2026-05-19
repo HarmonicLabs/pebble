@@ -47,7 +47,14 @@ export class TirDataStructType
         readonly untagged: boolean = false,
         narrowedFromParentCtorIdxs: number[] | undefined = undefined,
     ) {
-        this.untagged = false; // always false for now
+        // `untagged === true` requires a single constructor — its runtime
+        // form is `listData(fields)` instead of `constrData(idx, fields)`.
+        if( untagged && constructors.length !== 1 ) {
+            throw new Error(
+                "untagged data struct must have exactly one constructor; got "
+                + constructors.length
+            );
+        }
         this.narrowedFromParentCtorIdxs = narrowedFromParentCtorIdxs;
     }
 

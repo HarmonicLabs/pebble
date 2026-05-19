@@ -1354,7 +1354,7 @@ function _deriveContractDatumTypeDef(
 ): StructDecl
 {
     let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.untaggedSingleConstructor;
+    if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
 
     return new StructDecl(
         new Identifier( contractName, contractRange ),
@@ -1508,7 +1508,7 @@ function _buildSpendCaseBlock(
                         stateDecl.range
                     )
                 ],
-                StructDeclAstFlags.onlyDataEncoding | StructDeclAstFlags.untaggedSingleConstructor,
+                StructDeclAstFlags.onlyDataEncoding | StructDeclAstFlags.shortcutSingleConstructor,
                 stateDecl.range
             );
             compiler.registerInternalTypeDecl( perStateStructDecl );
@@ -1678,7 +1678,7 @@ function _deriveRedeemerTypeDef(
 ): StructDecl
 {
     let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( methods.length <= 1 ) defFlags |= StructDeclAstFlags.untaggedSingleConstructor;
+    if( methods.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
 
     const uniqueName = getUniqueInternalName( redeemerName );
     return new StructDecl(

@@ -1,15 +1,13 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
-import { _ir_apps, IRApp } from "../../../IR/IRNodes/IRApp";
+import { _ir_apps } from "../../../IR/IRNodes/IRApp";
+import { IRCase } from "../../../IR/IRNodes/IRCase";
 import { IRConst } from "../../../IR/IRNodes/IRConst";
 import { IRConstr } from "../../../IR/IRNodes/IRConstr";
-import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
-import { IRForced } from "../../../IR/IRNodes/IRForced";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
 import { IRHoisted } from "../../../IR/IRNodes/IRHoisted";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import { IRVar } from "../../../IR/IRNodes/IRVar";
 import type { IRTerm } from "../../../IR/IRTerm";
-import { _ir_let } from "../../../IR/tree_utils/_ir_let";
 import { TirBoolT } from "../types/TirNativeType/native/bool";
 import { TirBytesT } from "../types/TirNativeType/native/bytes";
 import { TirDataT } from "../types/TirNativeType/native/data";
@@ -24,6 +22,7 @@ import { TirVoidT } from "../types/TirNativeType/native/void";
 import { TirValueT } from "../types/TirNativeType/native/value";
 import { TirArrayT } from "../types/TirNativeType/native/array";
 import { TirDataStructType, TirSoPStructType } from "../types/TirStructType";
+import { TirEnumType } from "../types/TirEnumType";
 import { isTirType, TirType } from "../types/TirType";
 import { getListTypeArg } from "../types/utils/getListTypeArg";
 import { getOptTypeArg } from "../types/utils/getOptTypeArg";
@@ -158,37 +157,38 @@ export function _inlineFromData(
         const value_t = getOptTypeArg( to_t );
         if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
 
-        return _ir_let( // introuduce a var
-            _ir_apps(
-                IRNative.unConstrData,
-                dataExprIR
-            ),
-            unConstrDataResultSym => _ir_apps(
-                IRNative.strictIfThenElse,
-                _ir_apps(
-                    IRNative.equalsInteger,
-                    _ir_apps(
-                        IRNative.fstPair,
-                        new IRVar( unConstrDataResultSym ) // unConstrData result
-                    ),
-                    IRConst.int( 0 )
-                ),
-                // then (Just value)
-                new IRConstr( 0, [
-                    _ir_apps(
-                        _fromDataUplcFunc( value_t ),
-                        _ir_apps(
-                            IRNative.headList,
-                            _ir_apps(
-                                IRNative.sndPair,
-                                new IRVar( unConstrDataResultSym ) // unConstrData result
-                            )
-                        )
+        // Case(unConstrData(data), [\idxSym fieldsSym ->
+        //     Case(idxSym, [
+        //         IRConstr(0, [fromData(headList(fieldsSym))]),  -- Some
+        //         IRConstr(1, [])                                -- None
+        //     ])
+        // ])
+        const idxSym = Symbol("optIdx");
+        const fieldsListSym = Symbol("optFields");
+        return new IRCase(
+            _ir_apps( IRNative.unConstrData, dataExprIR ),
+            [
+                new IRFunc(
+                    [ idxSym, fieldsListSym ],
+                    new IRCase(
+                        new IRVar( idxSym ),
+                        [
+                            // ctor 0: Some
+                            new IRConstr( 0, [
+                                _ir_apps(
+                                    _fromDataUplcFunc( value_t ),
+                                    _ir_apps(
+                                        IRNative.headList,
+                                        new IRVar( fieldsListSym )
+                                    )
+                                )
+                            ]),
+                            // ctor 1: None
+                            new IRHoisted( new IRConstr( 1, [] ) )
+                        ]
                     )
-                ]),
-                // else (Nothing)
-                new IRHoisted( new IRConstr( 1, [] ) )
-            )
+                )
+            ]
         );
     }
 
@@ -216,6 +216,7 @@ export function _fromDataUplcFunc(
     ) return IRNative._id;
 
     if( target_t instanceof TirIntT ) return IRNative.unIData;
+    if( target_t instanceof TirEnumType ) return IRNative.unIData;
     if( target_t instanceof TirBytesT ) return IRNative.unBData;
     if( target_t instanceof TirVoidT ) return _mkUnit.clone();
     if( target_t instanceof TirBoolT ) return _boolFromData.clone();
@@ -262,18 +263,33 @@ const _mkUnit = new IRHoisted(
 );
 
 const _boolFromDataDataSym = Symbol("boolData");
+// Case(unConstrData(data), [\idxSym _fieldsSym ->
+//     Case(idxSym, [
+//         IRConst.bool(true),   -- ctor 0 → true   (preserves equalsInteger(_, 0) semantics)
+//         IRConst.bool(false)   -- ctor 1 → false
+//     ])
+// ])
+const _boolFromDataIdxSym = Symbol("boolIdx");
+const _boolFromDataFieldsSym = Symbol("boolFields_unused");
 const _boolFromData = new IRHoisted( new IRFunc(
     [ _boolFromDataDataSym ], // data
-    _ir_apps(
-        IRNative.equalsInteger,
-        new IRApp(
-            IRNative.fstPair,
-            new IRApp(
-                IRNative.unConstrData,
-                new IRVar( _boolFromDataDataSym )
-            )
+    new IRCase(
+        _ir_apps(
+            IRNative.unConstrData,
+            new IRVar( _boolFromDataDataSym )
         ),
-        IRConst.int( 0 )
+        [
+            new IRFunc(
+                [ _boolFromDataIdxSym, _boolFromDataFieldsSym ],
+                new IRCase(
+                    new IRVar( _boolFromDataIdxSym ),
+                    [
+                        IRConst.bool( true ),
+                        IRConst.bool( false )
+                    ]
+                )
+            )
+        ]
     )
 ));
 
@@ -302,39 +318,83 @@ export function _inilneSingeSopConstrFromData(
     if( constr.fields.length === 0 )
     return new IRHoisted( new IRConstr( 0, [] ) );
 
-    if( constr.fields.length === 1 ) {
-        const value_t = getUnaliased( constr.fields[0].type );
-        if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
+    // Case(unConstrData(data), [\_idxSym fieldsListSym -> IRConstr(0, [...fields])])
+    // Single ctor, so the index is ignored — the outer Case destructures
+    // the pair via a 2-arg branch and we only consume the fields list.
+    const idxSym = Symbol("singleCtorIdx_unused");
+    const fieldsListSym = Symbol("fieldsList");
+    return new IRCase(
+        _ir_apps( IRNative.unConstrData, dataExprIR ),
+        [
+            new IRFunc(
+                [ idxSym, fieldsListSym ],
+                new IRConstr(
+                    0,
+                    constr.fields.map( (field, i) => {
+                        const field_t = getUnaliased( field.type );
+                        if( !isTirType( field_t ) ) throw new Error("TirFromDataExpr: unreachable");
 
-        return new IRConstr( 0, [
-            _inlineFromData(
-                value_t,
-                // get head of fields list
-                _ir_apps(
-                    IRNative.headList,
-                    _ir_apps(
-                        IRNative.sndPair,
-                        _ir_apps(
-                            IRNative.unConstrData,
-                            dataExprIR
-                        )
-                    )
+                        return _inlineFromData(
+                            field_t,
+                            _ir_apps(
+                                IRNative.headList,
+                                i === 0
+                                    ? new IRVar( fieldsListSym )
+                                    : _ir_apps(
+                                        IRNative._dropList,
+                                        IRConst.int( i ),
+                                        new IRVar( fieldsListSym )
+                                    )
+                            )
+                        );
+                    } )
                 )
             )
-        ]);
-    }
+        ]
+    );
+}
 
-    return _ir_let(
-        _ir_apps(
-            IRNative.sndPair,
-            _ir_apps(
-                IRNative.unConstrData,
-                dataExprIR
-            )
-        ), // introduce fields list
-        fieldsListSym => new IRConstr(
-            0,
-            constr.fields.map( (field, i) => {
+export function _inlineMultiSopConstrFromData(
+    sop_t: TirSoPStructType,
+    dataExprIR: IRTerm
+): IRTerm
+{
+    if( sop_t.constructors.length <= 1 )
+    return _inilneSingeSopConstrFromData( sop_t, dataExprIR );
+
+    // Case(unConstrData(data), [\idxSym fieldsListSym ->
+    //     Case(idxSym, [
+    //         IRConstr(0, [...fields_of_ctor_0]),
+    //         IRConstr(1, [...fields_of_ctor_1]),
+    //         ...
+    //     ])
+    // ])
+    const idxSym = Symbol("ctorIdx");
+    const fieldsListSym = Symbol("fieldsList");
+
+    const continuations: IRTerm[] = sop_t.constructors.map( ( constr, constrIdx ) =>
+    {
+        if( constr.fields.length === 0 )
+        return new IRHoisted( new IRConstr( constrIdx, [] ) );
+
+        if( constr.fields.length === 1 ) {
+            const value_t = getUnaliased( constr.fields[0].type );
+            if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
+
+            return new IRConstr( constrIdx, [
+                _inlineFromData(
+                    value_t,
+                    _ir_apps(
+                        IRNative.headList,
+                        new IRVar( fieldsListSym )
+                    )
+                )
+            ]);
+        }
+
+        return new IRConstr(
+            constrIdx,
+            constr.fields.map( ( field, i ) => {
                 const field_t = getUnaliased( field.type );
                 if( !isTirType( field_t ) ) throw new Error("TirFromDataExpr: unreachable");
 
@@ -352,98 +412,20 @@ export function _inilneSingeSopConstrFromData(
                     )
                 );
             } )
-        )
-    );
-}
+        );
+    });
 
-export function _inlineMultiSopConstrFromData(
-    sop_t: TirSoPStructType,
-    dataExprIR: IRTerm
-): IRTerm
-{
-    if( sop_t.constructors.length <= 1 )
-    return _inilneSingeSopConstrFromData( sop_t, dataExprIR );
-
-    return _ir_let(
-        _ir_apps(
-            IRNative.unConstrData,
-            dataExprIR
-        ), // introduce unConstrData result
-        unConstrDataSym => _ir_let(
-            _ir_apps(
-                IRNative.equalsInteger,
-                _ir_apps(
-                    IRNative.fstPair,
-                    new IRVar( unConstrDataSym )
+    return new IRCase(
+        _ir_apps( IRNative.unConstrData, dataExprIR ),
+        [
+            new IRFunc(
+                [ idxSym, fieldsListSym ],
+                new IRCase(
+                    new IRVar( idxSym ),
+                    continuations
                 )
-            ), // introduce isConstrIdx predicate (a function expecting an int)
-            isConstrIdxSym => _ir_let(
-                _ir_apps(
-                    IRNative.sndPair,
-                    new IRVar( unConstrDataSym )
-                ), // introduce fields list
-                fieldsListSym => {
-                    const continuations = sop_t.constructors.map((constr, constrIdx) =>
-                    {
-                        if( constr.fields.length === 0 )
-                        return new IRHoisted( new IRConstr( constrIdx, [] ) );
-
-                        if( constr.fields.length === 1 ) {
-                            const value_t = getUnaliased( constr.fields[0].type );
-                            if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
-
-                            return new IRConstr( constrIdx, [
-                                _inlineFromData(
-                                    value_t,
-                                    _ir_apps(
-                                        IRNative.headList,
-                                        new IRVar( fieldsListSym )
-                                    )
-                                )
-                            ]);
-                        }
-
-                        return new IRConstr(
-                            constrIdx,
-                            constr.fields.map( (field, i) => {
-                                const field_t = getUnaliased( field.type );
-                                if( !isTirType( field_t ) ) throw new Error("TirFromDataExpr: unreachable");
-
-                                return _inlineFromData(
-                                    field_t,
-                                    _ir_apps(
-                                        IRNative.headList,
-                                        i === 0
-                                            ? new IRVar( fieldsListSym )
-                                            : _ir_apps(
-                                                IRNative._dropList,
-                                                IRConst.int( i ),
-                                                new IRVar( fieldsListSym )
-                                            )
-                                    )
-                                );
-                            } )
-                        );
-                    });
-
-                    let finalIfThenElseChain: IRTerm = continuations[ continuations.length - 1 ];
-                    for( let i = continuations.length - 2; i >= 0; i-- )
-                    {
-                        finalIfThenElseChain = new IRForced(_ir_apps(
-                            IRNative.strictIfThenElse,
-                            _ir_apps(
-                                new IRVar( isConstrIdxSym ),
-                                IRConst.int( i )
-                            ),
-                            new IRDelayed( continuations[i] ),
-                            new IRDelayed( finalIfThenElseChain )
-                        ));
-                    }
-
-                    return finalIfThenElseChain;
-                }
             )
-        )
+        ]
     );
 }
 

@@ -1,6 +1,7 @@
 import { TirBoolT, TirIntT } from "../../../compiler/tir/types/TirNativeType";
 import { equalIrHash } from "../../IRHash";
 import { _ir_apps } from "../../IRNodes/IRApp";
+import { IRCase } from "../../IRNodes/IRCase";
 import { IRConst } from "../../IRNodes/IRConst";
 import { IRFunc } from "../../IRNodes/IRFunc";
 import { IRHoisted } from "../../IRNodes/IRHoisted";
@@ -216,12 +217,16 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                         && eqZeroArgArgs.length === 1
                     ) {
                         const listTerm = eqZeroArgArgs[0];
-                        // replace with isNullList
-                        const newTerm = _ir_apps(
-                            IRNative.strictChooseList,
+                        // if( list.length() === 0 ) thenArg else elseArg
+                        //   →  case list of cons _h _t -> elseArg ; nil -> thenArg
+                        const dh = Symbol("_h");
+                        const dt = Symbol("_t");
+                        const newTerm = new IRCase(
                             listTerm,
-                            thenArg,
-                            elseArg
+                            [
+                                new IRFunc( [ dh, dt ], elseArg ),
+                                thenArg
+                            ]
                         );
                         modifyTermAndPushToReprocess( current, newTerm );
                         continue;
@@ -236,13 +241,17 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     && condArgs.length === 1
                 ) {
                     const listTerm = condArgs[0];
-                    // replace with isListLength
-                    const newTerm = _ir_apps(
-                        IRNative.strictChooseList,
+                    // if( nullList(list) ) thenArg else elseArg
+                    //   →  case list of cons _h _t -> elseArg ; nil -> thenArg
+                    const dh = Symbol("_h");
+                    const dt = Symbol("_t");
+                    const newTerm = new IRCase(
                         listTerm,
-                        thenArg,
-                        elseArg
-                    )
+                        [
+                            new IRFunc( [ dh, dt ], elseArg ),
+                            thenArg
+                        ]
+                    );
                     modifyTermAndPushToReprocess( current, newTerm );
                     continue;
                 } // if( x.isEmpty() )
@@ -400,6 +409,29 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     modifyTermAndPushToReprocess( current, newTerm );
                     continue;
                 }
+            }
+            else if(
+                tag === IRNativeTag.strictChooseList
+                && restArgs.length === 2
+            ) {
+                // strictChooseList list caseNil caseCons
+                //   →  case list of (λ_h _t → caseCons) | caseNil
+                // IRCase branches are naturally lazy, so wrapping caseNil/
+                // caseCons in delay/force is unnecessary at the call site.
+                const listTerm = fstArg;
+                const caseNil  = restArgs[0];
+                const caseCons = restArgs[1];
+                const dh = Symbol("_h");
+                const dt = Symbol("_t");
+                const newTerm = new IRCase(
+                    listTerm,
+                    [
+                        new IRFunc( [ dh, dt ], caseCons ),
+                        caseNil
+                    ]
+                );
+                modifyTermAndPushToReprocess( current, newTerm );
+                continue;
             }
         }
 

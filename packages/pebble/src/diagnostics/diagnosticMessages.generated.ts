@@ -285,6 +285,11 @@ export enum DiagnosticCode {
     _private_modifier_is_only_allowed_on_declarations_inside_a_namespace = 30003,
     Namespaces_cannot_be_declared_here = 30004,
     _0_is_not_a_namespace = 30005,
+    Enum_members_cannot_have_explicit_values = 30100,
+    Duplicate_enum_member_0 = 30101,
+    Enum_must_have_at_least_one_member = 30102,
+    Property_0_is_not_a_member_of_enum_1 = 30103,
+    Enum_member_pattern_cannot_have_fields = 30104,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -574,6 +579,11 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 30003: return "'private' modifier is only allowed on declarations inside a namespace.";
         case 30004: return "Namespaces cannot be declared here.";
         case 30005: return "'{0}' is not a namespace.";
+        case 30100: return "Enum members cannot have explicit values.";
+        case 30101: return "Duplicate enum member '{0}'.";
+        case 30102: return "Enum must have at least one member.";
+        case 30103: return "Property '{0}' is not a member of enum '{1}'.";
+        case 30104: return "Enum member pattern cannot have fields; enum members carry no data.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

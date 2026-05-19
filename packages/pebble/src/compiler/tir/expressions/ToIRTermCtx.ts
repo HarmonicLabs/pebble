@@ -1,5 +1,6 @@
 import { IRVar } from "../../../IR/IRNodes/IRVar";
 import { IRSelfCall } from "../../../IR/IRNodes/IRSelfCall";
+import type { IRTerm } from "../../../IR/IRTerm";
 
 const _1n = BigInt(1);
 
@@ -7,6 +8,15 @@ export class ToIRTermCtx
 {
     readonly _creationStack?: string | undefined;
     private readonly localVars: Map<string, symbol> = new Map();
+    /**
+     * Per-name overrides whose lookup synthesizes a fresh IR term at each
+     * access (rather than resolving to a pre-allocated IRVar). Used to
+     * implement lazy field extraction in case-arms — the body's references
+     * to pattern-bound fields each emit an `IRLetted` over the extraction
+     * IR, so the letted-handling pass can dedup, hoist or eliminate as
+     * appropriate.
+     */
+    private readonly deferredAccess: Map<string, () => IRTerm> = new Map();
 
     private _firstVariableIsRecursive: boolean = false;
 
@@ -55,7 +65,19 @@ export class ToIRTermCtx
         );
     }
 
-    getVarAccessIR( name: string ): IRVar | IRSelfCall | undefined {
+    private getDeferredAccessFactory( name: string ): ( () => IRTerm ) | undefined {
+        return (
+            this.deferredAccess.get( name )
+            ?? this.parent?.getDeferredAccessFactory( name )
+        );
+    }
+
+    getVarAccessIR( name: string ): IRTerm | undefined {
+        // deferred accesses (lazy field extraction in case-arms etc.)
+        // shadow symbol-based lookups when present.
+        const deferred = this.getDeferredAccessFactory( name );
+        if( deferred ) return deferred();
+
         const accessSym = this.getVarAccessSym( name );
         if( typeof accessSym !== "symbol" ) return undefined;
 
@@ -63,8 +85,23 @@ export class ToIRTermCtx
             this._firstVariableIsRecursive
             && name === this.localVars.keys().next().value
         ) return new IRSelfCall( accessSym );
-        
+
         return new IRVar( accessSym );
+    }
+
+    /**
+     * Register a per-name lookup override. Subsequent `getVarAccessIR(name)`
+     * calls in this context (or its descendants) return the IR term produced
+     * by `factory()`. The factory is invoked once per access — wrap the
+     * result in `IRLetted` if you want the IR-level let-handling pass to
+     * dedup / hoist / eliminate as appropriate.
+     */
+    defineDeferredAccess( name: string, factory: () => IRTerm ): void
+    {
+        if( this.localVars.has( name ) || this.deferredAccess.has( name ) ) {
+            throw new Error(`variable '${name}' already defined in the current scope`);
+        }
+        this.deferredAccess.set( name, factory );
     }
 
     /**

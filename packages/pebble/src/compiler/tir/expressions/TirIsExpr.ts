@@ -7,6 +7,7 @@ import { IRNative } from "../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { TirBoolT } from "../types/TirNativeType/native/bool";
 import { TirDataStructType, TirSoPStructType, TirStructType } from "../types/TirStructType";
+import { TirEnumType } from "../types/TirEnumType";
 import { getUnaliased } from "../types/utils/getUnaliased";
 import { ITirExpr } from "./ITirExpr";
 import { TirExpr } from "./TirExpr";
@@ -54,10 +55,35 @@ export class TirIsExpr
 
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
-        const structType = getUnaliased( this.instanceExpr.type ) as TirStructType;
+        const unaliased = getUnaliased( this.instanceExpr.type );
+
+        if( unaliased instanceof TirEnumType )
+        {
+            // enums lower to a plain int; `is Member` is integer equality
+            return _ir_apps(
+                IRNative.equalsInteger,
+                IRConst.int( this.parentCtorIdx ),
+                this.instanceExpr.toIR( ctx )
+            );
+        }
+
+        const structType = unaliased as TirStructType;
 
         if( structType instanceof TirDataStructType )
         {
+            // untagged data structs have exactly one constructor; the
+            // runtime value carries no tag — `is Ctor` is statically true.
+            // We still evaluate `instanceExpr` to preserve any error it
+            // would produce (the redundancy is also flagged with a warning
+            // at AstCompiler time).
+            if( structType.untagged ) return _ir_apps(
+                new IRFunc(
+                    [ Symbol("_unused_is_untagged") ],
+                    IRConst.bool( true )
+                ),
+                this.instanceExpr.toIR( ctx )
+            );
+
             // equalsInteger(parentCtorIdx, fstPair(unConstrData(<instance>)))
             return _ir_apps(
                 IRNative.equalsInteger,

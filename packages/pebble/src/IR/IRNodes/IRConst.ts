@@ -14,6 +14,7 @@ import { TirType } from "../../compiler/tir/types/TirType";
 import { getUnaliased } from "../../compiler/tir/types/utils/getUnaliased";
 import { TirAliasType } from "../../compiler/tir/types/TirAliasType";
 import { TirDataStructType, TirSoPStructType } from "../../compiler/tir/types/TirStructType";
+import { TirEnumType } from "../../compiler/tir/types/TirEnumType";
 import { getListTypeArg } from "../../compiler/tir/types/utils/getListTypeArg";
 import { TirTypeParam } from "../../compiler/tir/types/TirTypeParam";
 import { constT, ConstType, isPair, UPLCConst } from "@harmoniclabs/uplc";
@@ -228,6 +229,7 @@ function isValueAssignableToType( value: IRConstValue, type: TirType ): boolean
     if( type instanceof TirVoidT ) return value === undefined;
     if( type instanceof TirBoolT ) return typeof value === "boolean";
     if( type instanceof TirIntT ) return typeof value === "bigint";
+    if( type instanceof TirEnumType ) return typeof value === "bigint";
     if( type instanceof TirBytesT ) return value instanceof Uint8Array;
     if( type instanceof TirStringT ) return typeof value === "string";
     if( type instanceof TirPairDataT ) return (
@@ -307,7 +309,7 @@ function serializeIRConstValue( value: any, type: TirType ): Uint8Array
     if( type instanceof TirAliasType ) throw new Error("unreachable");
 
     if( type instanceof TirVoidT ) return new Uint8Array(0);
-    if( type instanceof TirIntT )
+    if( type instanceof TirIntT || type instanceof TirEnumType )
     {
         return positiveBigIntAsBytes(
             UPLCFlatUtils.zigzagBigint(
@@ -401,6 +403,7 @@ export function tirTypeToUplcType( t: TirType ): ConstType
     if( t instanceof TirVoidT ) return constT.unit;
     if( t instanceof TirBoolT ) return constT.bool;
     if( t instanceof TirIntT ) return constT.int;
+    if( t instanceof TirEnumType ) return constT.int;
     if( t instanceof TirBytesT ) return constT.byteStr;
     if( t instanceof TirStringT ) return constT.str;
 

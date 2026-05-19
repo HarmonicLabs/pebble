@@ -3,6 +3,7 @@ import { DiagnosticCode } from "../../../../../diagnostics/diagnosticMessages.ge
 import { TirNotEqualExpr } from "../../../../tir/expressions/binary/TirBinaryExpr";
 import { TirType } from "../../../../tir/types/TirType";
 import { canAssignTo } from "../../../../tir/types/utils/canAssignTo";
+import { normalizeEnumToInt } from "../../../../tir/types/utils/normalizeEnumToInt";
 import { AstCompilationCtx } from "../../../AstCompilationCtx";
 import { _compileExpr } from "../_compileExpr";
 
@@ -16,7 +17,7 @@ export function _compileNotEqualExpr(
     const left = _compileExpr( ctx, expr.left, typeHint );
     if( !left ) return undefined;
 
-    const leftType = left.type;
+    const leftType = normalizeEnumToInt( left.type, ctx.program.stdTypes.int );
 
     const right = _compileExpr( ctx, expr.right, leftType );
     if( !right ) return undefined;

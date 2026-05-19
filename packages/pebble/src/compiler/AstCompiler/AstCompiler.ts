@@ -1,5 +1,6 @@
 import { StructDecl, StructDeclAstFlags } from "../../ast/nodes/statements/declarations/StructDecl";
 import { TypeAliasDecl } from "../../ast/nodes/statements/declarations/TypeAliasDecl";
+import { EnumDecl } from "../../ast/nodes/statements/declarations/EnumDecl";
 import { ExportStarStmt } from "../../ast/nodes/statements/ExportStarStmt";
 import { ImportStarStmt } from "../../ast/nodes/statements/ImportStarStmt";
 import { ImportStmt } from "../../ast/nodes/statements/ImportStmt";
@@ -15,6 +16,7 @@ import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName } from "./scope/As
 import { TypedProgram } from "../tir/program/TypedProgram";
 import { TirAliasType } from "../tir/types/TirAliasType";
 import { TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
+import { TirEnumType } from "../tir/types/TirEnumType";
 import { ExportStmt } from "../../ast/nodes/statements/ExportStmt";
 import { ResolveStackNode } from "./utils/deps/ResolveStackNode";
 import { AstCompilationCtx } from "./AstCompilationCtx";
@@ -1131,12 +1133,15 @@ export class AstCompiler extends DiagnosticEmitter
             if(!(
                 stmt instanceof StructDecl
                 || stmt instanceof TypeAliasDecl
+                || stmt instanceof EnumDecl
             )) continue;
 
-            const isGeneric = stmt.typeParams.length > 0;
+            const isGeneric = stmt instanceof EnumDecl ? false : stmt.typeParams.length > 0;
 
             const tirTypes = stmt instanceof StructDecl
                 ? this._compileStructDecl( stmt, srcUid, topLevelScope )
+                : stmt instanceof EnumDecl
+                ? this._compileEnumDecl( stmt, srcUid, topLevelScope )
                 : this._compileTypeAliasDecl( stmt, srcUid, topLevelScope );
 
             if(
@@ -1251,6 +1256,25 @@ export class AstCompiler extends DiagnosticEmitter
         if( !stmt.hasFlag( StructDeclAstFlags.onlySopEncoding ) )
         {
             let canEncodeToData = true;
+            // Untagged Data encoding (`listData(...)`) instead of
+            // `constrData(0, ...)`. Requires exactly one constructor and is
+            // enabled by either the explicit `untagged` keyword or the
+            // shortcut-form syntax when `encodingStrategy === "minimal"`.
+            const isUntagged =
+                stmt.constrs.length === 1 && (
+                    stmt.hasFlag( StructDeclAstFlags.untagged )
+                    || (
+                        stmt.hasFlag( StructDeclAstFlags.shortcutSingleConstructor )
+                        && this.cfg.encodingStrategy === "minimal"
+                    )
+                );
+            if( stmt.hasFlag( StructDeclAstFlags.untagged ) && stmt.constrs.length !== 1 ) {
+                this.error(
+                    DiagnosticCode.Not_implemented_0,
+                    stmt.name.range,
+                    "`untagged` struct must have exactly one constructor"
+                );
+            }
             const dataType = new TirDataStructType(
                 stmt.name.text,
                 srcUid,
@@ -1282,7 +1306,8 @@ export class AstCompiler extends DiagnosticEmitter
                         .filter( f => f instanceof TirStructField ) as TirStructField[]
                     )
                 ),
-                methodsNames
+                methodsNames,
+                isUntagged
             );
 
             if( canEncodeToData ) data = dataType;
@@ -1336,6 +1361,55 @@ export class AstCompiler extends DiagnosticEmitter
         ) : undefined;
 
         return sop || data ? { sop, data, methodsNames } : undefined;
+    }
+
+    private _compileEnumDecl(
+        stmt: EnumDecl,
+        srcUid: string,
+        _topLevelScope: AstScope
+    ): AstTypeDefCompilationResult | undefined
+    {
+        if( stmt.members.length === 0 )
+        {
+            this.error(
+                DiagnosticCode.Enum_must_have_at_least_one_member,
+                stmt.name.range
+            );
+            return undefined;
+        }
+
+        const seen = new Set<string>();
+        const memberNames: string[] = [];
+        for( const m of stmt.members )
+        {
+            if( m.value !== undefined )
+            {
+                this.error(
+                    DiagnosticCode.Enum_members_cannot_have_explicit_values,
+                    m.range
+                );
+            }
+            if( seen.has( m.name.text ) )
+            {
+                this.error(
+                    DiagnosticCode.Duplicate_enum_member_0,
+                    m.name.range, m.name.text
+                );
+                continue;
+            }
+            seen.add( m.name.text );
+            memberNames.push( m.name.text );
+        }
+
+        const methodsNames: Map<AstFuncName, TirFuncName> = new Map();
+        const enumType = new TirEnumType(
+            stmt.name.text,
+            srcUid,
+            memberNames,
+            methodsNames
+        );
+
+        return { sop: enumType, data: enumType, methodsNames };
     }
 
     private _consumeImportsAddSymsInScope(

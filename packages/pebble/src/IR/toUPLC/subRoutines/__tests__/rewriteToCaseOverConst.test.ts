@@ -4,6 +4,7 @@ import { IRConst } from "../../../IRNodes/IRConst";
 import { IRError } from "../../../IRNodes/IRError";
 import { IRFunc } from "../../../IRNodes/IRFunc";
 import { IRNative } from "../../../IRNodes/IRNative";
+import { rewriteNativesAppliedToConstantsAndReturnRoot } from "../rewriteNativesAppliedToConstantsAndReturnRoot";
 import { rewriteToCaseOverConstAndReturnRoot } from "../rewriteToCaseOverConstAndReturnRoot";
 
 describe("rewriteToCaseOverConstAndReturnRoot", () => {
@@ -46,6 +47,8 @@ describe("rewriteToCaseOverConstAndReturnRoot", () => {
     });
 
     test("strictChooseList(list, nil, cons)  →  Case(list, [(λh λt → cons), nil])", () => {
+        // The strictChooseList → IRCase rewrite now lives in
+        // rewriteNativesAppliedToConstantsAndReturnRoot (unconditional, not V4-gated).
         const list = IRConst.listOf( {
             toUplcConstType: () => [ 0 ] as any,
         } as any )( [] as any );
@@ -59,7 +62,7 @@ describe("rewriteToCaseOverConstAndReturnRoot", () => {
             caseCons.clone(),
         );
 
-        const out = rewriteToCaseOverConstAndReturnRoot( root );
+        const out = rewriteNativesAppliedToConstantsAndReturnRoot( root );
 
         expect( out ).toBeInstanceOf( IRCase );
         const c = out as IRCase;
@@ -82,7 +85,9 @@ describe("rewriteToCaseOverConstAndReturnRoot", () => {
             caseCons.clone(),
         );
 
-        const out = rewriteToCaseOverConstAndReturnRoot( root );
+        // First pass converts to IRCase, second pass prunes the trailing IRError.
+        const afterConversion = rewriteNativesAppliedToConstantsAndReturnRoot( root );
+        const out = rewriteToCaseOverConstAndReturnRoot( afterConversion );
 
         expect( out ).toBeInstanceOf( IRCase );
         const c = out as IRCase;

@@ -237,6 +237,12 @@ export class Parser extends DiagnosticEmitter
             case Token.Data: {
                 // `next()` skips `data` keyword
                 tn.next();
+                let extraFlags = StructDeclAstFlags.onlyDataEncoding;
+                // accept `data untagged struct ...`
+                if( tn.peek() === Token.Untagged ) {
+                    tn.next();
+                    extraFlags |= StructDeclAstFlags.untagged;
+                }
                 // positions on (expected) `struct` keyword
                 if( tn.peek() !== Token.Struct ) {
                     console.error( Token[ tn.peek() ]);
@@ -247,7 +253,7 @@ export class Parser extends DiagnosticEmitter
                 }
                 tn.next(); // skip `struct`
                 statement = this.parseStruct(
-                    StructDeclAstFlags.onlyDataEncoding,
+                    extraFlags,
                     flags,
                     startPos
                 );
@@ -274,6 +280,25 @@ export class Parser extends DiagnosticEmitter
             case Token.Struct: {
                 tn.next();
                 statement = this.parseStruct( StructDeclAstFlags.none, flags, startPos );
+                break;
+            }
+            case Token.Untagged: {
+                // `untagged` keyword forces listData encoding (single ctor).
+                // Accept: `untagged struct ...` or `untagged data struct ...`.
+                tn.next(); // skip `untagged`
+                let extraFlags = StructDeclAstFlags.untagged;
+                if( tn.peek() === Token.Data ) {
+                    tn.next(); // skip `data`
+                    extraFlags |= StructDeclAstFlags.onlyDataEncoding;
+                }
+                if( tn.peek() !== Token.Struct ) {
+                    return this.error(
+                        DiagnosticCode._0_expected,
+                        tn.range(), "struct"
+                    );
+                }
+                tn.next(); // skip `struct`
+                statement = this.parseStruct( extraFlags, flags, startPos );
                 break;
             }
             case Token.Interface: {
@@ -1436,7 +1461,7 @@ export class Parser extends DiagnosticEmitter
                         range
                     )
                 ],
-                structDeclFlags | StructDeclAstFlags.untaggedSingleConstructor,
+                structDeclFlags | StructDeclAstFlags.shortcutSingleConstructor,
                 range.clone()
             );
         }
@@ -1479,7 +1504,7 @@ export class Parser extends DiagnosticEmitter
                         tn.range( startPos, tn.pos )
                     )
                 ],
-                structDeclFlags | StructDeclAstFlags.untaggedSingleConstructor,
+                structDeclFlags | StructDeclAstFlags.shortcutSingleConstructor,
                 tn.range( startPos, tn.pos )
             );
         }
@@ -3019,24 +3044,17 @@ export class Parser extends DiagnosticEmitter
         const expr = this.parseExpr( Precedence.Relational + 1 );
         if (!expr) return undefined;
 
-        let noPatternCaseSeen = false;
         const cases = new Array<CaseExprMatcher>();
 
         while( tn.skip( Token.Is ) )
-        {            
-            if( noPatternCaseSeen )
-            return this.error(
-                DiagnosticCode.This_case_will_never_be_evaluated_because_all_patterns_will_be_catched_before,
-                tn.range()
-            );
-
+        {
             const startPos = tn.tokenPos;
 
             const matcher = this._parseVarDecl( CommonFlags.Const );
             if( !matcher ) return undefined;
 
-            if( matcher instanceof SimpleVarDecl ) noPatternCaseSeen = true;
-
+            // SimpleVarDecl patterns are validated by the AstCompiler, which
+            // has type info (enum-member promotion vs invalid catch-all).
             if( matcher.initExpr || matcher.type )
             return this.error(
                 DiagnosticCode.Patterns_may_not_have_initializers_or_explicit_types,
@@ -4108,7 +4126,6 @@ export class Parser extends DiagnosticEmitter
             tn.range(), "{"
         );
 
-        let noPatternCaseSeen: boolean = false;
         const cases = new Array<MatchStmtCase>();
         while(
             !tn.skip( Token.CloseBrace )
@@ -4131,13 +4148,8 @@ export class Parser extends DiagnosticEmitter
                 tn.range()
             );
 
-            if( noPatternCaseSeen )
-            return this.error(
-                DiagnosticCode.This_case_will_never_be_evaluated_because_all_patterns_will_be_catched_before,
-                pattern.range
-            );
-
-            if( pattern instanceof SimpleVarDecl ) noPatternCaseSeen = true;
+            // SimpleVarDecl patterns are validated by the AstCompiler, which
+            // has type info (enum-member promotion vs invalid catch-all).
 
             if( !tn.skip( Token.Colon ) )
             return this.error(

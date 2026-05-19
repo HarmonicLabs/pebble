@@ -12,6 +12,7 @@ import { TirSopOptT } from "../TirNativeType/native/Optional/sop";
 import { TirStringT } from "../TirNativeType/native/string";
 import { TirVoidT } from "../TirNativeType/native/void";
 import { isTirStructType, TirDataStructType } from "../TirStructType";
+import { TirEnumType } from "../TirEnumType";
 import { TirType } from "../TirType";
 import { CanAssign, getCanAssign } from "./canAssignTo";
 
@@ -63,6 +64,7 @@ export function canCastTo( a: TirType, b: TirType ): boolean
     if( b instanceof TirIntT )
     {
         if( a instanceof TirIntT ) return true;
+        if( a instanceof TirEnumType ) return true; // enum is an int at runtime
         if( a instanceof TirDataT ) return true;
         if( a instanceof TirBoolT ) return true; // 0 | 1
         if( a instanceof TirBytesT ) return true; // decode big endian plutus v3 builtin
@@ -128,6 +130,15 @@ export function canCastTo( a: TirType, b: TirType ): boolean
         return false;
     }
 
+    if( b instanceof TirEnumType )
+    {
+        if( a instanceof TirEnumType ) return a.toTirTypeKey() === b.toTirTypeKey();
+        // only `data` (e.g. datum/redeemer decoding) can be cast to enum;
+        // plain `int` cannot — there is no way to verify it is a valid tag.
+        if( a instanceof TirDataT ) return true;
+        return false;
+    }
+
     if( b instanceof TirFuncT )
     {
         if(!( a instanceof TirFuncT )) return false;
@@ -175,6 +186,7 @@ export function canCastToData( a: TirType ): boolean
         || a instanceof TirBoolT
         || a instanceof TirDataOptT
         || a instanceof TirDataStructType
+        || a instanceof TirEnumType
     ) return true;
     if( a instanceof TirLinearMapT ) {
         const key = canCastToData( a.keyTypeArg );

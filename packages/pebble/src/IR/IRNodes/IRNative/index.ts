@@ -14,6 +14,7 @@ import { TirType } from "../../../compiler/tir/types/TirType";
 import { IIRTerm, IRTerm } from "../../IRTerm";
 import { getUnaliased } from "../../../compiler/tir/types/utils/getUnaliased";
 import { TirDataStructType, TirSoPStructType } from "../../../compiler/tir/types/TirStructType";
+import { TirEnumType } from "../../../compiler/tir/types/TirEnumType";
 import { TirAliasType } from "../../../compiler/tir/types/TirAliasType";
 import { getListTypeArg } from "../../../compiler/tir/types/utils/getListTypeArg";
 import { TirTypeParam } from "../../../compiler/tir/types/TirTypeParam";
@@ -293,6 +294,7 @@ export class IRNative
         type = getUnaliased( type );
         if( type instanceof TirAliasType ) throw new Error("unreachable")
         if( type instanceof TirIntT ) return IRNative.equalsInteger;
+        if( type instanceof TirEnumType ) return IRNative.equalsInteger;
         if( type instanceof TirBytesT ) return IRNative.equalsByteString;
         if( type instanceof TirStringT ) return IRNative.equalsString;
         if( type instanceof TirBoolT ) return IRNative._equalBoolean;

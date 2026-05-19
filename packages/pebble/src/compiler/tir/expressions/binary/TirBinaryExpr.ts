@@ -10,6 +10,7 @@ import { getUnaliased } from "../../types/utils/getUnaliased";
 import { CEKConst, Machine } from "@harmoniclabs/plutus-machine";
 import { TirBytesT } from "../../types/TirNativeType/native/bytes";
 import { TirIntT } from "../../types/TirNativeType/native/int";
+import { TirEnumType } from "../../types/TirEnumType";
 import { TirValueT } from "../../types/TirNativeType/native/value";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../../IR/IRTerm";
@@ -158,7 +159,7 @@ export class TirLessThanExpr
     {
         const type = getUnaliased( this.left.type );
         const irFunc = (
-            type instanceof TirIntT ? IRNative.lessThanInteger :
+            (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanInteger :
             type instanceof TirBytesT ? IRNative.lessThanByteString :
             undefined
         );
@@ -214,7 +215,7 @@ export class TirGreaterThanExpr
     {
         const type = getUnaliased( this.left.type );
         const irFunc = (
-            type instanceof TirIntT ? IRNative.lessThanInteger :
+            (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanInteger :
             type instanceof TirBytesT ? IRNative.lessThanByteString :
             undefined
         );
@@ -271,7 +272,7 @@ export class TirLessThanEqualExpr
     {
         const type = getUnaliased( this.left.type );
         const irFunc = (
-            type instanceof TirIntT ? IRNative.lessThanEqualInteger :
+            (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanEqualInteger :
             type instanceof TirBytesT ? IRNative.lessThanEqualsByteString :
             undefined
         );
@@ -327,7 +328,7 @@ export class TirGreaterThanEqualExpr
     {
         const type = getUnaliased( this.left.type );
         const irFunc = (
-            type instanceof TirIntT ? IRNative.lessThanEqualInteger :
+            (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanEqualInteger :
             type instanceof TirBytesT ? IRNative.lessThanEqualsByteString :
             undefined
         );
@@ -463,6 +464,8 @@ export class TirAddExpr
             leftType instanceof TirIntT
             || leftType instanceof TirBytesT
         ) return leftType;
+        // enum + int yields an int (enums lower to ints at runtime)
+        if( leftType instanceof TirEnumType ) return int_t;
         throw new Error("invalid type for addition");
     }
     constructor(
@@ -500,7 +503,7 @@ export class TirAddExpr
     {
         const type = getUnaliased( this.left.type );
         const irFunc = (
-            type instanceof TirIntT ? IRNative.addInteger :
+            (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.addInteger :
             type instanceof TirBytesT ? IRNative.appendByteString :
             type instanceof TirValueT ? IRNative.unionValue :
             undefined

@@ -13,6 +13,7 @@ import { TirDataT } from "../../../tir/types/TirNativeType/native/data";
 import { TirDataOptT } from "../../../tir/types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
 import { isTirStructType, TirDataStructType, TirSoPStructType } from "../../../tir/types/TirStructType";
+import { TirEnumType } from "../../../tir/types/TirEnumType";
 import { getDeconstructableType, DeconstructableTirType } from "../../../tir/types/utils/getDeconstructableType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { wrapManyStatements } from "../../utils/wrapManyStatementsOrReturnSame";
@@ -47,17 +48,19 @@ export function _compileMatchStmt(
     );
 
     // TODO: add support for all deconstructable types
-    if( !isTirStructType( deconstructableType ) )
+    if( !isTirStructType( deconstructableType ) && !( deconstructableType instanceof TirEnumType ) )
     {
         return ctx.error(
             DiagnosticCode.Not_implemented_0,
             stmt.matchExpr.range,
-            "only structs supported for now, sorry!"
+            "only structs and enums supported for now, sorry!"
         );
     }
 
-    const ctors = deconstructableType.constructors;
-    const ctorNames = ctors.map( c => c.name );
+    const ctorNames = deconstructableType instanceof TirEnumType
+        ? deconstructableType.members.slice()
+        : deconstructableType.constructors.map( c => c.name );
+    const totalCtors = ctorNames.length;
     const missingCtors = ctorNames.slice();
 
     if( stmt.cases.length === 0 ) return ctx.error(
@@ -118,7 +121,7 @@ export function _compileMatchStmt(
         );
     }
 
-    if( !wildcardCase && cases.length < ctors.length )
+    if( !wildcardCase && cases.length < totalCtors )
     {
         return ctx.error(
             DiagnosticCode.Match_cases_are_not_exhaustive,
@@ -148,23 +151,44 @@ export function _compileTirMatchStmtCase(
     const pattern = matchCase.pattern;
 
     if( pattern instanceof SimpleVarDecl ) {
-        /*
-        if( pattern.name.text === "_" ) {
+        // bare-name pattern: only valid for enum scrutinees (`when Apple: ...`)
+        if( deconstructableType instanceof TirEnumType )
+        {
+            const memberName = pattern.name.text;
+            const memberIdx = deconstructableType.indexOf( memberName );
+            if( memberIdx < 0 ) return ctx.error(
+                DiagnosticCode.Unknown_0_constructor_1,
+                pattern.name.range, deconstructableType.toString(), memberName
+            );
+            if( constrNamesAlreadySpecified.includes( memberName ) )
+            return ctx.error(
+                DiagnosticCode.Constructor_0_was_already_specified,
+                pattern.name.range, memberName
+            );
+            constrNamesAlreadySpecified.push( memberName );
+
             const branchCtx = ctx.newBranchChildScope();
             const branchBody = wrapManyStatements(
-                _compileStatement(
-                    branchCtx,
-                    matchCase.body
-                ),
+                _compileStatement( branchCtx, matchCase.body ),
                 matchCase.body.range
             );
             if( !branchBody ) return undefined;
-            return new TirMatchStmtWildcardCase(
+
+            return new TirMatchStmtCase(
+                new TirNamedDeconstructVarDecl(
+                    memberName,
+                    new Map(),
+                    undefined,
+                    deconstructableType,
+                    undefined,
+                    true,
+                    pattern.name.range,
+                    pattern.name.range
+                ),
                 branchBody,
                 matchCase.range
             );
         }
-        //*/
         return ctx.error(
             DiagnosticCode.The_argument_of_a_match_statement_branch_must_be_deconstructed,
             matchCase.pattern.range
@@ -180,6 +204,41 @@ export function _compileTirMatchStmtCase(
             deconstructedCtorIdentifier.range, deconstructedCtorName
         );
         constrNamesAlreadySpecified.push( deconstructedCtorName );
+
+        if( deconstructableType instanceof TirEnumType )
+        {
+            const memberIdx = deconstructableType.indexOf( deconstructedCtorName );
+            if( memberIdx < 0 ) return ctx.error(
+                DiagnosticCode.Unknown_0_constructor_1,
+                pattern.name.range, deconstructableType.toString(), deconstructedCtorName
+            );
+            if( pattern.fields.size > 0 || pattern.rest ) return ctx.error(
+                DiagnosticCode.Enum_member_pattern_cannot_have_fields,
+                pattern.range
+            );
+
+            const branchCtx = ctx.newBranchChildScope();
+            const branchBody = wrapManyStatements(
+                _compileStatement( branchCtx, matchCase.body ),
+                matchCase.body.range
+            );
+            if( !branchBody ) return undefined;
+
+            return new TirMatchStmtCase(
+                new TirNamedDeconstructVarDecl(
+                    deconstructedCtorName,
+                    new Map(),
+                    undefined,
+                    deconstructableType,
+                    undefined,
+                    true,
+                    pattern.range,
+                    pattern.name.range
+                ),
+                branchBody,
+                matchCase.range
+            );
+        }
 
         if(
             deconstructableType instanceof TirSoPStructType

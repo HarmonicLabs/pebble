@@ -21,11 +21,6 @@
  * with `IRCase(cond, [e, t])`. Branches under `Case` are naturally
  * lazy, so the surrounding `force`/`delay` indirection is dropped.
  *
- * It also replaces `strictChooseList(list, caseNil, caseCons)` with
- * `IRCase(list, [(λh λt → caseCons), caseNil])` — the V4 native casing
- * is strictly cheaper than the forced builtin and also unlocks further
- * pruning (e.g. when `caseNil` is `error`).
- *
  * It also prunes trailing IRError continuations: a missing branch is
  * semantically equivalent to an evaluation-failure branch, so dropping a
  * trailing `IRError` reduces script size while preserving meaning.
@@ -44,7 +39,6 @@ import { IRCase } from "../../IRNodes/IRCase";
 import { IRDelayed } from "../../IRNodes/IRDelayed";
 import { IRError } from "../../IRNodes/IRError";
 import { IRForced } from "../../IRNodes/IRForced";
-import { IRFunc } from "../../IRNodes/IRFunc";
 import { IRHoisted } from "../../IRNodes/IRHoisted";
 import { IRLetted } from "../../IRNodes/IRLetted";
 import { IRNative } from "../../IRNodes/IRNative";
@@ -130,25 +124,6 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                 const newTerm = new IRCase(
                     cond,
                     [ elseBranch, thenBranch ]
-                );
-                modifyTermAndPushToReprocess( current, newTerm );
-                continue;
-            }
-
-            // strictChooseList list caseNil caseCons
-            //     →  case list [ (λ_h _t → caseCons), caseNil ]
-            if(
-                unwrappedFunc instanceof IRNative
-                && unwrappedFunc.tag === IRNativeTag.strictChooseList
-                && args.length === 3
-            ) {
-                const [ list, caseNil, caseCons ] = args;
-                const dummyH = Symbol("case_chooseList_h");
-                const dummyT = Symbol("case_chooseList_t");
-                const consBranch = new IRFunc( [ dummyH, dummyT ], caseCons );
-                const newTerm = new IRCase(
-                    list,
-                    [ consBranch, caseNil ]
                 );
                 modifyTermAndPushToReprocess( current, newTerm );
                 continue;

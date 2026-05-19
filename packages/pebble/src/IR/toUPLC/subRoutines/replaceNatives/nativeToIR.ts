@@ -14,7 +14,7 @@ import { IRSelfCall } from "../../../IRNodes/IRSelfCall";
 import { IRError } from "../../../IRNodes/IRError";
 import { _ir_apps } from "../../../IRNodes/IRApp";
 import { _ir_let, _ir_let_sym } from "../../../tree_utils/_ir_let";
-import { _ir_lazyChooseList } from "../../../tree_utils/_ir_lazyChooseList";
+import { _ir_caseList } from "../../../tree_utils/_ir_caseList";
 import { _ir_lazyIfThenElse } from "../../../tree_utils/_ir_lazyIfThenElse";
 import { hoisted_drop4, hoisted_drop2, hoisted_drop3 } from "../_comptimeDropN";
 import { IRCase, IRConstr } from "../../../IRNodes";
@@ -145,26 +145,30 @@ hoisted_isNonNegative.hash;
 
 export const hoisted_matchList = new IRHoisted(
     (() => {
+        // callers still pass `matchNil` pre-delayed (so it can close over
+        // a recursive self-reference without forcing immediately); the
+        // case-nil branch forces it. The case-cons branch binds h/t
+        // directly — no `headList`/`tailList` calls needed.
         const delayed_matchNil = Symbol("delayed_matchNil");
         const matchCons = Symbol("matchCons");
         const list = Symbol("list");
+        const h = Symbol("h");
+        const t = Symbol("t");
         return new IRFunc(
             [ delayed_matchNil, matchCons, list ],
-            new IRForced(
-                new IRForced(
-                    _ir_apps(
-                        IRNative.strictChooseList,
-                        new IRVar( list ),
-                        new IRVar( delayed_matchNil ),
-                        new IRDelayed(
-                            _ir_apps(
-                                new IRVar( matchCons ),
-                                new IRApp( IRNative.headList, new IRVar( list ) ),
-                                new IRApp( IRNative.tailList, new IRVar( list ) ),
-                            )
+            new IRCase(
+                new IRVar( list ),
+                [
+                    new IRFunc(
+                        [ h, t ],
+                        _ir_apps(
+                            new IRVar( matchCons ),
+                            new IRVar( h ),
+                            new IRVar( t ),
                         )
-                    )
-                )
+                    ),
+                    new IRForced( new IRVar( delayed_matchNil ) )
+                ]
             )
         );
     })()
@@ -235,15 +239,19 @@ export const hosited_lazyChooseList = new IRHoisted(
         const list = Symbol("list");
         const delayed_caseNil = Symbol("delayed_caseNil");
         const delayed_caseCons = Symbol("delayed_caseCons");
+        const h = Symbol("_h");
+        const t = Symbol("_t");
         return new IRFunc(
             [ list, delayed_caseNil, delayed_caseCons ],
-            new IRForced(
-                _ir_apps(
-                    IRNative.strictChooseList,
-                    new IRVar( list ),
-                    new IRVar( delayed_caseNil ),
-                    new IRVar( delayed_caseCons )
-                )
+            new IRCase(
+                new IRVar( list ),
+                [
+                    new IRFunc(
+                        [ h, t ],
+                        new IRForced( new IRVar( delayed_caseCons ) )
+                    ),
+                    new IRForced( new IRVar( delayed_caseNil ) )
+                ]
             )
         );
     })()
@@ -274,7 +282,7 @@ export const hoisted_length = new IRHoisted(
         self_length,
         new IRFunc(
             [ length_list_sym ],
-            _ir_lazyChooseList(
+            _ir_caseList(
                 new IRVar( length_list_sym ),
                 IRConst.int( 0 ),
                 _ir_apps(
@@ -375,7 +383,7 @@ export const hoisted_findSopOptional = new IRHoisted(
             findSop_self,
             new IRFunc(
                 [ findSop_list ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( findSop_list ),
                     // case nil
                     new IRConstr( 1, [] ), // None
@@ -422,7 +430,7 @@ export const hoisted_lookupLinearMap = new IRHoisted(
             lookup_self,
             new IRFunc(
                 [ lookup_map ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( lookup_map ),
                     // case nil => None
                     new IRConstr( 1, [] ),
@@ -471,6 +479,7 @@ const mkFind_pred = Symbol("predicate");
 const mkFind_self = Symbol("findOpt_self");
 const mkFind_list = Symbol("list");
 const mkFind_head = Symbol("head");
+const mkFind_tail = Symbol("tail");
 export const hoisted_mkFindDataOptional = new IRHoisted(
     new IRFunc(
         [ mkFind_elemToData, mkFind_pred ],
@@ -478,50 +487,32 @@ export const hoisted_mkFindDataOptional = new IRHoisted(
             mkFind_self,
             new IRFunc(
                 [ mkFind_list ],
-                new IRForced(
-                    _ir_apps(
-                        new IRApp( IRNative.strictChooseList, new IRVar( mkFind_list ) ),
-                        new IRDelayed( IRConst.data( new DataConstr( 1, [] ) ) ),
-                        new IRDelayed(
-                            new IRApp(
-                                new IRFunc(
-                                    [ mkFind_head ],
-                                    new IRForced(
-                                        _ir_apps(
-                                            IRNative.strictIfThenElse,
-                                            new IRApp(
-                                                new IRVar( mkFind_pred ),
-                                                new IRVar( mkFind_head )
-                                            ),
-                                            new IRDelayed(
-                                                _ir_apps(
-                                                    IRNative.constrData,
-                                                    IRConst.int( 0 ),
-                                                    new IRApp(
-                                                        new IRVar( mkFind_elemToData ),
-                                                        new IRVar( mkFind_head )
-                                                    )
-                                                )
-                                            ),
-                                            new IRDelayed(
-                                                new IRApp(
-                                                    new IRSelfCall( mkFind_self ),
-                                                    new IRApp(
-                                                        IRNative.tailList,
-                                                        new IRVar( mkFind_list )
-                                                    )
-                                                )
-                                            )
-                                        )
+                new IRCase(
+                    new IRVar( mkFind_list ),
+                    [
+                        new IRFunc(
+                            [ mkFind_head, mkFind_tail ],
+                            _ir_lazyIfThenElse(
+                                new IRApp(
+                                    new IRVar( mkFind_pred ),
+                                    new IRVar( mkFind_head )
+                                ),
+                                _ir_apps(
+                                    IRNative.constrData,
+                                    IRConst.int( 0 ),
+                                    new IRApp(
+                                        new IRVar( mkFind_elemToData ),
+                                        new IRVar( mkFind_head )
                                     )
                                 ),
                                 new IRApp(
-                                    IRNative.headList,
-                                    new IRVar( mkFind_list )
+                                    new IRSelfCall( mkFind_self ),
+                                    new IRVar( mkFind_tail )
                                 )
                             )
-                        )
-                    )
+                        ),
+                        IRConst.data( new DataConstr( 1, [] ) )
+                    ]
                 )
             )
         )
@@ -571,7 +562,7 @@ export const hoisted_some = new IRHoisted(
             some_self,
             new IRFunc(
                 [ some_lst ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( some_lst ),
                     IRConst.bool( false ), // case nil => false
                     _ir_or(
@@ -610,7 +601,7 @@ export const hoisted_every = new IRHoisted(
             every_self,
             new IRFunc(
                 [ every_lst ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( every_lst ),
                     IRConst.bool( true ), // case nil => true
                     _ir_and(
@@ -650,7 +641,7 @@ export const hoisted_filter = new IRHoisted(
             filt_self,
             new IRFunc(
                 [ filt_list ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( filt_list ),
                     // case nil
                     new IRVar( filt_list ), // nil
@@ -1017,7 +1008,7 @@ export const hoisted_mkEqualsList = new IRHoisted(
             eqList_self,
             new IRFunc(
                 [ eqList_listA, eqList_listB ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( eqList_listA ),
                     // case nil: check if listB is also nil
                     _ir_apps(
@@ -1025,7 +1016,7 @@ export const hoisted_mkEqualsList = new IRHoisted(
                         new IRVar( eqList_listB )
                     ),
                     // case cons
-                    _ir_lazyChooseList(
+                    _ir_caseList(
                         new IRVar( eqList_listB ),
                         // listB is nil => false
                         IRConst.bool( false ),
@@ -1074,7 +1065,7 @@ export const hoisted_mkMapList = new IRHoisted(
             mkMap_map,
             new IRFunc(
                 [ mkMap_list ],
-                _ir_lazyChooseList(
+                _ir_caseList(
                     new IRVar( mkMap_list ),
                     // case nil: return nil of type
                     new IRVar( mkMap_nil ),
@@ -1171,35 +1162,29 @@ export const hoisted_amountOfValue = new IRHoisted(
             amount_policyLoop,
             new IRFunc(
                 [ amount_value ], // value
-                new IRForced(_ir_apps(
-                    IRNative.strictChooseList,
-                    new IRVar( amount_value ),
-                    // case nil: return (tokenName => 0)
-                    new IRDelayed(
-                        new IRFunc( [ amount_isTokenName ], IRConst.int( 0 ) )
-                    ),
-                    // case cons
-                    new IRDelayed(
-                        _ir_let(
-                            _ir_apps(
-                                IRNative.headList,
-                                new IRVar( amount_value )
-                            ),
-                            pairDataSym => new IRForced(_ir_apps(
-                                IRNative.strictIfThenElse,
-                                // isPolicy( fst pairData as bytes )
-                                _ir_apps(
-                                    new IRVar( amount_isPolicy ),
+                (() => {
+                    const valHead = Symbol("valHead");
+                    const valTail = Symbol("valTail");
+                    const tokHead = Symbol("tokHead");
+                    const tokTail = Symbol("tokTail");
+                    return new IRCase(
+                        new IRVar( amount_value ),
+                        [
+                            new IRFunc(
+                                [ valHead, valTail ],
+                                _ir_lazyIfThenElse(
+                                    // isPolicy( unBData( fst valHead ) )
                                     _ir_apps(
-                                        IRNative.unBData,
+                                        new IRVar( amount_isPolicy ),
                                         _ir_apps(
-                                            IRNative.fstPair,
-                                            new IRVar( pairDataSym )
+                                            IRNative.unBData,
+                                            _ir_apps(
+                                                IRNative.fstPair,
+                                                new IRVar( valHead )
+                                            )
                                         )
-                                    )
-                                ),
-                                // then: build (tokenName => amount)
-                                new IRDelayed(
+                                    ),
+                                    // then: build (tokenName => amount)
                                     new IRFunc(
                                         [ amount_isTokenName ],
                                         _ir_apps(
@@ -1207,80 +1192,66 @@ export const hoisted_amountOfValue = new IRHoisted(
                                                 amount_tokenNameLoop,
                                                 new IRFunc(
                                                     [ amount_tokenMap ],
-                                                    new IRForced(_ir_apps(
-                                                        IRNative.strictChooseList,
+                                                    new IRCase(
                                                         new IRVar( amount_tokenMap ),
-                                                        // token map empty => 0
-                                                        new IRDelayed( IRConst.int( 0 ) ),
-                                                        // token map cons
-                                                        new IRDelayed(
-                                                            _ir_let(
-                                                                _ir_apps(
-                                                                    IRNative.headList,
-                                                                    new IRVar( amount_tokenMap )
-                                                                ),
-                                                                pairDataTokenSym => new IRForced(_ir_apps(
-                                                                    IRNative.strictIfThenElse,
-                                                                    // isTokenName( fst pairDataToken as bytes )
+                                                        [
+                                                            new IRFunc(
+                                                                [ tokHead, tokTail ],
+                                                                _ir_lazyIfThenElse(
+                                                                    // isTokenName( unBData( fst tokHead ) )
                                                                     _ir_apps(
                                                                         new IRVar( amount_isTokenName ),
                                                                         _ir_apps(
                                                                             IRNative.unBData,
                                                                             _ir_apps(
                                                                                 IRNative.fstPair,
-                                                                                new IRVar( pairDataTokenSym )
+                                                                                new IRVar( tokHead )
                                                                             )
                                                                         )
                                                                     ),
                                                                     // then: return amount
-                                                                    new IRDelayed(
+                                                                    _ir_apps(
+                                                                        IRNative.unIData,
                                                                         _ir_apps(
-                                                                            IRNative.unIData,
-                                                                            _ir_apps(
-                                                                                IRNative.sndPair,
-                                                                                new IRVar( pairDataTokenSym )
-                                                                            )
+                                                                            IRNative.sndPair,
+                                                                            new IRVar( tokHead )
                                                                         )
                                                                     ),
-                                                                    // else: recurse tail
-                                                                    new IRDelayed(
-                                                                        _ir_apps(
-                                                                            new IRSelfCall( amount_tokenNameLoop ),
-                                                                            _ir_apps(
-                                                                                IRNative.tailList,
-                                                                                new IRVar( amount_tokenMap ) // tokenMap list
-                                                                            )
-                                                                        )
+                                                                    // else: recurse on tokTail
+                                                                    _ir_apps(
+                                                                        new IRSelfCall( amount_tokenNameLoop ),
+                                                                        new IRVar( tokTail )
                                                                     )
-                                                                ))
-                                                            )
-                                                        )
-                                                    ))
+                                                                )
+                                                            ),
+                                                            // token map empty => 0
+                                                            IRConst.int( 0 )
+                                                        ]
+                                                    )
                                                 )
                                             ),
-                                            // pass token map (snd pairData)
+                                            // pass token map (unMapData( snd valHead ))
                                             _ir_apps(
                                                 IRNative.unMapData,
                                                 _ir_apps(
                                                     IRNative.sndPair,
-                                                    new IRVar( pairDataSym )
+                                                    new IRVar( valHead )
                                                 )
                                             )
                                         )
-                                    )
-                                ),
-                                // else: recurse policyLoop on tail value list
-                                new IRDelayed(_ir_apps(
-                                    new IRSelfCall( amount_policyLoop ),
+                                    ),
+                                    // else: recurse policyLoop on valTail
                                     _ir_apps(
-                                        IRNative.tailList,
-                                        new IRVar( amount_value )
+                                        new IRSelfCall( amount_policyLoop ),
+                                        new IRVar( valTail )
                                     )
-                                ))
-                            ))
-                        )
-                    )
-                ))
+                                )
+                            ),
+                            // case nil: return (tokenName => 0)
+                            new IRFunc( [ amount_isTokenName ], IRConst.int( 0 ) )
+                        ]
+                    );
+                })()
             )
         )
     )

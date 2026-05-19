@@ -6,6 +6,7 @@ import { TirLitFailExpr } from "../../tir/expressions/litteral/TirLitFailExpr";
 import { TirLitFalseExpr } from "../../tir/expressions/litteral/TirLitFalseExpr";
 import { TirLitHexBytesExpr } from "../../tir/expressions/litteral/TirLitHexBytesExpr";
 import { TirLitIntExpr } from "../../tir/expressions/litteral/TirLitIntExpr";
+import { TirLitEnumMemberExpr } from "../../tir/expressions/litteral/TirLitEnumMemberExpr";
 import { TirLitNamedObjExpr } from "../../tir/expressions/litteral/TirLitNamedObjExpr";
 import { TirLitObjExpr } from "../../tir/expressions/litteral/TirLitObjExpr";
 import { TirLitStrExpr } from "../../tir/expressions/litteral/TirLitStrExpr";
@@ -86,6 +87,7 @@ export function expressifyVars(
         || expr instanceof TirLitThisExpr
         || expr instanceof TirLitStrExpr
         || expr instanceof TirLitIntExpr
+        || expr instanceof TirLitEnumMemberExpr
         || expr instanceof TirLitHexBytesExpr
         || expr instanceof TirNativeFunc
         // hoisted expressions are necessarily closed, so no external variables
@@ -318,6 +320,7 @@ function expressifyPropAccess(
         || expr instanceof TirLitArrExpr
         || expr instanceof TirLitStrExpr
         || expr instanceof TirLitIntExpr
+        || expr instanceof TirLitEnumMemberExpr
         || expr instanceof TirLitHexBytesExpr
         || expr instanceof TirNativeFunc
         || expr instanceof TirPropAccessExpr // `expressifyVars` is called recursively on the object before this check
@@ -470,6 +473,42 @@ function expressifyPropAccess(
 
         const fName = ctor.fields[fIdx].name;
         const fType = ctor.fields[fIdx].type;
+
+        // Untagged data structs encode as `listData(fields)` rather than
+        // `constrData(0, fields)`. Field access lowers directly to
+        // `unIData (or _inlineFromData) <$> headList (dropList idx (unListData v))`
+        // — no case-rewrite needed, no constructor index to check.
+        if(
+            objType instanceof TirDataStructType
+            && (objType as TirDataStructType).untagged
+        ) {
+            const fieldsListT = new TirListT( data_t );
+            return new TirFromDataExpr(
+                new TirCallExpr(
+                    TirNativeFunc.headList( data_t ),
+                    [
+                        new TirCallExpr(
+                            TirNativeFunc._dropList( data_t ),
+                            [
+                                new TirLitIntExpr( BigInt( fIdx ), propAccessExpr.range ),
+                                new TirCallExpr(
+                                    TirNativeFunc.unListData,
+                                    [ expr ],
+                                    fieldsListT,
+                                    propAccessExpr.range
+                                )
+                            ],
+                            fieldsListT,
+                            propAccessExpr.range
+                        )
+                    ],
+                    data_t,
+                    propAccessExpr.range
+                ),
+                fType,
+                propAccessExpr.range
+            );
+        }
 
         return new TirCaseExpr(
             expr,

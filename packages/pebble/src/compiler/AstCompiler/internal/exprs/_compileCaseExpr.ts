@@ -2,11 +2,14 @@ import { Identifier } from "../../../../ast/nodes/common/Identifier";
 import { ParentesizedExpr } from "../../../../ast/nodes/expr/ParentesizedExpr";
 import { PebbleExpr } from "../../../../ast/nodes/expr/PebbleExpr";
 import { CaseExpr, CaseExprMatcher, CaseWildcardMatcher } from "../../../../ast/nodes/expr/CaseExpr";
+import { NamedDeconstructVarDecl as AstNamedDeconstructVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/NamedDeconstructVarDecl";
+import { SimpleVarDecl as AstSimpleVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../../tir/expressions/TirCaseExpr";
 import { TirNamedDeconstructVarDecl } from "../../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSimpleVarDecl } from "../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirDataStructType, TirSoPStructType } from "../../../tir/types/TirStructType";
+import { TirEnumType, getEnumType } from "../../../tir/types/TirEnumType";
 import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo, getStructType } from "../../../tir/types/utils/canAssignTo";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
@@ -76,6 +79,62 @@ export function _compileCaseExprMatcher(
     matchedVarName?: string
 ): TirCaseMatcher | undefined
 {
+    const enumType = getEnumType( patternType );
+    if( enumType )
+    {
+        const astPattern = matcher.pattern;
+        let memberName: string | undefined;
+        let patternRange = astPattern.range;
+        let ctorNameRange = astPattern.range;
+
+        if( astPattern instanceof AstSimpleVarDecl )
+        {
+            memberName = astPattern.name.text;
+            patternRange = astPattern.name.range;
+            ctorNameRange = astPattern.name.range;
+        }
+        else if( astPattern instanceof AstNamedDeconstructVarDecl )
+        {
+            if( astPattern.fields.size > 0 || astPattern.rest ) return ctx.error(
+                DiagnosticCode.Enum_member_pattern_cannot_have_fields,
+                astPattern.range
+            );
+            memberName = astPattern.name.text;
+            ctorNameRange = astPattern.name.range;
+        }
+        else return ctx.error(
+            DiagnosticCode._case_expression_must_decontructed_the_inspected_value,
+            astPattern.range
+        );
+
+        if( enumType.indexOf( memberName ) < 0 ) return ctx.error(
+            DiagnosticCode.Constructor_0_is_not_part_of_the_definition_of_1,
+            ctorNameRange, memberName, enumType.toString()
+        );
+
+        const body = _compileExpr( ctx, matcher.body, returnTypeHint );
+        if( !body ) return undefined;
+        if( returnTypeHint && !canAssignTo( body.type, returnTypeHint ) ) return ctx.error(
+            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+            matcher.body.range, body.type.toString(), returnTypeHint.toString()
+        );
+
+        return new TirCaseMatcher(
+            new TirNamedDeconstructVarDecl(
+                memberName,
+                new Map(),
+                undefined,
+                enumType,
+                undefined,
+                true,
+                patternRange,
+                ctorNameRange
+            ),
+            body,
+            matcher.range
+        );
+    }
+
     const pattern = _compileVarDecl( ctx, matcher.pattern, patternType );
     if( !pattern ) return undefined;
 

@@ -2,6 +2,7 @@ import { Identifier } from "../../../ast/nodes/common/Identifier";
 import { TirAliasType } from "../../tir/types/TirAliasType";
 import { TirInterfaceImpl } from "../../tir/types/TirInterfaceImpl";
 import { isTirStructType, TirStructType } from "../../tir/types/TirStructType";
+import { TirEnumType } from "../../tir/types/TirEnumType";
 import { TirType } from "../../tir/types/TirType";
 import { TirTypeParam } from "../../tir/types/TirTypeParam";
 import { int_t, bytes_t, bool_t, string_t } from "../../tir/program/stdScope/stdScope";
@@ -91,6 +92,7 @@ export function getPropAccessReturnType(
     // direct prop-access on the native type.
     if( objType instanceof TirValueT ) return undefined;
     if( objType instanceof TirArrayT ) return undefined;
+    if( objType instanceof TirEnumType ) return undefined;
 
     const tsEnsureExhaustiveCheck: never = objType;
     console.error( objType );
