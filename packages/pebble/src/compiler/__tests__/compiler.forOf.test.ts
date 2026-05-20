@@ -1,5 +1,5 @@
 import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
-import { Application, parseUPLC, UPLCConst, constT } from "@harmoniclabs/uplc";
+import { Application, parseUPLC, UPLCConst, constT, prettyUPLC } from "@harmoniclabs/uplc";
 import { CEKConst, Machine } from "@harmoniclabs/buildooor";
 
 /**
@@ -230,5 +230,160 @@ export function main( xs: List<int> ): boolean {
         applyAndExpectBool(uplc, intList([1, 2, 3]), true);
         applyAndExpectBool(uplc, intList([1, 0, 3]), false);
         applyAndExpectBool(uplc, intList([]), true);
+    });
+
+    test("inliner skips let-bindings whose single use is inside a recursive body", async () => {
+        // `computed` is bound OUTSIDE the for-of and used ONCE INSIDE.
+        // If the inliner blindly inlined on the syntactic count of 1,
+        // the multiplication would run on every iteration instead of
+        // once. We verify by comparing CPU spent against a baseline
+        // where `computed` is genuinely inlined at the source level.
+        const lettedSrc = `
+export function main( xs: List<int>, base: int ): int {
+    let computed = base * 100 + 5;
+    let result = 0;
+    for( const x of xs ) {
+        result = result + x * computed;
+    }
+    return result;
+}
+`;
+        const inlinedSrc = `
+export function main( xs: List<int>, base: int ): int {
+    let result = 0;
+    for( const x of xs ) {
+        result = result + x * (base * 100 + 5);
+    }
+    return result;
+}
+`;
+        const lettedUplc = await exportFunction(lettedSrc, "main");
+        const inlinedUplc = await exportFunction(inlinedSrc, "main");
+
+        const xs20 = intList(Array.from({length: 20}, (_, i) => i + 1));
+        const base = UPLCConst.int(3n);
+
+        const lettedRes = Machine.eval(
+            new Application(new Application(lettedUplc, xs20), base)
+        );
+        const inlinedRes = Machine.eval(
+            new Application(new Application(inlinedUplc, xs20), base)
+        );
+
+        // Same numeric result.
+        expect((lettedRes.result as CEKConst).value)
+            .toBe((inlinedRes.result as CEKConst).value);
+
+        // Letted version should be CHEAPER than inlined (computes the
+        // base*100+5 expression once, not 20 times).
+        expect(lettedRes.budgetSpent.cpu).toBeLessThan(inlinedRes.budgetSpent.cpu);
+        expect(lettedRes.budgetSpent.mem).toBeLessThan(inlinedRes.budgetSpent.mem);
+    });
+
+    // ── inliner behaviour matrix ──
+
+    test("inliner DOES inline a single-use let defined in the SAME (recursive) scope", async () => {
+        // `temp` is bound inside the for-of body and used once in the
+        // same iteration — same scope-frequency as its binding. Safe to
+        // inline: each iteration evaluates `temp` exactly once whether
+        // inlined or not. After our pipeline the letted form should
+        // compile to the SAME UPLC as the explicitly-inlined source, so
+        // the CEK budgets must match exactly.
+        const lettedSrc = `
+export function main( xs: List<int> ): int {
+    let acc = 0;
+    for( const x of xs ) {
+        let temp = x + 1;
+        acc = acc + temp;
+    }
+    return acc;
+}
+`;
+        const inlinedSrc = `
+export function main( xs: List<int> ): int {
+    let acc = 0;
+    for( const x of xs ) {
+        acc = acc + ( x + 1 );
+    }
+    return acc;
+}
+`;
+        const lettedUplc  = await exportFunction(lettedSrc, "main");
+        const inlinedUplc = await exportFunction(inlinedSrc, "main");
+
+        const xs20 = intList(Array.from({length: 20}, (_, i) => i + 1));
+
+        const lettedRes  = Machine.eval(new Application(lettedUplc, xs20));
+        const inlinedRes = Machine.eval(new Application(inlinedUplc, xs20));
+
+        expect((lettedRes.result as CEKConst).value)
+            .toBe((inlinedRes.result as CEKConst).value);
+        // Exact equality: the inliner should have collapsed the letted
+        // form into the inlined shape.
+        expect(lettedRes.budgetSpent.cpu).toBe(inlinedRes.budgetSpent.cpu);
+        expect(lettedRes.budgetSpent.mem).toBe(inlinedRes.budgetSpent.mem);
+    });
+
+    test("inliner does NOT inline a let from an outer recursive body into a NESTED recursive body", async () => {
+        // `inner` is bound in the OUTER for-of body and used once in the
+        // INNER for-of body. The inner loop runs n times per outer
+        // iteration, so the single syntactic use of `inner` corresponds
+        // to n*n evaluations if inlined. The letted form computes
+        // `x * x` once per outer iteration (n times total), then reuses
+        // it n times — strictly cheaper.
+        const lettedSrc = `
+export function main( xs: List<int> ): int {
+    let result = 0;
+    for( const x of xs ) {
+        let inner = x * x + 7;
+        for( const y of xs ) {
+            result = result + y * inner;
+        }
+    }
+    return result;
+}
+`;
+        const inlinedSrc = `
+export function main( xs: List<int> ): int {
+    let result = 0;
+    for( const x of xs ) {
+        for( const y of xs ) {
+            result = result + y * ( x * x + 7 );
+        }
+    }
+    return result;
+}
+`;
+        const lettedUplc  = await exportFunction(lettedSrc, "main");
+        const inlinedUplc = await exportFunction(inlinedSrc, "main");
+
+        const xs10 = intList(Array.from({length: 10}, (_, i) => i + 1));
+
+        const lettedRes  = Machine.eval(new Application(lettedUplc, xs10));
+        const inlinedRes = Machine.eval(new Application(inlinedUplc, xs10));
+
+        expect((lettedRes.result as CEKConst).value)
+            .toBe((inlinedRes.result as CEKConst).value);
+        expect(lettedRes.budgetSpent.cpu).toBeLessThan(inlinedRes.budgetSpent.cpu);
+        expect(lettedRes.budgetSpent.mem).toBeLessThan(inlinedRes.budgetSpent.mem);
+    });
+
+    test("vectorMul", async () => {
+        const uplc = await exportFunction(`
+export function vectorMul( xs: List<int>, let ys: List<int> ): int {
+    let result = 0;
+    for( const x of xs ) {
+        result += x * ys.head();
+        ys = ys.tail();
+    }
+    return result;
+}
+`, "vectorMul");
+        console.log("UPLC for vectorMul:", prettyUPLC( uplc ));
+        const result = Machine.eval(
+            new Application(new Application(uplc, intList([1, 2, 3])), intList([4, 5, 6]))
+        );
+        expect(result.result instanceof CEKConst).toBe(true);
+        expect((result.result as CEKConst).value).toBe(32n);
     });
 });

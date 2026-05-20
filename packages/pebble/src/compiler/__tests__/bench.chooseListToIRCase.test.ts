@@ -205,6 +205,33 @@ export function main( xs: List<int> ): int {
             rows.push(evalAndRow("for-of nested (n=20)", uplc, sizeBytes, xs20));
         }
 
+        // vectorMul exercises a `let` parameter list that's *both* head'd
+        // and tail'd inside the loop body — the prototypical scenario
+        // where introducing a case-on-second-list saves vs two builtin
+        // calls per iteration.
+        {
+            const { uplc, sizeBytes } = await compileExport(`
+export function main( xs: List<int>, let ys: List<int> ): int {
+    let result = 0;
+    for( const x of xs ) {
+        result += x * ys.head();
+        ys = ys.tail();
+    }
+    return result;
+}
+`, "main");
+            const r = Machine.eval(
+                new Application(new Application(uplc, xs20), xs20)
+            );
+            rows.push({
+                label: "vectorMul (n=20)",
+                bytes: sizeBytes,
+                cpu: r.budgetSpent.cpu,
+                mem: r.budgetSpent.mem,
+                result: String((r.result as any).value).slice(0, 8),
+            });
+        }
+
         {
             const { uplc, sizeBytes } = await compileExport(`
 export function main( xs: List<int> ): int {

@@ -43,6 +43,7 @@ import { IRHoisted } from "../../IRNodes/IRHoisted";
 import { IRLetted } from "../../IRNodes/IRLetted";
 import { IRNative } from "../../IRNodes/IRNative";
 import { IRNativeTag } from "../../IRNodes/IRNative/IRNativeTag";
+import { IRFunc } from "../../IRNodes/IRFunc";
 import { IRTerm } from "../../IRTerm";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
 import { getApplicationTerms } from "../utils/getApplicationTerms";
@@ -102,6 +103,53 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                 modifyTermAndPushToReprocess( current, newTerm );
                 continue;
             }
+
+            // `IRForced(IRCase(s, [b0, b1, …]))` where every branch is
+            // either `IRDelayed(v)` or `IRFunc(params, IRDelayed(v))` can
+            // be simplified by stripping the force/delay pair: case
+            // branches are naturally lazy in UPLC v1.2.0 `case`. The
+            // wrap typically comes from `_ir_lazyIfThenElse` lowering an
+            // `if/else` whose condition then got rewritten to a list-case
+            // (e.g. `if(nullList(L)) ...`) — the outer force is left
+            // dangling around the resulting IRCase.
+            if( current.forced instanceof IRCase )
+            {
+                const caseTerm = current.forced;
+                const conts = caseTerm.continuations;
+                const stripped: ( IRTerm | undefined )[] = [];
+                let allOk = true;
+                for( let i = 0; i < conts.length; i++ )
+                {
+                    const c = conts[ i ]!;
+                    if( c instanceof IRDelayed )
+                    {
+                        stripped.push( c.delayed );
+                    }
+                    else if(
+                        c instanceof IRFunc
+                        && c.body instanceof IRDelayed
+                    ) {
+                        stripped.push(
+                            new IRFunc( c.params.slice(), c.body.delayed )
+                        );
+                    }
+                    else
+                    {
+                        allOk = false;
+                        break;
+                    }
+                }
+                if( allOk )
+                {
+                    const newCase = new IRCase(
+                        caseTerm.constrTerm.clone(),
+                        stripped as IRTerm[],
+                    );
+                    modifyTermAndPushToReprocess( current, newCase );
+                    continue;
+                }
+            }
+
             stack.unshift( ...current.children() );
             continue;
         }

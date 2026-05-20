@@ -19,6 +19,9 @@ import { replaceForcedNativesWithHoisted } from "./subRoutines/replaceForcedNati
 import { performUplcOptimizationsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/performUplcOptimizationsAndReturnRoot";
 import { rewriteNativesAppliedToConstantsAndReturnRoot } from "./subRoutines/rewriteNativesAppliedToConstantsAndReturnRoot";
 import { rewriteToCaseOverConstAndReturnRoot } from "./subRoutines/rewriteToCaseOverConstAndReturnRoot";
+import { rewriteHeadTailInCaseConsAndReturnRoot } from "./subRoutines/rewriteHeadTailInCaseConsAndReturnRoot";
+import { introduceCaseForDualHeadTailAndReturnRoot } from "./subRoutines/introduceCaseForDualHeadTailAndReturnRoot";
+import { inlineSingleUseLetBindingsAndReturnRoot } from "./subRoutines/inlineSingleUseLetBindingsAndReturnRoot";
 import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
@@ -86,6 +89,24 @@ export function compileIRToUPLC(
     if( options.targetUplcVersion.isV4Friendly() ) {
         term = rewriteToCaseOverConstAndReturnRoot( term );
     }
+
+    // Inside `case L of cons h t -> body`, replace any `headList(L)` /
+    // `tailList(L)` calls within `body` with `h` / `t`. Drop the now-dead
+    // `h`/`t` bindings via a fresh unused-vars sweep.
+    term = rewriteHeadTailInCaseConsAndReturnRoot( term );
+    term = removeUnusedVarsAndReturnRoot( term );
+
+    // For every IRFunc body where the same list L is accessed via BOTH
+    // `headList(L)` and `tailList(L)`, wrap the body in
+    // `case L of cons h t -> body' | nil -> error` and substitute the two
+    // builtin calls with `h` / `t`. Empirically (bench.headTailVsCase):
+    // one case dispatch costs ~128K CPU vs ~160K for two builtin calls,
+    // and only ~9 bytes vs ~16. The previous head/tail-in-case-cons pass
+    // can then make a second sweep to substitute any further internal
+    // references the new case introduced.
+    term = introduceCaseForDualHeadTailAndReturnRoot( term );
+    term = rewriteHeadTailInCaseConsAndReturnRoot( term );
+    term = removeUnusedVarsAndReturnRoot( term );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -202,6 +223,16 @@ export function compileIRToUPLC(
     // }
 
     term = removeUnusedVarsAndReturnRoot( term );
+
+    // After `handleLettedAndReturnRoot` lowers `IRLetted` into the
+    // `IRApp(IRFunc([p], body), value)` shape, this is the first point
+    // where the let-as-application pattern is syntactically visible.
+    // Run the inliner here (NOT earlier, where lets are still IRLetted
+    // nodes the inliner doesn't recognize). Single-use uses trapped
+    // inside nested closures are skipped — see the pass for details.
+    term = inlineSingleUseLetBindingsAndReturnRoot( term );
+    term = removeUnusedVarsAndReturnRoot( term );
+
     term = performUplcOptimizationsAndReturnRoot( term, options );
 
     // V4: rewrite strictIfThenElse into IRCase-over-Const, and prune
