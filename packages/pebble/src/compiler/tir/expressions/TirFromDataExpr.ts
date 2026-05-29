@@ -102,14 +102,14 @@ export function _inlineFromData(
     // LinearMapEntry is Pair<Data,Data> at runtime — no conversion needed
     if( to_t instanceof TirLinearMapEntryT ) return dataExprIR;
 
-    // V4 native Value: data -> Value via `unValueData`
+    // Native Value: data -> Value via `unValueData`
     if( to_t instanceof TirValueT )
     return _ir_apps(
         IRNative.unValueData,
         dataExprIR
     );
 
-    // V4 native Array<T>: data -> [data] (unListData) -> Array<T>
+    // Native Array<T>: data -> [data] (unListData) -> Array<T>
     // for non-data element types we map elements through their fromData first.
     if( to_t instanceof TirArrayT )
     {
@@ -221,7 +221,7 @@ export function _fromDataUplcFunc(
     if( target_t instanceof TirVoidT ) return _mkUnit.clone();
     if( target_t instanceof TirBoolT ) return _boolFromData.clone();
     if( target_t instanceof TirStringT ) return _strFromData.clone();
-    // V4 native Value: data -> Value via `unValueData`
+    // Native Value: data -> Value via `unValueData`
     if( target_t instanceof TirValueT ) return IRNative.unValueData;
 
     if( target_t instanceof TirLinearMapT )
@@ -341,7 +341,7 @@ export function _inilneSingeSopConstrFromData(
                                 i === 0
                                     ? new IRVar( fieldsListSym )
                                     : _ir_apps(
-                                        IRNative._dropList,
+                                        IRNative.dropList,
                                         IRConst.int( i ),
                                         new IRVar( fieldsListSym )
                                     )
@@ -405,7 +405,7 @@ export function _inlineMultiSopConstrFromData(
                         i === 0
                             ? new IRVar( fieldsListSym )
                             : _ir_apps(
-                                IRNative._dropList,
+                                IRNative.dropList,
                                 IRConst.int( i ),
                                 new IRVar( fieldsListSym )
                             )

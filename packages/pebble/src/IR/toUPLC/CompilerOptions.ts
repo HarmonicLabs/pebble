@@ -1,6 +1,8 @@
 import { isObject } from "@harmoniclabs/obj-utils";
-import { defaultUplcVersion, UPLCVersion } from "@harmoniclabs/uplc";
+import { UPLCVersion } from "@harmoniclabs/uplc";
 import { COMPILER_VERSION } from "../../version.generated";
+
+const defaultTargetUplcVersion = new UPLCVersion( 1, 1, 0 );
 
 export { COMPILER_VERSION };
 
@@ -153,7 +155,7 @@ export const extremeOptions: CompilerDefaults = Object.freeze({
     root: ".",
     outDir: "./out",
     silent: false,
-    targetUplcVersion: defaultUplcVersion,
+    targetUplcVersion: defaultTargetUplcVersion,
     removeTraces: true,
     delayHoists: true,
     uplcOptimizations: productionUplcOptimizations,
@@ -166,7 +168,7 @@ export const productionOptions: CompilerDefaults = Object.freeze({
     root: ".",
     outDir: "./out",
     silent: false,
-    targetUplcVersion: defaultUplcVersion,
+    targetUplcVersion: defaultTargetUplcVersion,
     removeTraces: true,
     delayHoists: true,
     uplcOptimizations: productionUplcOptimizations,
@@ -179,7 +181,7 @@ export const debugOptions: CompilerDefaults = Object.freeze({
     root: ".",
     outDir: "./out",
     silent: false,
-    targetUplcVersion: defaultUplcVersion,
+    targetUplcVersion: defaultTargetUplcVersion,
     removeTraces: false,
     delayHoists: false,
     uplcOptimizations: debugUplcOptimizations,
@@ -203,7 +205,7 @@ export function completeCompilerOptions(
     complete: Partial<CompilerOptions> = defaultOptions as Partial<CompilerOptions>
 ): CompilerOptions
 {
-    let targetUplcVersion = options.targetUplcVersion instanceof UPLCVersion ? complete.targetUplcVersion : defaultUplcVersion;
+    let targetUplcVersion = options.targetUplcVersion instanceof UPLCVersion ? complete.targetUplcVersion : defaultTargetUplcVersion;
     complete = {
         ...(defaultOptions as Partial<CompilerOptions>),
         ...complete

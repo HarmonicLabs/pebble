@@ -608,7 +608,7 @@ export class ExpressifyCtx
             const lettedRest = this.introduceLettedConstant(
                 stmt.rest,
                 new TirCallExpr(
-                    TirNativeFunc._dropList( elemsType ),
+                    TirNativeFunc.dropList( elemsType ),
                     [
                         new TirLitIntExpr(
                             BigInt(nElems),

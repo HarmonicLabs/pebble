@@ -281,7 +281,7 @@ function uncheckedGetCanAssign(
     if( b instanceof TirBlsG1T ) return a instanceof TirBlsG1T ? CanAssign.Yes : CanAssign.No;
     if( b instanceof TirBlsG2T ) return a instanceof TirBlsG2T ? CanAssign.Yes : CanAssign.No;
     if( b instanceof TirMlResultT ) return a instanceof TirMlResultT ? CanAssign.Yes : CanAssign.No;
-    // V4 native Value / Array<T>
+    // Native Value / Array<T>
     if( b instanceof TirValueT ) return a instanceof TirValueT ? CanAssign.Yes : CanAssign.No;
     if( b instanceof TirArrayT ) {
         if( !( a instanceof TirArrayT ) ) return CanAssign.No;

@@ -8,10 +8,10 @@ import { CEKConst, DataB, DataConstr, DataI, DataMap, Hash28, Machine, Value } f
 const policyHex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const nameHex = "ff";
 
-// SKIPPED post-V4 migration: feeds `Value.toData("v3")` whose zero-lovelace
-// entry violates V4 `unValueData` canonical-form validation. Rewrite using
-// data that matches the V4 ledger canonical form (no zero quantities), or
-// test against `ValueMap` instead.
+// SKIPPED post-Value-native migration: feeds `Value.toData("v3")` whose
+// zero-lovelace entry violates `unValueData` canonical-form validation.
+// Rewrite using data that matches the ledger canonical form (no zero
+// quantities), or test against `ValueMap` instead.
 describe.skip("amountOf", () => {
 
     test("single entry ok", async () => {

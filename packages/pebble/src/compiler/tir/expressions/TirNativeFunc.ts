@@ -833,9 +833,9 @@ export class TirNativeFunc
     }
 
     // Custom utility functions
-    static _dropList(elemT: TirType): TirNativeFunc {
+    static dropList(elemT: TirType): TirNativeFunc {
         return new TirNativeFunc(
-            IRNativeTag._dropList,
+            IRNativeTag.dropList,
             new TirFuncT([
                 // n
                 int_t,

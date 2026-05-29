@@ -1,9 +1,9 @@
 /**
- * Plutus V4 Case-over-Const lowering pass.
+ * Case-over-Const lowering pass.
  *
- * In UPLC v1.2.0 the `Case` term accepts a constant scrutinee and
- * reinterprets it as a tag-untagged constructor (bool → 0/1, int N → N,
- * unit → 0, pair → constr 0 [fst, snd], list → constr 1 [] for `[]` or
+ * The UPLC `Case` term accepts a constant scrutinee and reinterprets it
+ * as a tag-untagged constructor (bool → 0/1, int N → N, unit → 0,
+ * pair → constr 0 [fst, snd], list → constr 1 [] for `[]` or
  * constr 0 [head, tail] for cons).
  *
  * This pass replaces canonical `strictIfThenElse(cond, then, else)`
@@ -24,8 +24,6 @@
  * It also prunes trailing IRError continuations: a missing branch is
  * semantically equivalent to an evaluation-failure branch, so dropping a
  * trailing `IRError` reduces script size while preserving meaning.
- *
- * The pass is gated by the caller on `isV4Friendly()`.
  *
  * NOTE: `getApplicationTerms` sees through both raw `IRApp` chains AND
  * the case-constr-app encoding produced earlier in `performUplc…`
@@ -107,7 +105,7 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
             // `IRForced(IRCase(s, [b0, b1, …]))` where every branch is
             // either `IRDelayed(v)` or `IRFunc(params, IRDelayed(v))` can
             // be simplified by stripping the force/delay pair: case
-            // branches are naturally lazy in UPLC v1.2.0 `case`. The
+            // branches are naturally lazy in UPLC `case`. The
             // wrap typically comes from `_ir_lazyIfThenElse` lowering an
             // `if/else` whose condition then got rewritten to a list-case
             // (e.g. `if(nullList(L)) ...`) — the outer force is left

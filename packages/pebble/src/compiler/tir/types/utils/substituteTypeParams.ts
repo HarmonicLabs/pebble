@@ -1,4 +1,5 @@
 import { TirAliasType } from "../TirAliasType";
+import { TirArrayT } from "../TirNativeType/native/array";
 import { TirFuncT } from "../TirNativeType/native/function";
 import { TirLinearMapT } from "../TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../TirNativeType/native/linearMapEntry";
@@ -30,6 +31,11 @@ export function substituteTypeParams(
     {
         const sub = substituteTypeParams( t.typeArg, subst );
         return sub === t.typeArg ? t : new TirListT( sub );
+    }
+    if( t instanceof TirArrayT )
+    {
+        const sub = substituteTypeParams( t.typeArg, subst );
+        return sub === t.typeArg ? t : new TirArrayT( sub );
     }
     if( t instanceof TirFuncT )
     {

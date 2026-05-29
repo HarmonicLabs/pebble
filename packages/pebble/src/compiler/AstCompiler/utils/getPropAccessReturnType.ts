@@ -88,8 +88,8 @@ export function getPropAccessReturnType(
     if( objType instanceof TirBlsG1T ) return undefined;
     if( objType instanceof TirBlsG2T ) return undefined;
     if( objType instanceof TirMlResultT ) return undefined;
-    // V4 natives — methods are reached through prelude/std aliases, not via
-    // direct prop-access on the native type.
+    // Native Value / Array<T> — methods are reached through prelude/std
+    // aliases, not via direct prop-access on the native type.
     if( objType instanceof TirValueT ) return undefined;
     if( objType instanceof TirArrayT ) return undefined;
     if( objType instanceof TirEnumType ) return undefined;

@@ -39,7 +39,7 @@ export const data_t = new TirDataT();
 
 export const valueMapLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "sortedValueLovelaces";
 export const valueMapAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "amountOfValue";
-// V4 native Value (ConstTyTag.value); methods route to v4 builtins.
+// Native Value (ConstTyTag.value); methods route to the value builtins.
 export const valueLovelacesName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueLovelaces";
 export const valueAmountOfName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueAmountOf";
 export const valueInsertCoinName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueInsertCoin";
@@ -68,7 +68,7 @@ export function populateStdScope( program: TypedProgram ): void
     _defineStdUnambigous( data_t );
     // Register native Value (ConstTyTag.value) in program.types so the prelude
     // alias can wrap it. The user-facing `Value` name is defined in the
-    // prelude scope (with methods routed to v4 builtins).
+    // prelude scope (with methods routed to the value builtins).
     {
         const value_native_t = new TirValueT();
         program.types.set( value_native_t.toTirTypeKey(), value_native_t );
@@ -856,7 +856,7 @@ export function populatePreludeScope( program: TypedProgram ): void
         )
     );
 
-    // Native V4 `Value` (ConstTyTag.value). Methods route to v4 builtins.
+    // Native `Value` (ConstTyTag.value). Methods route to the value builtins.
     const value_native_t = program.types.get( TirValueT.toTirTypeKey() );
     if(!value_native_t) throw new Error("expected native Value type registered");
     const value_t = _defineUnambigousAlias(

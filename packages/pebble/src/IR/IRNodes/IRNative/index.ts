@@ -230,7 +230,7 @@ export class IRNative
     static get countSetBits() { return new IRNative( IRNativeTag.countSetBits ); }
     static get findFirstSetBit() { return new IRNative( IRNativeTag.findFirstSetBit ); }
     static get ripemd_160() { return new IRNative( IRNativeTag.ripemd_160 ); }
-    // Chang2 / Plutus V4
+    // Chang2
     static get expModInteger() { return new IRNative( IRNativeTag.expModInteger ); }
     static get dropList() { return new IRNative( IRNativeTag.dropList ); }
     static get lengthOfArray() { return new IRNative( IRNativeTag.lengthOfArray ); }
@@ -246,7 +246,6 @@ export class IRNative
     static get unValueData() { return new IRNative( IRNativeTag.unValueData ); }
     static get scaleValue() { return new IRNative( IRNativeTag.scaleValue ); }
 
-    static get _dropList() { return new IRNative( IRNativeTag._dropList ); }
     static get _foldr() { return new IRNative( IRNativeTag._foldr ); }
     static get _foldl() { return new IRNative( IRNativeTag._foldl ); }
     // static get _mkFindDataOptional() { return new IRNative( IRNativeTag._mkFindDataOptional ); }
@@ -309,7 +308,7 @@ export class IRNative
         if( type instanceof TirLinearMapEntryT ) return IRNative._equalPairData;
         if( type instanceof TirUnConstrDataResultT ) return getEqUnConstr();
         if( type instanceof TirVoidT ) return getEqVoid();
-        // V4 native Value: equality via bidirectional valueContains
+        // Native Value: equality via bidirectional valueContains
         if( type instanceof TirValueT ) return IRNative._valueEq;
         if(
             type instanceof TirBlsG1T

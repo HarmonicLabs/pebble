@@ -1,6 +1,6 @@
 {
   "name": "@harmoniclabs/pebble",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -53,12 +53,12 @@
   "homepage": "https://github.com/HarmonicLabs/pebble#readme",
   "dependencies": {
     "@harmoniclabs/bigint-utils": "^1.0.0",
-    "@harmoniclabs/cardano-costmodels-ts": "^1.4.0",
+    "@harmoniclabs/cardano-costmodels-ts": "^1.6.1",
     "@harmoniclabs/cbor": "^2.0.1",
     "@harmoniclabs/crypto": "^0.3.0",
     "@harmoniclabs/obj-utils": "^1.0.0",
     "@harmoniclabs/plutus-data": "^2.0.1",
-    "@harmoniclabs/plutus-machine": "^3.0.0",
+    "@harmoniclabs/plutus-machine": "^3.0.3",
     "@harmoniclabs/uint8array-utils": "^1.0.4",
     "@harmoniclabs/uplc": "^2.0.5"
   },

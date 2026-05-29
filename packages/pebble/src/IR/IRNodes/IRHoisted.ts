@@ -19,6 +19,7 @@ import { IRCase } from "./IRCase";
 import { IRNodeKind } from "../IRNodeKind";
 import { IRRecursive } from "./IRRecursive";
 import { IRHash, isIRHash, hashIrData, irHashToBytes, equalIrHash, irHashToHex } from "../IRHash";
+import { currentCompilationCtx } from "../CompilationCtx";
 import { UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
 import { IRNative } from "./IRNative";
@@ -49,13 +50,6 @@ const defaultHoistedMeta: IRHoistedMeta = freezeAll({
     forceHoist: false
 });
 
-const _hoisted_hash_to_symbol: Map<number, WeakRef<Symbol>> = new Map();
-
-export function __unsafe_clear_hoisted_hash_to_symbol(): void
-{
-    _hoisted_hash_to_symbol.clear();
-}
-
 export class IRHoisted
     implements IIRTerm, Cloneable<IRHoisted>, IIRParent, ToJson, IRHoistedMetadata
 {
@@ -63,14 +57,15 @@ export class IRHoisted
     get name(): symbol
     {
         const hash = this.hash;
-        const cached = _hoisted_hash_to_symbol.get( hash )?.deref();
+        const hashToSymbol = currentCompilationCtx().hoistedHashToSymbol;
+        const cached = hashToSymbol.get( hash )?.deref();
 
         if( typeof cached === "symbol" ) return cached;
 
         const sym = Symbol( tryInferName( this.hoisted ) ?? "hoisted_" + irHashToHex( hash ) );
-        
+
         /// @ts-ignore Argument of type 'WeakRef<object>' is not assignable to parameter of type 'WeakRef<Symbol>'
-        _hoisted_hash_to_symbol.set( hash, new WeakRef( sym ) );
+        hashToSymbol.set( hash, new WeakRef( sym ) );
 
         return sym;
     }

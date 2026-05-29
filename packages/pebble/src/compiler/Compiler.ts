@@ -10,12 +10,7 @@ import { AstCompiler } from "./AstCompiler/AstCompiler";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "./io/CompilerIoApi";
 import { compileTypedProgram } from "./TirCompiler/compileTirProgram";
 import { toHex } from "@harmoniclabs/uint8array-utils";
-import { __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from "../IR/IRHash";
-import { __VERY_UNSAFE_FORGET_VAR_SYM_HASHES_ONLY_USE_AT_END_OF_UPLC_COMPILATION } from "../IR/IRNodes/utils/hashVarSym";
-import { __unsafe_clear_hoisted_hash_to_symbol } from "../IR/IRNodes/IRHoisted";
-import { __unsafe_clear_letted_hash_to_symbol } from "../IR/IRNodes/IRLetted";
-import { __unsafe_clear_hoisted_cache } from "../IR/toUPLC/subRoutines/replaceHoistedWithLetted";
-import { __unsafe_clear_mapToType_cache } from "./TirCompiler/expressify/expressifyVars";
+import { CompilationCtx, withCompilationCtx } from "../IR/CompilationCtx";
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
@@ -91,7 +86,6 @@ export class Compiler
         const program = await astCompiler.compile();
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
-            // globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
             for( msg of this.diagnostics ) {
@@ -119,7 +113,6 @@ export class Compiler
         const program = await astCompiler.export( cfg.functionName, cfg.entry );
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
-            globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
             while( msg = this.diagnostics.shift()! ) {
@@ -142,7 +135,6 @@ export class Compiler
         const program = await astCompiler.run();
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
-            globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
             while( msg = this.diagnostics.shift()! ) {
@@ -387,7 +379,6 @@ export class Compiler
         const program = await astCompiler.runRepl();
         if( this.diagnostics.length > 0 ) {
             let msg: DiagnosticMessage;
-            globalThis.console && console.log( this.diagnostics );
             const fstErrorMsg = this.diagnostics[0].toString();
             const nDiags = this.diagnostics.length;
             while( msg = this.diagnostics.shift()! ) {
@@ -408,34 +399,36 @@ export class Compiler
         skipFileOutput: boolean = false
     ): Uint8Array
     {
-        // backend starts here
-        const ir = compileTypedProgram(
-            cfg,
-            program
-        );
-        const uplc = compileIRToUPLC( ir, cfg );
-        const serialized = compileUPLC(
-            new UPLCProgram(
-                cfg.targetUplcVersion,
-                uplc
-            )
-        );
+        // Run the whole backend under a fresh per-compilation context. All
+        // node-level caches (hoisted/letted naming, hoisted->letted lowering,
+        // the mapToType helper cache) live on this context, so they cannot
+        // leak into or be perturbed by any other compilation — and they are
+        // dropped automatically when this scope exits, even on throw. The
+        // content-addressed `IRHash` has no global state at all, so there is
+        // nothing else to reset.
+        return withCompilationCtx( new CompilationCtx(), () => {
+            const ir = compileTypedProgram(
+                cfg,
+                program
+            );
+            const uplc = compileIRToUPLC( ir, cfg );
+            const serialized = compileUPLC(
+                new UPLCProgram(
+                    cfg.targetUplcVersion,
+                    uplc
+                )
+            );
 
-        if( !skipFileOutput )
-        {
-            const outDir = cfg.outDir;
-            const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
-            this.io.writeFile( outPath, serialized, cfg.root );
-            this.io.stdout.write( `compiled program written to ${outPath}\n` );
-        }
+            if( !skipFileOutput )
+            {
+                const outDir = cfg.outDir;
+                const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
+                this.io.writeFile( outPath, serialized, cfg.root );
+                this.io.stdout.write( `compiled program written to ${outPath}\n` );
+            }
 
-        __VERY_UNSAFE_FORGET_IRHASH_ONLY_USE_AT_END_OF_UPLC_COMPILATION();
-        __VERY_UNSAFE_FORGET_VAR_SYM_HASHES_ONLY_USE_AT_END_OF_UPLC_COMPILATION();
-        __unsafe_clear_hoisted_hash_to_symbol();
-        __unsafe_clear_letted_hash_to_symbol();
-        __unsafe_clear_hoisted_cache();
-        __unsafe_clear_mapToType_cache();
-        return serialized;
+            return serialized;
+        });
     }
 }
 

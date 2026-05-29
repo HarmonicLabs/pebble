@@ -34,7 +34,7 @@ function valueArg( entries: Array<{ policy: string, tokens: Array<{ name: string
     return parseUPLCText( src ) as UPLCConst;
 }
 
-describe("V4 Value operators", () => {
+describe("Value operators", () => {
 
     test("Value + Value  →  unionValue", async () => {
         const uplc = await compileSingleFn(

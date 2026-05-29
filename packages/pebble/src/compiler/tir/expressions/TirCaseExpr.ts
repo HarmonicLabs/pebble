@@ -203,7 +203,7 @@ export class TirCaseExpr
                     _ir_apps(
                         IRNative.headList,
                         _ir_apps(
-                            IRNative._dropList,
+                            IRNative.dropList,
                             IRConst.int( f.idx ),
                             fieldsListLetted.clone()
                         )
@@ -384,8 +384,8 @@ export class TirCaseExpr
         // TirDataOptT extends TirDataStructType (constructors Some{value}, None{}),
         // so the same logic handles it.
         //
-        // V4 lowering structure (UPLC v1.2.0 `Case` accepts pair / int
-        // scrutinees as untagged constructors):
+        // Lowering structure (UPLC `Case` accepts pair / int scrutinees
+        // as untagged constructors):
         //
         //   Case (unConstrData scrutinee) [
         //       \idxSym fieldsSym ->
@@ -463,7 +463,7 @@ export class TirCaseExpr
                             _ir_apps(
                                 IRNative.headList,
                                 _ir_apps(
-                                    IRNative._dropList,
+                                    IRNative.dropList,
                                     IRConst.int( fieldIdx ),
                                     new IRVar( fieldsListSym )
                                 )

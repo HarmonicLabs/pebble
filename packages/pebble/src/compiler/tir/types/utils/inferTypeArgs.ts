@@ -1,3 +1,4 @@
+import { TirArrayT } from "../TirNativeType/native/array";
 import { TirFuncT } from "../TirNativeType/native/function";
 import { TirLinearMapT } from "../TirNativeType/native/linearMap";
 import { TirLinearMapEntryT } from "../TirNativeType/native/linearMapEntry";
@@ -43,6 +44,10 @@ export function inferTypeArgs(
 
     // both must be the same shape and equal in arg-positions
     if( formal instanceof TirListT && actual instanceof TirListT )
+    {
+        return inferTypeArgs( formal.typeArg, actual.typeArg, env );
+    }
+    if( formal instanceof TirArrayT && actual instanceof TirArrayT )
     {
         return inferTypeArgs( formal.typeArg, actual.typeArg, env );
     }

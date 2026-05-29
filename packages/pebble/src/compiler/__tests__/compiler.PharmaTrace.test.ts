@@ -4,11 +4,12 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, prettyUPLC } from "@harmoniclabs/uplc";
 
-// SKIPPED post-V4 migration: this contract uses `tx.mint[policyId]` map-style
-// indexing on the Value field, which only worked when `Value` was the V3
-// AssocMap-of-AssocMap (now `ValueMap`). With V4 the field is the native
-// `Value` and the equivalent is `tx.mint.amountOf(policyId, name)`.
-// Rewrite the contract against the new API and re-enable.
+// SKIPPED post-Value-native migration: this contract uses
+// `tx.mint[policyId]` map-style indexing on the Value field, which only
+// worked when `Value` was the AssocMap-of-AssocMap (now `ValueMap`). The
+// field is now the native `Value`; the equivalent is
+// `tx.mint.amountOf(policyId, name)`. Rewrite the contract against the
+// new API and re-enable.
 describe.skip("PharmaTrace", () => {
     test("compiles PharmaTrace", async () => {
 

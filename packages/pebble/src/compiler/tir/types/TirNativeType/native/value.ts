@@ -12,7 +12,7 @@ export class TirValueT
     toTirTypeKey(): string { return TirValueT.toTirTypeKey(); }
     toConcreteTirTypeName(): string { return this.toTirTypeKey(); }
     /**
-     * Native V4 `Value` is bidirectionally reachable from `data` via
+     * Native `Value` is bidirectionally reachable from `data` via
      * `unValueData` / `valueData`, so it qualifies as data-encoded for
      * the purposes of `data struct` field types.
      */

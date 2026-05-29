@@ -87,7 +87,7 @@ export const hoisted_negateValue = new IRHoisted(
 hoisted_negateValue.hash;
 
 // valueEq a b = if valueContains(a, b) then valueContains(b, a) else false
-//   Bidirectional containment is equality for canonical V4 Values (the
+//   Bidirectional containment is equality for canonical Values (the
 //   only form the runtime ever produces). Short-circuits on the first
 //   non-containment to save the second `valueContains` traversal.
 export const hoisted_valueEq = new IRHoisted(
@@ -236,63 +236,38 @@ hoisted_sub4.hash;
 const self_length = Symbol("self_length");
 const length_list_sym = Symbol("length_list_sym");
 export const hoisted_length = new IRHoisted(
-    new IRRecursive(
-        self_length,
-        new IRFunc(
-            [ length_list_sym ],
-            _ir_caseList(
-                new IRVar( length_list_sym ),
-                IRConst.int( 0 ),
-                _ir_apps(
-                    hoisted_incr.clone(),
-                    new IRApp(
-                        new IRSelfCall( self_length ), // self
-                        new IRApp(
-                            IRNative.tailList,
-                            new IRVar( length_list_sym )  // list
-                        )
-                    )
-                )
+    // new IRRecursive(
+    //     self_length,
+    //     new IRFunc(
+    //         [ length_list_sym ],
+    //         _ir_caseList(
+    //             new IRVar( length_list_sym ),
+    //             IRConst.int( 0 ),
+    //             _ir_apps(
+    //                 hoisted_incr.clone(),
+    //                 new IRApp(
+    //                     new IRSelfCall( self_length ), // self
+    //                     new IRApp(
+    //                         IRNative.tailList,
+    //                         new IRVar( length_list_sym )  // list
+    //                     )
+    //                 )
+    //             )
+    //         )
+    //     )
+    // )
+    new IRFunc(
+        [length_list_sym],
+        _ir_apps(
+            IRNative.lengthOfArray,
+            _ir_apps(
+                IRNative.listToArray,
+                new IRVar( length_list_sym )
             )
         )
     )
 );
 hoisted_length.hash;
-
-// REPLACED hoisted_dropList (was numeric arity + dbn)
-const drop_self = Symbol("drop_self");
-const drop_n = Symbol("n");
-const drop_lst = Symbol("lst");
-export const hoisted_dropList = new IRHoisted(
-    new IRRecursive(
-        drop_self,
-        new IRFunc(
-            [ drop_n, drop_lst ],
-            _ir_lazyIfThenElse(
-                _ir_apps( hoisted_isMoreThanOrEqualTo4.clone(), new IRVar( drop_n ) ),
-                _ir_apps(
-                    new IRSelfCall( drop_self ),
-                    _ir_apps( hoisted_sub4.clone(), new IRVar( drop_n ) ),
-                    _ir_apps( hoisted_drop4.clone(), new IRVar( drop_lst ) )
-                ),
-                _ir_lazyIfThenElse(
-                    _ir_apps( hoisted_isZero.clone(), new IRVar( drop_n ) ),
-                    new IRVar( drop_lst ),
-                    _ir_lazyIfThenElse(
-                        _ir_apps( hoisted_isOne.clone(), new IRVar( drop_n ) ),
-                        _ir_apps( IRNative.tailList, new IRVar( drop_lst ) ),
-                        _ir_lazyIfThenElse(
-                            _ir_apps( hoisted_isTwo.clone(), new IRVar( drop_n ) ),
-                            _ir_apps( hoisted_drop2.clone(), new IRVar( drop_lst ) ),
-                            _ir_apps( hoisted_drop3.clone(), new IRVar( drop_lst ) )
-                        )
-                    )
-                )
-            )
-        )
-    )
-);
-hoisted_dropList.hash;
 
 //   λ reduce → recurse self → λ acc → λ list →
 //     case list of
@@ -940,7 +915,7 @@ export function nativeToIR( native: IRNative ): IRTerm
         case IRNativeTag._isZero: return hoisted_isZero.clone();
         case IRNativeTag._sortedValueLovelaces: return hoisted_sortedValueLovelaces.clone();
         case IRNativeTag._getCredentialsHash: return hoisted_getCredentialsHash.clone();
-        case IRNativeTag._dropList: return hoisted_dropList.clone();
+        // case IRNativeTag._dropList: return hoisted_dropList.clone();
         case IRNativeTag._mkMapList: return hoisted_mkMapList.clone();
         case IRNativeTag._increment: return hoisted_addOne.clone();
         case IRNativeTag._decrement: return hoisted_subOne.clone();

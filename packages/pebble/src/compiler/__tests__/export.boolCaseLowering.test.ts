@@ -47,13 +47,13 @@ function countCases( t: UPLCTerm ): number {
     return n;
 }
 
-/** Pretty-printed UPLC must NOT mention `ifThenElse` after V4 lowering. */
+/** Pretty-printed UPLC must NOT mention `ifThenElse` after bool case lowering. */
 function assertNoIfThenElse( uplc: UPLCTerm ): void {
     const text = prettyUPLC( uplc, 2 );
     expect( text.includes( "ifThenElse" ) ).toBe( false );
 }
 
-describe("V4 bool → Case-over-Const lowering", () => {
+describe("bool → Case-over-Const lowering", () => {
 
     test("&&  →  case", async () => {
         const uplc = await compileSingleFn(

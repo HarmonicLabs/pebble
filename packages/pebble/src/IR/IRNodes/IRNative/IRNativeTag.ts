@@ -109,7 +109,7 @@ export enum IRNativeTag {
     findFirstSetBit                 = 85,
     ripemd_160                      = 86,
 
-    // Chang2 / Plutus V4
+    // Chang2
     expModInteger                   = 87,
     dropList                        = 88,
     lengthOfArray                   = 89,
@@ -131,7 +131,7 @@ export enum IRNativeTag {
     // -------------------------------------------------------------------------- //
     ////////////////////////////////////////////////////////////////////////////////
 
-    _dropList          = -4,
+    // _dropList          = -4,
     _foldr              = -6,
     _foldl              = -7,
 //     _mkFindDataOptional               = -8,
@@ -182,7 +182,7 @@ export enum IRNativeTag {
     _negateValue           = -49,
     /**
      * `\a b -> valueContains(a, b) && valueContains(b, a)` — equality on
-     * canonical V4 Values. Short-circuits on the first inequality.
+     * canonical Values. Short-circuits on the first inequality.
      */
     _valueEq               = -50,
 }
@@ -193,7 +193,7 @@ export function nativeTagToString( nativeTag: IRNativeTag ): string
     if( nativeTag >= 0 ) return builtinTagToString( nativeTag as any );
     switch( nativeTag )
     {
-        case IRNativeTag._dropList      : return "dropList";
+        // case IRNativeTag._dropList      : return "dropList";
         case IRNativeTag._foldr         : return "foldr";
         case IRNativeTag._foldl         : return "foldl";
         // case IRNativeTag._mkFindDataOptional          : return "mkFind";

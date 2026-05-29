@@ -44,6 +44,7 @@ import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefix
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
 import { bool_t, bytes_t, data_t, int_t, valueMapAmountOfName } from "../../tir/program/stdScope/stdScope";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
+import { currentCompilationCtx } from "../../../IR/CompilationCtx";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
 import { TirStmt } from "../../tir/statements/TirStmt";
@@ -488,7 +489,7 @@ function expressifyPropAccess(
                     TirNativeFunc.headList( data_t ),
                     [
                         new TirCallExpr(
-                            TirNativeFunc._dropList( data_t ),
+                            TirNativeFunc.dropList( data_t ),
                             [
                                 new TirLitIntExpr( BigInt( fIdx ), propAccessExpr.range ),
                                 new TirCallExpr(
@@ -967,8 +968,9 @@ function expressifyListMethodCall(
         );
         const mapReturnT = argFuncType.returnType;
 
-        const elemTypeTirName = elemsType.toTirTypeKey(); 
-        let base_mapToType = _base_mapToType_cache.get( elemTypeTirName )?.clone() as TirHoistedExpr;
+        const elemTypeTirName = elemsType.toTirTypeKey();
+        const mapToTypeCache = currentCompilationCtx().mapToTypeCache as Map<string, TirHoistedExpr>;
+        let base_mapToType = mapToTypeCache.get( elemTypeTirName )?.clone() as TirHoistedExpr;
         if( !base_mapToType ) {
             base_mapToType = new TirHoistedExpr(
                 "_map_to_list_of_" + elemTypeTirName,
@@ -987,7 +989,7 @@ function expressifyListMethodCall(
                 )
             );
             base_mapToType.varName; // precompute hash and symbol
-            _base_mapToType_cache.set(
+            mapToTypeCache.set(
                 elemTypeTirName,
                 base_mapToType.clone() as TirHoistedExpr
             );
@@ -1010,9 +1012,3 @@ function expressifyListMethodCall(
     */
 }
 
-const _base_mapToType_cache: Map<string, TirHoistedExpr> = new Map();
-
-export function __unsafe_clear_mapToType_cache(): void
-{
-    _base_mapToType_cache.clear();
-}

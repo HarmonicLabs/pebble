@@ -277,8 +277,8 @@ function isValueAssignableToType( value: IRConstValue, type: TirType ): boolean
         || type instanceof TirMlResultT
     ) return false;
 
-    // V4 native `Value` and `Array<T>` are never IRConst literals — they
-    // only appear at runtime as results of v4 builtins.
+    // Native `Value` and `Array<T>` are never IRConst literals — they
+    // only appear at runtime as results of builtins.
     if(
         type instanceof TirValueT
         || type instanceof TirArrayT

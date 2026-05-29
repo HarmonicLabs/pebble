@@ -475,7 +475,7 @@ function isDropList( term: IRTerm ): boolean
     }
     return (
         term instanceof IRNative
-        && term.tag === IRNativeTag._dropList
+        && term.tag === IRNativeTag.dropList
     )
 }
 

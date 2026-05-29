@@ -371,7 +371,7 @@ export function expressifyFuncBody(
                 const restLetted = ctx.introduceLettedConstant(
                     uniqueRestName,
                     new TirCallExpr(
-                        TirNativeFunc._dropList( elemType ),
+                        TirNativeFunc.dropList( elemType ),
                         [
                             new TirLitIntExpr( BigInt( stmt.elements.length % modTails ), stmt.range ),
                             lettedArr

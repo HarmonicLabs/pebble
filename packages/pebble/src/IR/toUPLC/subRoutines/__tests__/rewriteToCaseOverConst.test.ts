@@ -48,7 +48,7 @@ describe("rewriteToCaseOverConstAndReturnRoot", () => {
 
     test("strictChooseList(list, nil, cons)  →  Case(list, [(λh λt → cons), nil])", () => {
         // The strictChooseList → IRCase rewrite now lives in
-        // rewriteNativesAppliedToConstantsAndReturnRoot (unconditional, not V4-gated).
+        // rewriteNativesAppliedToConstantsAndReturnRoot (unconditional).
         const list = IRConst.listOf( {
             toUplcConstType: () => [ 0 ] as any,
         } as any )( [] as any );

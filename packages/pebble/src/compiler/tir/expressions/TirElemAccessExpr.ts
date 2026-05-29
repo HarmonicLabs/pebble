@@ -72,7 +72,7 @@ export class TirElemAccessExpr
             ) return _ir_apps(
                 IRNative.headList,
                 _ir_apps(
-                    IRNative._dropList,
+                    IRNative.dropList,
                     IRConst.int( result.value ),
                     irArr,
                 )
@@ -82,7 +82,7 @@ export class TirElemAccessExpr
         return _ir_apps(
             IRNative.headList,
             _ir_apps(
-                IRNative._dropList,
+                IRNative.dropList,
                 irIndex,
                 irArr,
             )

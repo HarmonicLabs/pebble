@@ -166,7 +166,7 @@ type ValueMap implements {
     }
 }
 
-// `Value` is a native Plutus V4 built-in value (ConstTyTag.value).
+// `Value` is a native built-in value (ConstTyTag.value).
 // It is reached from `data` via `unValueData`; the ledger always passes data.
 type Value implements {
     amountOf( policy: PolicyId, name: bytes ): int

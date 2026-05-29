@@ -12,6 +12,7 @@ import { IRParentTerm, isIRParentTerm } from "../utils/isIRParentTerm";
 import { _modifyChildFromTo } from "../toUPLC/_internal/_modifyChildFromTo";
 import { BaseIRMetadata } from "./BaseIRMetadata";
 import { hashIrData, IRHash, irHashToBytes, isIRHash } from "../IRHash";
+import { currentCompilationCtx } from "../CompilationCtx";
 import { IRNodeKind } from "../IRNodeKind";
 import { prettyIR } from "../utils/showIR";
 import { UPLCTerm } from "@harmoniclabs/uplc";
@@ -61,13 +62,6 @@ const defaultLettedMeta: IRLettedMeta = freezeAll({
     isClosed: false
 });
 
-const _letted_hash_to_symbol: Map<number, WeakRef<Symbol>> = new Map();
-
-export function __unsafe_clear_letted_hash_to_symbol(): void
-{
-    _letted_hash_to_symbol.clear();
-}
-
 export class IRLetted
     implements IIRTerm, Cloneable<IRLetted>, IIRParent, ToJson, IRLettedMetadata
 {
@@ -76,7 +70,8 @@ export class IRLetted
 
     get name(): symbol {
         const hash = this.hash;
-        const cached = _letted_hash_to_symbol.get( hash )?.deref();
+        const hashToSymbol = currentCompilationCtx().lettedHashToSymbol;
+        const cached = hashToSymbol.get( hash )?.deref();
 
         if( typeof cached === "symbol" ) return cached;
 
@@ -84,7 +79,7 @@ export class IRLetted
 
         const sym = this._name;
         /// @ts-ignore Argument of type 'WeakRef<object>' is not assignable to parameter of type 'WeakRef<Symbol>'
-        _letted_hash_to_symbol.set( hash, new WeakRef( sym ) );
+        hashToSymbol.set( hash, new WeakRef( sym ) );
 
         return sym;
     }

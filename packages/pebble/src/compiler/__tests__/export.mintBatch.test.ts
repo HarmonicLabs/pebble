@@ -7,7 +7,7 @@ import { CEKConst, CEKError, DataB, DataConstr, DataI, DataMap, Hash28, Machine,
 
 const policyHex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-// SKIPPED post-V4 migration: see export.valueOf.test.ts — same root cause.
+// SKIPPED post-Value-native migration: see export.valueOf.test.ts — same root cause.
 describe.skip("amountOf", () => {
 
     test("single entry ok", async () => {

@@ -354,7 +354,7 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( builtinsNsScope, "equalsData",     IRNativeTag.equalsData,     new TirFuncT([ data_t, data_t ], bool_t), blt );
     defineBuiltin( builtinsNsScope, "serialiseData",  IRNativeTag.serialiseData,  new TirFuncT([ data_t ], bytes_t), blt );
 
-    // Chang2 / Plutus V4
+    // Chang2 / value & array builtins
     const value_native_t = new TirValueT();
     defineBuiltin( builtinsNsScope, "expModInteger",  IRNativeTag.expModInteger,  new TirFuncT([ int_t, int_t, int_t ], int_t), blt );
     defineBuiltin( builtinsNsScope, "insertCoin",     IRNativeTag.insertCoin,     new TirFuncT([ bytes_t, bytes_t, int_t, value_native_t ], value_native_t), blt );
@@ -647,7 +647,7 @@ export function populateStdNamespace( program: TypedProgram ): void
     );
     defineGenericBuiltin( listNsScope, "drop", 1,
         ( [ T ] ) => new TirFuncT([ int_t, new TirListT( T ) ], new TirListT( T )),
-        () => new IRNative( IRNativeTag._dropList ),
+        () => new IRNative( IRNativeTag.dropList ),
         listNs
     );
     defineGenericBuiltin( listNsScope, "foldr", 2,
@@ -824,7 +824,7 @@ export function populateStdNamespace( program: TypedProgram ): void
         }
         scope.functions.set( astName, existingTirFuncName );
     }
-    // std.value.* — methods on the V4 native Value
+    // std.value.* — methods on the native Value
     defineAliasFromProgram( valueNsScope,      "amountOf",  valueAmountOfName );
     defineAliasFromProgram( valueNsScope,      "lovelaces", valueLovelacesName );
     defineAliasFromProgram( valueNsScope,      "insert",    valueInsertCoinName );
@@ -832,12 +832,12 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineAliasFromProgram( valueNsScope,      "contains",  valueContainsName );
     defineAliasFromProgram( valueNsScope,      "scale",     valueScaleName );
     defineAliasFromProgram( valueNsScope,      "toData",    valueToDataName );
-    // std.valueMap.* — methods on the V3-style AssocMap-of-AssocMap representation
+    // std.valueMap.* — methods on the legacy AssocMap-of-AssocMap representation
     defineAliasFromProgram( valueMapNsScope,   "amountOf",  valueMapAmountOfName );
     defineAliasFromProgram( valueMapNsScope,   "lovelaces", valueMapLovelacesName );
     defineAliasFromProgram( credentialNsScope, "hash",      getCredentialHashFuncName );
 
-    // ---------- std.array (polymorphic; V4 native array) ----------
+    // ---------- std.array (polymorphic; native array) ----------
     const arrayNs = "array";
     defineGenericBuiltin( arrayNsScope, "length", 1,
         ( [ T ] ) => new TirFuncT([ new TirArrayT( T ) ], int_t),

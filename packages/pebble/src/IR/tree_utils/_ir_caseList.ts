@@ -7,7 +7,7 @@ import type { IRTerm } from "../IRTerm";
  *   h::t -> caseCons   (h, t are bound only if `consParams` is provided)
  *   []   -> caseNil
  *
- * Lowers to UPLC `Case` (v1.2.0). Branches are naturally lazy, so callers
+ * Lowers to UPLC `Case`. Branches are naturally lazy, so callers
  * should pass plain (un-delayed) expressions — no `force` is needed around
  * the result.
  */

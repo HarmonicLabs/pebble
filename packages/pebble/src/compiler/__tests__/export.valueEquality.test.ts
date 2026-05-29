@@ -37,7 +37,7 @@ function evalBool( uplc: UPLCTerm, a: UPLCConst, b: UPLCConst ): boolean
     return (r as CEKConst).value as boolean;
 }
 
-describe("V4 Value equality", () => {
+describe("Value equality", () => {
 
     test("identical values  →  true (==)", async () => {
         const uplc = await compileSingleFn(

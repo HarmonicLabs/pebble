@@ -108,8 +108,6 @@ export function ecd( a: int, b: int ): int {
 
         const uplc = parseUPLC( output ).body;
 
-        console.log( "UPLC for `ecd`:", prettyUPLC( uplc ) );
-
         // Input pairs to compare. Includes:
         //   - small + large coprime / non-coprime cases
         //   - identity edge cases (one operand is 0)
@@ -146,6 +144,7 @@ export function ecd( a: int, b: int ): int {
             const result = Machine.eval( applied );
 
             expect( result.result instanceof CEKConst ).toBe( true );
+            console.log( result )
             const actual = ( result.result as CEKConst ).value;
             expect( actual ).toBe( expected );
         }

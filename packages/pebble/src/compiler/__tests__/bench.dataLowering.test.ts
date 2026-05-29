@@ -81,9 +81,11 @@ function printTable(samples: Sample[]): void {
         "mem".padStart(10),
         "result".padStart(8),
     ].join("  ");
+    /*
     console.log("\n" + header);
     console.log("-".repeat(header.length));
     for (const s of samples) {
+        /*
         console.log([
             s.label.padEnd(widthLabel),
             fmt(s.uplcSize).padStart(8),
@@ -93,6 +95,7 @@ function printTable(samples: Sample[]): void {
         ].join("  "));
     }
     console.log("");
+    //*/
 }
 
 describe("data lowering benchmarks (informational, not assertions)", () => {
