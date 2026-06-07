@@ -210,6 +210,60 @@ function main( xs: List<int> ): int {
         expect( compiler.diagnostics ).toEqual( [] );
     });
 
+    // ----- lambdas in generic-call positions: param types inferred from the
+    //       formal slot after the non-lambda args populate the inference env -----
+
+    test("std.list.foldl with unannotated lambda — params inferred from List<int> + init", async () => {
+        const src = `
+function main( xs: List<int> ): int {
+    return std.list.foldl( (acc, n) => acc + n, 0, xs );
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("std.list.filter with unannotated lambda — param T inferred from List<int>", async () => {
+        const src = `
+function main( xs: List<int> ): List<int> {
+    return std.list.filter( (n) => n % 2 == 0, xs );
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("std.list.foldl on the result of std.list.filter — chained lambdas", async () => {
+        const src = `
+function main( xs: List<int> ): int {
+    return std.list.foldl(
+        (acc, n) => acc + n,
+        0,
+        std.list.filter( (n) => n % 2 == 0, xs )
+    );
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("std.list.find with unannotated lambda", async () => {
+        const src = `
+function main( xs: List<int> ): Optional<int> {
+    return std.list.find( (n) => n == 3, xs );
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("std.list.some / every with unannotated lambda", async () => {
+        const src = `
+function main( xs: List<int> ): bool {
+    const anyBig: bool = std.list.some( (n) => n > 4, xs );
+    const allPos: bool = std.list.every( (n) => n > 0, xs );
+    return anyBig && allPos;
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
     // ----- negative path: type-args unable to be inferred -----
 
     test("calling std.id() with no args produces a diagnostic", async () => {

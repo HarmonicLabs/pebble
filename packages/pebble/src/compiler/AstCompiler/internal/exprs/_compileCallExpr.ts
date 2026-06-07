@@ -1,4 +1,5 @@
 import { CallExpr } from "../../../../ast/nodes/expr/functions/CallExpr";
+import { FuncExpr } from "../../../../ast/nodes/expr/functions/FuncExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
 import { TirCallExpr } from "../../../tir/expressions/TirCallExpr";
 import { TirExpr } from "../../../tir/expressions/TirExpr";
@@ -78,16 +79,77 @@ export function _compileCallExpr(
 
             // 2) Compile arguments. We need them anyway, and they're used for
             //    inference when no explicit args were given.
-            const tirArgs = expr.args.map(( arg, i ) => {
-                const expected = explicitArgs
-                    ? substituteTypeParams(
-                          funcType.argTypes[i],
-                          new Map( template.typeParams.map(( tp, idx ) => [ tp.symbol, explicitArgs![idx] ]) )
-                      )
-                    : undefined;
-                return _compileExpr( ctx, arg, expected );
-            }) as TirExpr[];
-            for( const a of tirArgs ) if( !a ) return undefined;
+            //
+            // For inferred-type-args calls, lambda arguments cannot be compiled
+            // without an expected function type (their param types would be
+            // unannotated). So we compile non-lambda args first, build an
+            // inference environment from them, then compile lambda args with
+            // the substituted expected type from `funcType.argTypes[i]`.
+            const tirArgs = new Array<TirExpr>( expr.args.length );
+            const usable = Math.min( expr.args.length, funcType.argTypes.length );
+
+            if( explicitArgs )
+            {
+                const explicitSubst = new Map(
+                    template.typeParams.map(( tp, idx ) => [ tp.symbol, explicitArgs![idx] ])
+                );
+                for( let i = 0; i < expr.args.length; i++ )
+                {
+                    const expected = i < funcType.argTypes.length
+                        ? substituteTypeParams( funcType.argTypes[i], explicitSubst )
+                        : undefined;
+                    const compiled = _compileExpr( ctx, expr.args[i], expected );
+                    if( !compiled ) return undefined;
+                    tirArgs[i] = compiled;
+                }
+            }
+            else
+            {
+                const env = new Map<symbol, TirType>();
+                // Pass 1: compile non-FuncExpr args (no type hint needed) and
+                // populate `env` from each arg's resolved type.
+                for( let i = 0; i < expr.args.length; i++ )
+                {
+                    if( expr.args[i] instanceof FuncExpr ) continue;
+                    const compiled = _compileExpr( ctx, expr.args[i], undefined );
+                    if( !compiled ) return undefined;
+                    tirArgs[i] = compiled;
+                    if( i < usable )
+                    {
+                        if( !inferTypeArgs( funcType.argTypes[i], compiled.type, env ) )
+                        return ctx.error(
+                            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+                            expr.args[i].range,
+                            compiled.type.toString(),
+                            funcType.argTypes[i].toString()
+                        );
+                    }
+                }
+                // Pass 2: compile FuncExpr args with the substituted expected
+                // type so lambda param types can be inferred from context.
+                for( let i = 0; i < expr.args.length; i++ )
+                {
+                    if( !( expr.args[i] instanceof FuncExpr ) ) continue;
+                    const expected = i < funcType.argTypes.length
+                        ? substituteTypeParams( funcType.argTypes[i], env )
+                        : undefined;
+                    const compiled = _compileExpr( ctx, expr.args[i], expected );
+                    if( !compiled ) return undefined;
+                    tirArgs[i] = compiled;
+                    if( i < usable )
+                    {
+                        // re-run to capture type params bound only via the
+                        // lambda's return type (e.g. `map<T, A>(f: (T) -> A, ...)`)
+                        if( !inferTypeArgs( funcType.argTypes[i], compiled.type, env ) )
+                        return ctx.error(
+                            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+                            expr.args[i].range,
+                            compiled.type.toString(),
+                            funcType.argTypes[i].toString()
+                        );
+                    }
+                }
+            }
 
             // 3) Determine final type arguments
             let resolvedArgs: TirType[];
@@ -98,7 +160,6 @@ export function _compileCallExpr(
             else
             {
                 const env = new Map<symbol, TirType>();
-                const usable = Math.min( tirArgs.length, funcType.argTypes.length );
                 for( let i = 0; i < usable; i++ )
                 {
                     if( !inferTypeArgs( funcType.argTypes[i], tirArgs[i].type, env ) )
