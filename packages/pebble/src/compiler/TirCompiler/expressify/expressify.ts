@@ -664,7 +664,81 @@ export function expressifyFuncBody(
                 );
             }
 
-            throw new Error("match statement with multiple non-terminating cases is not implemented yet (sorry)");
+            // more than one case does not terminate:
+            // each non-terminating case must merge its reassigned variables
+            // (and optional early return) into a common SoP state, then the
+            // rest of the body continues from that merged state.
+            // (mirrors the non-terminating `if` statement handling above)
+
+            // build a SoP type to return from each branch
+            const { sop } = getBranchStmtReturnType( reassignsAndReturns, ctx, stmt.range );
+            const reassignedNames = reassignsAndReturns.reassigned;
+
+            const finalExpression = new TirCaseExpr(
+                expressifyVars( ctx, stmt.matchExpr ),
+                stmt.cases.map( _case => {
+                    if( _case.pattern instanceof TirArrayLikeDeconstr )
+                    throw new Error("array-like deconstruction in match statement is not supported");
+
+                    _case.pattern = toNamedDeconstructVarDecl( _case.pattern );
+
+                    const caseCtx = ctx.newChild();
+
+                    const nestedDeconstructs = flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
+                        _case.pattern,
+                        caseCtx
+                    );
+
+                    const branchStmts = _case.body instanceof TirBlockStmt
+                        ? _case.body.stmts
+                        : [ _case.body ];
+
+                    const branchBlock = new TirBlockStmt(
+                        (nestedDeconstructs as TirStmt[]).concat( branchStmts ),
+                        _case.body.range
+                    );
+
+                    // expressify the branch so it returns the merged SoP state
+                    const caseBody = expressifyIfBranch(
+                        caseCtx,
+                        branchBlock,
+                        reassignedNames,
+                        sop,
+                        loopReplacements
+                    );
+
+                    return new TirCaseMatcher(
+                        _case.pattern,
+                        caseBody,
+                        _case.range
+                    );
+                }),
+                stmt.wildcardCase ? new TirWildcardCaseMatcher(
+                    expressifyIfBranch(
+                        ctx.newChild(),
+                        stmt.wildcardCase.body,
+                        reassignedNames,
+                        sop,
+                        loopReplacements
+                    ),
+                    stmt.wildcardCase.range
+                ) : undefined,
+                sop,
+                stmt.range
+            );
+
+            return TirAssertAndContinueExpr.fromStmtsAndContinuation(
+                assertions,
+                wrapNonTerminatingFinalStmtAsCaseExpr(
+                    finalExpression,
+                    sop,
+                    ctx,
+                    stmt.range,
+                    reassignsAndReturns,
+                    bodyStmts,
+                    loopReplacements
+                )
+            );
         }
         // else if( stmt instanceof TirForOfStmt ) {
         // 

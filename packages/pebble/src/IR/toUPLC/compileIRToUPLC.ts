@@ -79,6 +79,13 @@ export function compileIRToUPLC(
     term = replaceNativesAndReturnRoot( term );
     // re-call rewrite to optimize introduced hoisted
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
+    // the rewrite above can itself introduce custom (negative-tag) natives
+    // (eg. `equalsInteger(x, 0)` -> `_isZero(x)`, `addInteger(x, 1)` ->
+    // `_increment(x)`); lower those too, otherwise they survive as bare
+    // IRNatives and crash the later forcing pass with
+    // "getNRequiredForces ... input was: -<tag>". This only surfaced in
+    // contracts complex enough for the rewrite to fire on shared/hoisted bodies.
+    term = replaceNativesAndReturnRoot( term );
 
     // Lower `strictIfThenElse` triple-apps to `IRCase` BEFORE
     // `replaceForcedNativesWithHoisted` would otherwise hoist

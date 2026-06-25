@@ -797,6 +797,71 @@ function expressifyMethodCall(
                 exprRange
             );
         }
+        // receiver-first byte ops: `a.op( b )` -> native( a, b )
+        if( methodName === "concat" ) {
+            return new TirCallExpr(
+                TirNativeFunc.appendByteString,
+                [ objectExpr, methodCall.args[0] ],
+                bytes_t,
+                exprRange
+            );
+        }
+        if( methodName === "indexAt" ) {
+            return new TirCallExpr(
+                TirNativeFunc.indexByteString,
+                [ objectExpr, methodCall.args[0] ],
+                int_t,
+                exprRange
+            );
+        }
+        if( methodName === "equals" ) {
+            return new TirCallExpr(
+                TirNativeFunc.equalsByteString,
+                [ objectExpr, methodCall.args[0] ],
+                bool_t,
+                exprRange
+            );
+        }
+        if( methodName === "lessThan" ) {
+            return new TirCallExpr(
+                TirNativeFunc.lessThanByteString,
+                [ objectExpr, methodCall.args[0] ],
+                bool_t,
+                exprRange
+            );
+        }
+        if( methodName === "lessThanEquals" ) {
+            return new TirCallExpr(
+                TirNativeFunc.lessThanEqualsByteString,
+                [ objectExpr, methodCall.args[0] ],
+                bool_t,
+                exprRange
+            );
+        }
+        if( methodName === "greaterThan" ) {
+            return new TirCallExpr(
+                TirNativeFunc._gtBS,
+                [ objectExpr, methodCall.args[0] ],
+                bool_t,
+                exprRange
+            );
+        }
+        if( methodName === "greaterThanEquals" ) {
+            return new TirCallExpr(
+                TirNativeFunc._gtEqBS,
+                [ objectExpr, methodCall.args[0] ],
+                bool_t,
+                exprRange
+            );
+        }
+        if( methodName === "toInt" ) {
+            return new TirCallExpr(
+                TirNativeFunc._bytesToIntBE,
+                [ objectExpr ],
+                int_t,
+                exprRange
+            );
+        }
     }
 
     // Generic `.show()` fallback: any value whose type has a built-in

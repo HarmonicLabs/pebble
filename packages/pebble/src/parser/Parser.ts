@@ -96,6 +96,28 @@ interface ParseStmtOpts {
 export class Parser extends DiagnosticEmitter
 {
     readonly tn: Tokenizer;
+    /**
+     * When set, the leading primary of the next parsed expression must NOT be
+     * interpreted as a named-object/struct literal (`Ident{ ... }`).
+     *
+     * This is needed for statements of the form `<keyword> <expr> { ... }`
+     * (eg. `match subject { ... }`) where the `{` introduces the statement
+     * block, not a struct literal body. The flag is consumed (and cleared) by
+     * the first `parseExprStart` call, so nested expressions still allow
+     * struct literals.
+     */
+    private _noStructLiteral: boolean = false;
+    /**
+     * When set (while parsing the subject / arm bodies of a `case` expression),
+     * the `is` keyword is treated as a low-precedence arm separator rather than
+     * the binary `is` (type-narrowing) operator. This lets an arm body absorb
+     * higher-precedence operators (comparisons, arithmetic, etc.) while still
+     * stopping before the next arm's `is`.
+     *
+     * Inside parentheses the body is re-parsed at a low precedence, so a binary
+     * `is` there is still recognised normally (eg. `=> ( x is Foo )`).
+     */
+    private _caseArmIsLowPrec: boolean = false;
     constructor(
         tokenizer: Tokenizer,
         diagnostics: DiagnosticMessage[] | undefined = undefined
@@ -2391,6 +2413,17 @@ export class Parser extends DiagnosticEmitter
         return new ParentesizedExpr(inner, tn.range(startPos, tn.pos));
     }
 
+    /**
+     * Like {@link determinePrecedence} but context-sensitive: inside a `case`
+     * expression the `is` keyword acts as a low-precedence arm separator.
+     */
+    private precedenceOf( kind: Token ): Precedence
+    {
+        if( kind === Token.Is && this._caseArmIsLowPrec )
+            return Precedence.CaseExpr;
+        return determinePrecedence( kind );
+    }
+
     parseExpr(
         precedence: Precedence = Precedence.Comma
     ): PebbleExpr | undefined
@@ -2420,7 +2453,7 @@ export class Parser extends DiagnosticEmitter
         let prevState: TokenizerState;
         outer_while: while(
             (
-                nextPrecedence = determinePrecedence(tn.peek())
+                nextPrecedence = this.precedenceOf( tn.peek() )
             ) >= precedence
         ) {
             prevState = tn.mark();
@@ -2682,6 +2715,10 @@ export class Parser extends DiagnosticEmitter
     parseExprStart(): PebbleExpr | undefined
     {
         const tn = this.tn;
+        // consume the flag: only the leading primary of this expression is
+        // affected; any nested expression parsed below allows struct literals.
+        const noStructLiteral = this._noStructLiteral;
+        this._noStructLiteral = false;
         const token = tn.next( IdentifierHandling.Prefer );
         const startPos = tn.tokenPos;
 
@@ -2863,7 +2900,7 @@ export class Parser extends DiagnosticEmitter
 
                 // LitNamedObjExpr
                 // eg: `Identifier{ a: 1, b: 2 }`
-                if( tn.peek() === Token.OpenBrace ) {
+                if( !noStructLiteral && tn.peek() === Token.OpenBrace ) {
                     const endPos = tn.pos;
                     const litObjExpr = this.parseExprStart();
                     if(!( litObjExpr instanceof LitObjExpr ))
@@ -2885,7 +2922,7 @@ export class Parser extends DiagnosticEmitter
 
                 // LitNamedObjExpr with type qualifier
                 // eg: `Type.Constructor{ a: 1, b: 2 }`
-                if( tn.peek() === Token.Dot ) {
+                if( !noStructLiteral && tn.peek() === Token.Dot ) {
                     const savedState = tn.mark();
                     tn.next(); // consume '.'
                     if( tn.skipIdentifier( IdentifierHandling.Always ) ) {
@@ -3039,6 +3076,11 @@ export class Parser extends DiagnosticEmitter
 
         const startPos = tn.tokenPos;
 
+        // within the case expression, `is` is a low-precedence arm separator
+        const prevCaseArmIsLowPrec = this._caseArmIsLowPrec;
+        this._caseArmIsLowPrec = true;
+        try {
+
         // parse the matched expression at a precedence higher than `is`
         // so the case-level `is` is left unconsumed
         const expr = this.parseExpr( Precedence.Relational + 1 );
@@ -3067,10 +3109,10 @@ export class Parser extends DiagnosticEmitter
                 tn.range(), "=>"
             );
 
-            // parse body at precedence higher than `is` so the next case-arm's
-            // `is` is left unconsumed (otherwise `is` would be greedily parsed
-            // as the binary `is` operator inside the body)
-            const body = this.parseExpr( Precedence.Relational + 1 );
+            // parse the body absorbing all operators tighter than `is`; the
+            // low-precedence `is` (see `_caseArmIsLowPrec`) stops the body
+            // before the next case-arm's `is`
+            const body = this.parseExpr( Precedence.CaseExpr + 1 );
             if( !body ) return undefined;
 
             cases.push(
@@ -3086,10 +3128,8 @@ export class Parser extends DiagnosticEmitter
         if( tn.skip( Token.Else ) )
         {
             const wildcardStart = tn.tokenPos;
-            // parse body at precedence higher than `is` so the next case-arm's
-            // `is` is left unconsumed (otherwise `is` would be greedily parsed
-            // as the binary `is` operator inside the body)
-            const body = this.parseExpr( Precedence.Relational + 1 );
+            // parse the body absorbing all operators tighter than `is`
+            const body = this.parseExpr( Precedence.CaseExpr + 1 );
             if( !body ) return undefined;
             wildcardCase = new CaseWildcardMatcher(
                 body,
@@ -3113,6 +3153,10 @@ export class Parser extends DiagnosticEmitter
             wildcardCase,
             finalRange
         );
+
+        } finally {
+            this._caseArmIsLowPrec = prevCaseArmIsLowPrec;
+        }
     }
 
     parseFunctionExpr(): FuncExpr | undefined
@@ -4113,7 +4157,10 @@ export class Parser extends DiagnosticEmitter
 
         const startPos = tn.pos;
 
+        // the `{` after the subject opens the match block, not a struct literal
+        this._noStructLiteral = true;
         const expr = this.parseExpr();
+        this._noStructLiteral = false;
         if( !expr )
         return this.error(
             DiagnosticCode.Expression_expected,

@@ -135,7 +135,13 @@ export function _compileCaseExprMatcher(
         );
     }
 
-    const pattern = _compileVarDecl( ctx, matcher.pattern, patternType );
+    // each arm gets its own child scope so that the pattern binders are
+    // scoped to the arm and do NOT leak into the enclosing block (which would
+    // make two mutually-exclusive arms reusing a binder name collide as
+    // "duplicate identifier").
+    const armCtx = ctx.newBranchChildScope();
+
+    const pattern = _compileVarDecl( armCtx, matcher.pattern, patternType );
     if( !pattern ) return undefined;
 
     if( pattern instanceof TirSimpleVarDecl ) return ctx.error(
@@ -148,7 +154,7 @@ export function _compileCaseExprMatcher(
         matcher.pattern.range, pattern.type.toString(), patternType.toString()
     );
 
-    let bodyCtx = ctx;
+    let bodyCtx = armCtx;
     if( matchedVarName && pattern instanceof TirNamedDeconstructVarDecl )
     {
         const parentStruct = getStructType( patternType );
@@ -160,7 +166,7 @@ export function _compileCaseExprMatcher(
             if( localIdx >= 0 )
             {
                 const parentIdx = parentStruct.parentCtorIdx( localIdx );
-                bodyCtx = ctx.newBranchChildScope();
+                bodyCtx = armCtx.newBranchChildScope();
                 if( parentStruct instanceof TirDataStructType
                     || parentStruct instanceof TirSoPStructType
                 )

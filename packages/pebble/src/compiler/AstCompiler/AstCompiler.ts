@@ -129,6 +129,9 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     private _isExporting: boolean;
+    /** scope used to resolve field types of synthetic internal type decls while a contract body is being derived */
+    private _internalDeclScope: AstScope | undefined = undefined;
+    private _internalDeclSrcUid: string = "";
     async export( funcName: string, modulePath?: string ): Promise<TypedProgram>
     {
         this._isExporting = true;
@@ -523,7 +526,7 @@ export class AstCompiler extends DiagnosticEmitter
                     continue;
                 }
 
-                const funcDeclContract = this._contractDeclToFuncDecl( stmt );
+                const funcDeclContract = this._contractDeclToFuncDecl( stmt, topLevelScope, srcUid );
                 if( !funcDeclContract ) {
                     // remove from array so we don't process it again
                     void stmts.splice( i, 1 );
@@ -1103,14 +1106,20 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     registerInternalTypeDecl(
-        decl: StructDecl | TypeAliasDecl
+        decl: StructDecl | TypeAliasDecl,
+        // scope in which the decl's field types are resolved; defaults to the
+        // contract source scope while a contract body is being derived (so
+        // synthetic decls that reference user types — eg. a redeemer whose
+        // fields are the method params — resolve), otherwise the prelude.
+        scope: AstScope = this._internalDeclScope ?? this.preludeScope,
+        srcUid: string = this._internalDeclSrcUid
     ): void
     {
         this._collectTypeDeclarations(
             [ decl ],
-            "",
-            this.preludeScope,
-            this.preludeScope
+            srcUid,
+            scope,
+            scope
         );
     }
 
@@ -1678,7 +1687,11 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     private _contractDeclToFuncDecl(
-        contractDecl: ContractDecl
+        contractDecl: ContractDecl,
+        // scope where user types referenced by the contract (eg. method param
+        // types used to derive the redeemer) are resolved
+        userScope: AstScope = this.preludeScope,
+        srcUid: string = ""
     ): FuncDecl | undefined
     {
         const funcName = getUniqueInternalName( contractDecl.name.text );
@@ -1739,12 +1752,25 @@ export class AstCompiler extends DiagnosticEmitter
             contractDecl.name.range
         );
 
-        const contractBody = _deriveContractBody(
-            this,
-            contractDecl,
-            paramsInternalNamesMap,
-            scriptContextName
-        );
+        // make user types referenced by synthetic internal type decls (the
+        // redeemer / datum / per-state structs derived below) resolvable in the
+        // contract's source scope, instead of only the prelude.
+        const prevInternalDeclScope = this._internalDeclScope;
+        const prevInternalDeclSrcUid = this._internalDeclSrcUid;
+        this._internalDeclScope = userScope;
+        this._internalDeclSrcUid = srcUid;
+        let contractBody: BlockStmt | undefined;
+        try {
+            contractBody = _deriveContractBody(
+                this,
+                contractDecl,
+                paramsInternalNamesMap,
+                scriptContextName
+            );
+        } finally {
+            this._internalDeclScope = prevInternalDeclScope;
+            this._internalDeclSrcUid = prevInternalDeclSrcUid;
+        }
         if( !contractBody ) return undefined;
 
         return new FuncDecl(

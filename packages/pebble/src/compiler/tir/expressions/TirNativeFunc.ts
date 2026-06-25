@@ -1023,6 +1023,14 @@ export class TirNativeFunc
             ], bool_t)
         );
     }
+    static get _bytesToIntBE(): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag._bytesToIntBE,
+            new TirFuncT([
+                bytes_t
+            ], int_t)
+        );
+    }
     static get _gtInt(): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag._gtInt,

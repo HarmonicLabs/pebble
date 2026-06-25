@@ -152,6 +152,9 @@ function getLinearMapMethods( kT: TirType, vT: TirType ): { [x: string]: TirFunc
     };
 }
 
+// Method-form signatures: the receiver (the `bytes` value the method is
+// called on) is implicit and dropped from the argument list. These mirror the
+// `std.bytes.*` namespace functions registered in `populateStdNamespace`.
 const bytesMethods: { [x: string]: TirFuncT | undefined } = Object.freeze({
     length: new TirFuncT([], int_t ),
     subByteString: new TirFuncT([ int_t, int_t ], bytes_t ),
@@ -159,6 +162,14 @@ const bytesMethods: { [x: string]: TirFuncT | undefined } = Object.freeze({
     show: new TirFuncT([], bytes_t ),
     decodeUtf8: new TirFuncT([], string_t ),
     prepend: new TirFuncT([ int_t ], bytes_t ),
+    concat: new TirFuncT([ bytes_t ], bytes_t ),
+    indexAt: new TirFuncT([ int_t ], int_t ),
+    equals: new TirFuncT([ bytes_t ], bool_t ),
+    lessThan: new TirFuncT([ bytes_t ], bool_t ),
+    lessThanEquals: new TirFuncT([ bytes_t ], bool_t ),
+    greaterThan: new TirFuncT([ bytes_t ], bool_t ),
+    greaterThanEquals: new TirFuncT([ bytes_t ], bool_t ),
+    toInt: new TirFuncT([], int_t ),
 });
 
 const stringMethods: { [x: string]: TirFuncT | undefined } = Object.freeze({

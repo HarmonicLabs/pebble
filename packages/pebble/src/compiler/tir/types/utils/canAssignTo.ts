@@ -73,6 +73,35 @@ export function canAssignToList( type: TirType ): boolean
 }
 
 /**
+ * The two `Optional` representations (data-encoded `TirDataOptT` and
+ * SoP-encoded `TirSopOptT`) are **incompatible at runtime** and therefore not
+ * directly assignable. They can however be bridged by a real encoding
+ * conversion (`TirTypeConversionExpr`, lowered via `_inlineFromData` /
+ * `_inlineToData`).
+ *
+ * @returns `true` if `from` and `to` are Optionals of *different* encodings
+ *          whose type arguments are assignable — i.e. assigning `from` to `to`
+ *          only requires inserting such an encoding conversion.
+ */
+export function isOptionalEncodingBridge( from: TirType, to: TirType ): boolean
+{
+    from = getUnaliased( from );
+    to   = getUnaliased( to );
+
+    const fromIsData = from instanceof TirDataOptT;
+    const fromIsSop  = from instanceof TirSopOptT;
+    const toIsData   = to instanceof TirDataOptT;
+    const toIsSop    = to instanceof TirSopOptT;
+
+    if( !(fromIsData || fromIsSop) || !(toIsData || toIsSop) ) return false;
+    // only bridge *across* encodings; same-encoding cases are handled by the
+    // normal assignability rules
+    if( fromIsData === toIsData ) return false;
+
+    return canAssignTo( (from as TirDataOptT | TirSopOptT).typeArg, (to as TirDataOptT | TirSopOptT).typeArg );
+}
+
+/**
  * @returns `true` if `a` can be assigned to `b` **without** explicit cast
  * 
  * use `getCanAssign` for more detailed information
