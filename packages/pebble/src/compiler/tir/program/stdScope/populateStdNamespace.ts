@@ -264,6 +264,8 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( blsNsScope, "g1HashToGroup", IRNativeTag.bls12_381_G1_hashToGroup,   new TirFuncT([ bytes_t, bytes_t ], g1_t), blsNs );
     defineBuiltin( blsNsScope, "g1Compress",    IRNativeTag.bls12_381_G1_compress,      new TirFuncT([ g1_t ], bytes_t), blsNs );
     defineBuiltin( blsNsScope, "g1Uncompress",  IRNativeTag.bls12_381_G1_uncompress,    new TirFuncT([ bytes_t ], g1_t), blsNs );
+    // CIP-0381 multi-scalar multiplication: Σ scalars[i] · points[i]
+    defineBuiltin( blsNsScope, "g1MultiScalarMul", IRNativeTag.bls12_381_G1_multiScalarMul, new TirFuncT([ new TirListT( int_t ), new TirListT( g1_t ) ], g1_t), blsNs );
 
     defineBuiltin( blsNsScope, "g2Add",         IRNativeTag.bls12_381_G2_add,           new TirFuncT([ g2_t, g2_t ], g2_t), blsNs );
     defineBuiltin( blsNsScope, "g2Neg",         IRNativeTag.bls12_381_G2_neg,           new TirFuncT([ g2_t ], g2_t), blsNs );
@@ -272,6 +274,7 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( blsNsScope, "g2HashToGroup", IRNativeTag.bls12_381_G2_hashToGroup,   new TirFuncT([ bytes_t, bytes_t ], g2_t), blsNs );
     defineBuiltin( blsNsScope, "g2Compress",    IRNativeTag.bls12_381_G2_compress,      new TirFuncT([ g2_t ], bytes_t), blsNs );
     defineBuiltin( blsNsScope, "g2Uncompress",  IRNativeTag.bls12_381_G2_uncompress,    new TirFuncT([ bytes_t ], g2_t), blsNs );
+    defineBuiltin( blsNsScope, "g2MultiScalarMul", IRNativeTag.bls12_381_G2_multiScalarMul, new TirFuncT([ new TirListT( int_t ), new TirListT( g2_t ) ], g2_t), blsNs );
 
     defineBuiltin( blsNsScope, "millerLoop",    IRNativeTag.bls12_381_millerLoop,       new TirFuncT([ g1_t, g2_t ], ml_t), blsNs );
     defineBuiltin( blsNsScope, "mulMlResult",   IRNativeTag.bls12_381_mulMlResult,      new TirFuncT([ ml_t, ml_t ], ml_t), blsNs );

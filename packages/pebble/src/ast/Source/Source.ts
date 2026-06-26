@@ -62,7 +62,12 @@ export class Source {
 
     /** Determines the line number at the specified position. Starts at `1`. */
     lineAt(pos: number): number {
-        if(pos < 0 || pos >= 0x7fffffff) throw  new Error("pos out of range");
+        // Synthetic / internal nodes carry mock ranges (`SourceRange.mock` uses
+        // -1) and some positions can point past the end of the text. Clamp
+        // instead of throwing, otherwise printing a single diagnostic on such a
+        // node crashes the whole diagnostic pass and hides every later error.
+        if( pos < 0 ) pos = 0;
+        if( pos >= 0x7fffffff ) pos = Math.max( 0, this.text.length );
         let lineCache = this.lineCache;
         if (!lineCache) {
             this.lineCache = lineCache = [0];

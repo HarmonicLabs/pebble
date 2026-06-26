@@ -4,6 +4,8 @@ import { TirLessThanEqualExpr } from "../../../../tir/expressions/binary/TirBina
 import { TirAliasType } from "../../../../tir/types/TirAliasType";
 import { TirType } from "../../../../tir/types/TirType";
 import { canAssignTo } from "../../../../tir/types/utils/canAssignTo";
+import { getUnaliased } from "../../../../tir/types/utils/getUnaliased";
+import { TirValueT } from "../../../../tir/types/TirNativeType/native/value";
 import { normalizeEnumToInt } from "../../../../tir/types/utils/normalizeEnumToInt";
 import { AstCompilationCtx } from "../../../AstCompilationCtx";
 import { int_t, bytes_t } from "../../../../tir/program/stdScope/stdScope";
@@ -19,7 +21,8 @@ export function _compileLessThanEqualExpr(
     if( !left ) return undefined;
 
     if(
-        !canAssignTo( left.type, int_t )
+        !( getUnaliased( left.type ) instanceof TirValueT )
+        && !canAssignTo( left.type, int_t )
         && !canAssignTo( left.type, bytes_t )
     ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,

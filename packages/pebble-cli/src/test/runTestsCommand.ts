@@ -75,6 +75,22 @@ export async function runTestsCommand(
                 propertyIterations,
                 seed,
             });
+            // A file that fails to compile yields NO test descriptors, so
+            // `test()` returns `[]` without throwing. Previously that made the
+            // compile error vanish and the run report "0 total". Surface the
+            // compile diagnostics instead. (Errors render as `ERROR ...`.)
+            const errorDiags = compiler.diagnostics.filter(
+                d => String( d ).startsWith( "ERROR" )
+            );
+            if( errorDiags.length > 0 )
+            {
+                process.stderr.write(
+                    `compile error in ${path.relative( root, file )}:\n`
+                );
+                for( const d of errorDiags )
+                    process.stderr.write( "  " + String( d ) + "\n" );
+                process.exitCode = 1;
+            }
             if( results.length > 0 ) resultsByFile.set( file, results );
         } catch ( err ) {
             process.stderr.write(

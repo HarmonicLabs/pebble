@@ -98,7 +98,11 @@ export function determineReassignedVariablesAndReturn(
     stmt: TirStmt 
 ): ReassignedVariablesAndReturn
 {
-    const originalStmtDeps = stmt.deps();
+    // `keepSortedStrArrInplace` (used below) requires BOTH inputs sorted;
+    // `stmt.deps()` is NOT sorted, so sort a copy here. Without this, reassigned
+    // variables get spuriously dropped from the threaded loop/branch state —
+    // e.g. a `for` loop reassigning two accumulators would freeze all but one.
+    const originalStmtDeps = stmt.deps().slice().sort();
     const stack: TirStmt[] = [ stmt ];
 
     const reassignedSet: Set<string> = new Set();
@@ -172,7 +176,11 @@ export function determineReassignedVariablesAndFlowInfos(
     stmt: TirStmt 
 ): ReassignedVariablesAndFlowInfos
 {
-    const originalStmtDeps = stmt.deps();
+    // `keepSortedStrArrInplace` (used below) requires BOTH inputs sorted;
+    // `stmt.deps()` is NOT sorted, so sort a copy here. Without this, reassigned
+    // variables get spuriously dropped from the threaded loop/branch state —
+    // e.g. a `for` loop reassigning two accumulators would freeze all but one.
+    const originalStmtDeps = stmt.deps().slice().sort();
     const stack: TirStmt[] = [ stmt ];
 
     const reassignedSet: Set<string> = new Set();

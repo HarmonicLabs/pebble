@@ -52,6 +52,30 @@ export const hoisted_not = new IRHoisted(
 );
 hoisted_not.hash;
 
+// boolean equality: `a == b`  ≡  `if a then b else (not b)`
+export const hoisted_equalBoolean = new IRHoisted(
+    (() => {
+        const a = Symbol("a");
+        const b = Symbol("b");
+        return new IRFunc(
+            [ a, b ],
+            _ir_apps(
+                IRNative.strictIfThenElse,
+                new IRVar( a ),
+                new IRVar( b ),
+                // not b
+                _ir_apps(
+                    IRNative.strictIfThenElse,
+                    new IRVar( b ),
+                    IRConst.bool( false ),
+                    IRConst.bool( true )
+                )
+            )
+        );
+    })()
+);
+hoisted_equalBoolean.hash;
+
 export const hoisted_incr = new IRHoisted(
     new IRApp( IRNative.addInteger, IRConst.int( 1 ) )
 );
@@ -920,7 +944,7 @@ export function nativeToIR( native: IRNative ): IRTerm
         case IRNativeTag._increment: return hoisted_addOne.clone();
         case IRNativeTag._decrement: return hoisted_subOne.clone();
         // case IRNativeTag._bytesToIntBE: ;
-        // case IRNativeTag._equalBoolean: ;
+        case IRNativeTag._equalBoolean: return hoisted_equalBoolean.clone();
         // case IRNativeTag._equalPairData: ;
         case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         case IRNativeTag._negateInt: return hoisted_negateInteger.clone();

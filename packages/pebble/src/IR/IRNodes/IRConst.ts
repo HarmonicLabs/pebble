@@ -421,6 +421,10 @@ export function tirTypeToUplcType( t: TirType ): ConstType
 
     if( t instanceof TirValueT ) return constT.value;
 
+    if( t instanceof TirBlsG1T ) return constT.bls12_381_G1_element;
+    if( t instanceof TirBlsG2T ) return constT.bls12_381_G2_element;
+    if( t instanceof TirMlResultT ) return constT.bls12_381_MlResult;
+
     if(
         t instanceof TirDataT
         || t instanceof TirDataOptT
@@ -439,9 +443,6 @@ export function tirTypeToUplcType( t: TirType ): ConstType
         || t instanceof TirSopOptT
         || t instanceof TirSoPStructType
         || t instanceof TirTypeParam
-        || t instanceof TirBlsG1T
-        || t instanceof TirBlsG2T
-        || t instanceof TirMlResultT
     ) throw new Error("invalid uplc const type");
 
     const tsEnsureExsaustiveCheck: never = t;

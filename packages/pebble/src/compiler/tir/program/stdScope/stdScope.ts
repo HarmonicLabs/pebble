@@ -62,6 +62,8 @@ export function populateStdScope( program: TypedProgram ): void
 
     _defineStdUnambigous( void_t );
     _defineStdUnambigous( bool_t );
+    // `bool` is a common spelling; accept it as an alias for `boolean`.
+    stdScope.defineUnambigousType( "bool", bool_t.toTirTypeKey(), true, new Map() );
     _defineStdUnambigous( int_t );
     _defineStdUnambigous( bytes_t );
     _defineStdUnambigous( string_t );

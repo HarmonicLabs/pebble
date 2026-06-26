@@ -2,6 +2,49 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.3.3
+
+- **Relational operators on `Value`.** `<`, `<=`, `>`, `>=` now work on the
+  native `Value` type (previously rejected as "not assignable to int"), lowering
+  to the `valueContains` builtin over the value **partial** order:
+  `a <= b` → `valueContains(b,a)`, `a >= b` → `valueContains(a,b)`,
+  `a < b` → `valueContains(a,b) ? false : valueContains(b,a)`, and `>` the
+  mirror. Strict `<`/`>` are real partial-order comparisons (incomparable values
+  are false in both directions), not `!(>=)`. (`==` `===` `!=` `!==` and `+`
+  `-` / unary `-` were already supported.)
+
+- **Loops no longer drop reassigned accumulators (silent miscompilation).** The
+  variables threaded through a loop are `reassigned ∩ stmt.deps()`, filtered with
+  `keepSortedStrArrInplace` — which needs both inputs sorted, but `stmt.deps()`
+  was unsorted, so accumulators were spuriously dropped and frozen at their
+  initial value (wrong result, no diagnostic). Sorting the deps fixes it. Covers
+  both reported cases: a loop reassigning two-plus accumulators (only one
+  threaded), and a loop whose single accumulator update binds the helper-call
+  args to inner `let`s (accumulator frozen).
+
+- **`boolean == boolean` now compiles.** Boolean equality lowered to the
+  `_equalBoolean` native, which had no implementation ("unknown (negative)
+  native … `_equalBoolean`"). Implemented as `if a then b else !b`.
+
+- **`bool` is accepted as an alias for `boolean`.** Previously `bool` →
+  `'bool' is not defined`.
+
+- **`std.crypto.bls12_381.g1MultiScalarMul` / `g2MultiScalarMul` (CIP-381).**
+  The MSM builtins are now surfaced in the stdlib (`(List<int>, List<G1|G2>)
+  -> G1|G2`); `List<G1>`/`List<G2>` are now valid UPLC list element types. (The
+  bundled JS test evaluator has an unrelated `instanceof` bug in its MSM point
+  check, so the value is verified to compile, not evaluated in-process.)
+
+- **Diagnostic printer no longer crashes on synthetic ranges.** `Source.lineAt`
+  threw "pos out of range" for mock/internal ranges (which use `-1`), aborting
+  the whole diagnostic pass and hiding every later error. Out-of-range positions
+  are now clamped.
+
+- **`pebble test` surfaces compile errors instead of reporting "0 total".** A
+  test file that fails to compile produces no test descriptors, so `test()`
+  returned `[]` without throwing and the CLI dropped the error. The CLI now
+  prints the compile diagnostics (and exits non-zero).
+
 ## v0.3.2
 
 Bug fixes (all reported against `0.3.x`, each now covered by a regression test

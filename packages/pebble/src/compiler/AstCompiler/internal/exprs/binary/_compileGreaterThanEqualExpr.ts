@@ -4,6 +4,8 @@ import { TirGreaterThanEqualExpr } from "../../../../tir/expressions/binary/TirB
 import { TirAliasType } from "../../../../tir/types/TirAliasType";
 import { TirType } from "../../../../tir/types/TirType";
 import { canAssignTo } from "../../../../tir/types/utils/canAssignTo";
+import { getUnaliased } from "../../../../tir/types/utils/getUnaliased";
+import { TirValueT } from "../../../../tir/types/TirNativeType/native/value";
 import { normalizeEnumToInt } from "../../../../tir/types/utils/normalizeEnumToInt";
 import { AstCompilationCtx } from "../../../AstCompilationCtx";
 import { _compileExpr } from "../_compileExpr";
@@ -22,7 +24,8 @@ export function _compileGreaterThanEqualExpr(
     if( !left ) return undefined;
 
     if(
-        !canAssignTo( left.type, int_t )
+        !( getUnaliased( left.type ) instanceof TirValueT )
+        && !canAssignTo( left.type, int_t )
         && !canAssignTo( left.type, bytes_t )
     )
     return ctx.error(

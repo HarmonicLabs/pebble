@@ -18,6 +18,45 @@ import { IRConst } from "../../../../IR/IRNodes/IRConst";
 import { compileIRToUPLC } from "../../../../IR/toUPLC/compileIRToUPLC";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { _ir_lazyIfThenElse } from "../../../../IR/tree_utils/_ir_lazyIfThenElse";
+import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
+import { IRVar } from "../../../../IR/IRNodes/IRVar";
+
+/**
+ * Lowering for Value relational operators, in terms of the `valueContains`
+ * builtin (`valueContains(x, y)` ⟺ `x ≥ y`, componentwise):
+ *
+ *   a <= b   →  valueContains(b, a)
+ *   a >= b   →  valueContains(a, b)
+ *   a <  b   →  valueContains(a, b) ? false : valueContains(b, a)
+ *   a >  b   →  valueContains(b, a) ? false : valueContains(a, b)
+ *
+ * `<` / `>` reference each operand twice, so they are bound once via a lambda
+ * to avoid re-evaluating the operand subterms.
+ */
+function _ir_valueContains( geIR: IRTerm, leIR: IRTerm ): IRTerm
+{
+    // valueContains(ge, le) ⟺ ge ≥ le
+    return _ir_apps( IRNative.valueContains, geIR, leIR );
+}
+/** strict Value `lo < hi` */
+function _ir_valueStrictLess( loIR: IRTerm, hiIR: IRTerm ): IRTerm
+{
+    const lo = Symbol("vlt_lo");
+    const hi = Symbol("vlt_hi");
+    // (λ lo hi. valueContains(lo, hi) ? false : valueContains(hi, lo)) loIR hiIR
+    return _ir_apps(
+        new IRFunc(
+            [ lo, hi ],
+            _ir_lazyIfThenElse(
+                _ir_valueContains( new IRVar( lo ), new IRVar( hi ) ),
+                IRConst.bool( false ),
+                _ir_valueContains( new IRVar( hi ), new IRVar( lo ) )
+            )
+        ),
+        loIR,
+        hiIR
+    );
+}
 
 
 export type TirBinaryExpr
@@ -158,6 +197,9 @@ export class TirLessThanExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const type = getUnaliased( this.left.type );
+        // Value: a < b  →  valueContains(a,b) ? false : valueContains(b,a)
+        if( type instanceof TirValueT )
+            return _ir_valueStrictLess( this.left.toIR( ctx ), this.right.toIR( ctx ) );
         const irFunc = (
             (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanInteger :
             type instanceof TirBytesT ? IRNative.lessThanByteString :
@@ -214,6 +256,9 @@ export class TirGreaterThanExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const type = getUnaliased( this.left.type );
+        // Value: a > b  ≡  b < a
+        if( type instanceof TirValueT )
+            return _ir_valueStrictLess( this.right.toIR( ctx ), this.left.toIR( ctx ) );
         const irFunc = (
             (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanInteger :
             type instanceof TirBytesT ? IRNative.lessThanByteString :
@@ -271,6 +316,9 @@ export class TirLessThanEqualExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const type = getUnaliased( this.left.type );
+        // Value: a <= b  →  valueContains(b, a)   (b ≥ a)
+        if( type instanceof TirValueT )
+            return _ir_valueContains( this.right.toIR( ctx ), this.left.toIR( ctx ) );
         const irFunc = (
             (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanEqualInteger :
             type instanceof TirBytesT ? IRNative.lessThanEqualsByteString :
@@ -327,6 +375,9 @@ export class TirGreaterThanEqualExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const type = getUnaliased( this.left.type );
+        // Value: a >= b  →  valueContains(a, b)   (a ≥ b)
+        if( type instanceof TirValueT )
+            return _ir_valueContains( this.left.toIR( ctx ), this.right.toIR( ctx ) );
         const irFunc = (
             (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.lessThanEqualInteger :
             type instanceof TirBytesT ? IRNative.lessThanEqualsByteString :
