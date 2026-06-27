@@ -46,8 +46,31 @@ export class ToUplcCtx
 
     getVarAccessDbn( sym: symbol ): number
     {
-        const declDbn = this.getVarDeclDbn( sym );
-        return this.dbn - declDbn;
+        // Resolve the de Bruijn index LEXICALLY, against this access's own
+        // scope chain — i.e. the number of binders between the access and the
+        // NEAREST (innermost) enclosing binder of `sym`.
+        //
+        // The previous implementation looked `sym` up in a single tree-wide
+        // `ctxMap` (last writer wins). That is incorrect whenever the same
+        // binder symbol appears in sibling scopes — which happens routinely
+        // because cloned IR reuses its binder symbols (e.g. the shared
+        // `const { tx } = context` destructuring duplicated across a
+        // contract's purpose-match cases). An access in one branch would then
+        // resolve against another branch's binder, yielding a wrong and
+        // sometimes NEGATIVE index ("invalid deBruijn index").
+        let offset = 0;
+        let ctx: ToUplcCtx | undefined = this;
+        while( ctx )
+        {
+            const vars = ctx._variables;
+            for( let i = vars.length - 1; i >= 0; i-- )
+            {
+                if( vars[i] === sym ) return offset + ( vars.length - 1 - i );
+            }
+            offset += vars.length;
+            ctx = ctx.parent;
+        }
+        throw new Error("Variable not found in scope chain: " + String( sym.description ));
     }
 
     toJson(): any

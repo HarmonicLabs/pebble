@@ -33,5 +33,8 @@
     "tsc-alias": "^1.7.1",
     "typescript": "^4.6.3"
   },
-  "funding": "https://github.com/sponsors/HarmonicLabs"
+  "funding": "https://github.com/sponsors/HarmonicLabs",
+  "dependencies": {
+    "@harmoniclabs/pebble-cli": "^0.3.3"
+  }
 }

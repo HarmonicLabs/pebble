@@ -2,6 +2,13 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.3.4
+
+- **Fixed `invalid deBruijn index` crash on multi-purpose contracts.** A contract
+  with a single `spend` doing indexed UTxO access (`tx.inputs[i]` / `tx.outputs[j]`)
+  alongside two or more `mint` methods failed to compile. Such contracts now
+  compile correctly.
+
 ## v0.3.3
 
 - **Relational operators on `Value`.** `<`, `<=`, `>`, `>=` now work on the
