@@ -737,7 +737,7 @@ function _getMatchedRedeemerBlockStatements(
                 const realVarName = contextVarsMapping[ fieldIdentifier.text ];
                 if( !realVarName && typeof realVarName !== "string" ) {
                     return compiler.error(
-                        DiagnosticCode._0_is_not_aviable_in_this_contract_method_context,
+                        DiagnosticCode._0_is_not_available_in_this_contract_method_context,
                         fieldIdentifier.range, fieldIdentifier.text
                     );
                 }

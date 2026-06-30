@@ -47,6 +47,54 @@ class AstCompiler {
 7. **Contract Compilation** — Process contract declarations and methods
 8. **TypedProgram Assembly** — Register all compiled definitions in the output program
 
+## Contract Compilation — the on-chain ABI
+
+**File:** `src/compiler/AstCompiler/internal/_deriveContractBody/_deriveContractBody.ts`
+
+A `contract` is lowered to a single validator function
+`func main( ...params, ctx: ScriptContext ): void`, which destructures
+`{ tx, redeemer, purpose } = ctx` and dispatches on `purpose` (Spend / Mint /
+Withdraw / …). How the three on-chain inputs — **parameters**, **redeemer**,
+**datum** — map to Pebble source is fixed and worth stating explicitly, because
+the conventions differ and have surprised users:
+
+### Parameters (`param x: T;`) — native constants, no decoding
+
+Contract parameters are **applied constants**: they are applied to the script
+directly as their declared (native) type, with **no Plutus-Data decoding**.
+- A scalar param (`param owner: bytes`) is applied as a raw bytestring const —
+  **not** `bData(owner)`.
+- A struct param (`param ref: TxOutRef`) is applied as its data form, simply
+  because a Pebble struct's native representation already *is* `data`.
+
+`this.<name>` is sugar for reading a parameter; bare `this` is an error. So
+applying a scalar parameter as `data` (`bData(...)`) is wrong and fails at
+runtime — the value must be the native type.
+
+### Redeemer — a method-tagged ADT (`Constr <method> [params…]`)
+
+The redeemer for a purpose is a **sum type with one constructor per method of
+that purpose**, the constructor fields being that method's parameters. This is
+uniform regardless of method count:
+
+```
+spend edit( r: data )                  -> redeemer = Constr 0 [ r ]
+spend edit( r ) ; spend close( n )     -> redeemer = Constr 0 [ r ] | Constr 1 [ n ]
+```
+
+So **even a single `spend edit( redeemer )` expects `Constr 0 [ <redeemer> ]`**
+on-chain, and binds the method's `redeemer` parameter to field 0 — it does NOT
+bind it to the raw, unwrapped redeemer. Passing the unwrapped value fails with
+"Expected the Constr constructor". This wrapping is intentional: an existing
+method's encoding stays stable when another method is added later.
+
+### Datum (spend only) — raw, not method-tagged
+
+The datum comes from the `Spend` purpose (`optionalDatum`) and is the **raw**
+datum value — it is *not* wrapped in a method selector (a datum is not
+method-specific). Hence the asymmetry: a spend's datum is cast directly
+(`datum as MyDatum`) while its redeemer carries the `Constr <method>` selector.
+
 ## Compilation Context
 
 **File:** `src/compiler/AstCompiler/AstCompilationCtx.ts`

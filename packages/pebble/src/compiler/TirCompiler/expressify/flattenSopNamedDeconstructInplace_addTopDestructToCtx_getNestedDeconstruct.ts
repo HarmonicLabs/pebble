@@ -15,7 +15,22 @@ import { isSingleConstrStruct } from "./isSingleConstrStruct";
  */
 export function flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
     decl: TirNamedDeconstructVarDecl | TirSingleDeconstructVarDecl,
-    ctx: ExpressifyCtx
+    ctx: ExpressifyCtx,
+    /**
+     * The field-name → binding rename below is a REMAP device used by
+     * synthesized destructures (e.g. loop state `State{ a: §a_fresh }`, where
+     * the original body references the source name `a` and must be redirected
+     * to the fresh threaded binding). For those, key the rename by the field
+     * name (`fName`).
+     *
+     * A USER case-arm / destructure pattern (`P{ field: alias }`) is different:
+     * it INTRODUCES a fresh binding the body references by its own name
+     * (`alias` = `varDecl.name`); the field name is NOT a name the body uses.
+     * Keying by `fName` there shadows any outer variable that happens to share
+     * the struct field's name (a silent miscompilation). Such callers pass
+     * `false` so the rename is keyed by the binding's own name instead.
+     */
+    fieldNameIsBodyReference: boolean = true,
 ): TirVarDecl[]
 {
     const extracted: TirVarDecl[] = [];
@@ -29,7 +44,10 @@ export function flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedD
                 varDecl.name
             );
             ctx.introduceFuncParams([ varDecl ]);
-            ctx.setNewVariableName( fName, varDecl.name ); // added to fix reassigned variables on non-terminating statements
+            // register the rename so reassigned bindings thread on
+            // non-terminating statements; key by the name the body references
+            // (see `fieldNameIsBodyReference`).
+            ctx.setNewVariableName( fieldNameIsBodyReference ? fName : varDecl.name, varDecl.name );
             if( isSingleConstrStruct( varDecl.type ) )
             {
                 const structType = getUnaliased( varDecl.type ) as (TirDataStructType | TirSoPStructType);

@@ -266,6 +266,9 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( blsNsScope, "g1Uncompress",  IRNativeTag.bls12_381_G1_uncompress,    new TirFuncT([ bytes_t ], g1_t), blsNs );
     // CIP-0381 multi-scalar multiplication: Σ scalars[i] · points[i]
     defineBuiltin( blsNsScope, "g1MultiScalarMul", IRNativeTag.bls12_381_G1_multiScalarMul, new TirFuncT([ new TirListT( int_t ), new TirListT( g1_t ) ], g1_t), blsNs );
+    // `multiScalarMul` is a convenience alias for the G1 variant (the usual
+    // group for commitments); the explicit `g1`/`g2` names remain available.
+    defineBuiltin( blsNsScope, "multiScalarMul",   IRNativeTag.bls12_381_G1_multiScalarMul, new TirFuncT([ new TirListT( int_t ), new TirListT( g1_t ) ], g1_t), blsNs );
 
     defineBuiltin( blsNsScope, "g2Add",         IRNativeTag.bls12_381_G2_add,           new TirFuncT([ g2_t, g2_t ], g2_t), blsNs );
     defineBuiltin( blsNsScope, "g2Neg",         IRNativeTag.bls12_381_G2_neg,           new TirFuncT([ g2_t ], g2_t), blsNs );

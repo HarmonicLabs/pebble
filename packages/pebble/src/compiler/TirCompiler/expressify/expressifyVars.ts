@@ -193,6 +193,11 @@ export function expressifyVars(
             const branchBodyStmts: TirStmt[] = flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
                 pattern,
                 branchCtx,
+                // user case-arm pattern: the body references each binding by its
+                // OWN name (`is P{ field: alias } => …` uses `alias`), so the
+                // rename must NOT be keyed by the struct field name (which could
+                // shadow an outer variable of that name).
+                false,
             );
             branchBodyStmts.push(
                 new TirReturnStmt( c.body, c.body.range )

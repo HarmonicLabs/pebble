@@ -2,6 +2,23 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.3.5
+
+- **`case`-arm field aliases no longer shadow same-named outer variables
+  (silent miscompilation).** Deconstructing `is P{ field: alias } => …`
+  registered the binding under the struct FIELD name instead of `alias`, so a
+  parameter/variable in scope that happened to share the field's name read the
+  field's value instead of its own. The rename is now keyed by the name the body actually references.
+
+- **`pebble export --function-name <fn> --entry <file>` works without a config.**
+  It previously threw `… config is missing "compilerVersion"` when no
+  `pebble.config.json` was present.
+  Same fix applied to `pebble compile`.
+
+- **`std.crypto.bls12_381.multiScalarMul` (CIP-381) is now available** as a
+  convenience alias for the G1 variant (`g1MultiScalarMul` / `g2MultiScalarMul`
+  remain).
+
 ## v0.3.4
 
 - **Fixed `invalid deBruijn index` crash on multi-purpose contracts.** A contract

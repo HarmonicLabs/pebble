@@ -100,7 +100,7 @@ export enum DiagnosticCode {
     _context_can_only_be_destructured_in_a_constant_declaration = 292,
     _context_can_only_be_accessed_in_a_contract_method = 293,
     _this_in_a_contract_context_can_only_be_used_to_read_parameters_in_a_contract_method = 293,
-    _0_is_not_aviable_in_this_contract_method_context = 294,
+    _0_is_not_available_in_this_contract_method_context = 294,
     _context_can_only_be_destructured_as_an_unnamed_object = 295,
     _0_is_not_a_contract_parameter = 296,
     Importing_the_table_disables_some_indirect_call_optimizations = 901,
@@ -394,7 +394,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 292: return "`context` can only be destructured in a constant declaration.";
         case 293: return "`context` can only be accessed in a contract method.";
         case 293: return "`this`, in a contract context, can only be used to read parameters in a contract method.";
-        case 294: return "`{0}` is not aviable in this contract method `context`.";
+        case 294: return "`{0}` is not available in this contract method `context`.";
         case 295: return "`context` can only be destructured as an unnamed object.";
         case 296: return "'{0}' is not a contract parameter.";
         case 901: return "Importing the table disables some indirect call optimizations.";

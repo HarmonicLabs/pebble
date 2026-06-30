@@ -1,4 +1,4 @@
-import { CompilerOptions, defaultOptions, productionOptions } from "@harmoniclabs/pebble";
+import { CompilerOptions, defaultOptions, productionOptions, COMPILER_VERSION } from "@harmoniclabs/pebble";
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { normalizeRoot, isRecord } from "../utils/miscellaneous";
@@ -40,6 +40,13 @@ export function completeCompileOptions(flags: CliCompileFlags): CliCompileOption
         } catch {
             // ignore malformed config; proceed with flags/defaults
         }
+    }
+
+    // Allow `pebble compile --entry <file>` with no `pebble.config.json`:
+    // default the required `compilerVersion` to THIS compiler's version when no
+    // config supplies one (an explicit config range still wins and is checked).
+    if( typeof config?.compilerVersion !== "string" || config.compilerVersion.length === 0 ) {
+        config = { ...config, compilerVersion: COMPILER_VERSION } as CompilerOptions;
     }
 
     const cfgEntry = typeof config?.entry === "string" ? String(config!.entry) : undefined;

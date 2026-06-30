@@ -98,7 +98,7 @@
   "`context` can only be destructured in a constant declaration.": 292,
   "`context` can only be accessed in a contract method.": 293, 
   "`this`, in a contract context, can only be used to read parameters in a contract method.": 293, 
-  "`{0}` is not aviable in this contract method `context`.": 294, 
+  "`{0}` is not available in this contract method `context`.": 294, 
   "`context` can only be destructured as an unnamed object.": 295,
   "'{0}' is not a contract parameter.": 296,
   
