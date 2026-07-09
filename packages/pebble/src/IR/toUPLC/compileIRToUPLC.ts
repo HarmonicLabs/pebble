@@ -24,7 +24,7 @@ import { introduceCaseForDualHeadTailAndReturnRoot } from "./subRoutines/introdu
 import { inlineSingleUseLetBindingsAndReturnRoot } from "./subRoutines/inlineSingleUseLetBindingsAndReturnRoot";
 import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
-import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
+import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusedVarsAndReturnRoot/removeUnusedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
 import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/ensureProperlyForcedBuiltinsAndReturnRoot";
 
