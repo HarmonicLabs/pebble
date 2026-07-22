@@ -384,8 +384,12 @@ export class ExpressifyCtx
         const assertions: TirAssertStmt[] = [];
         const nestedDeconstructs: TirVarDecl[] = [];
 
-        if( structType.constructors.length > 1 )
-        assertions.push( 
+        // the runtime tag is the constructor's index in the ORIGINAL
+        // (un-narrowed) type — for narrowed types (e.g. `Contract.State`,
+        // `Struct.Constructor`) the local index would be wrong, and the
+        // tag must be checked even when only one LOCAL constructor exists.
+        if( structType.constructors.length > 1 || structType.isNarrowed() )
+        assertions.push(
             new TirAssertStmt(
                 new TirEqualExpr(
                     new TirCallExpr(
@@ -395,7 +399,7 @@ export class ExpressifyCtx
                         stmt.range
                     ),
                     new TirLitIntExpr(
-                        BigInt(constrIdx),
+                        BigInt( structType.parentCtorIdx( constrIdx ) ),
                         stmt.range
                     ),
                     stmt.range

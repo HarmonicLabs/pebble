@@ -173,7 +173,6 @@ export class AstScope
 
     defineValue( valueInfos: IVariableInfos ): boolean
     {
-        if( valueInfos.name === "§tx_3" ) console.log( "Defining variable tx3" );
         if( this._isReadonly ) return false;
 
         if(

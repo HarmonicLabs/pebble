@@ -1,4 +1,5 @@
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
+import { _compileQualifiedNamedTypeExpr } from "./_compileQualifiedNamedTypeExpr";
 import { AstVoidType, AstBooleanType, AstIntType, AstBytesType, AstNativeOptionalType, AstListType, AstLinearMapType, AstFuncType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
 import { AstTypeExpr } from "../../../../ast/nodes/types/AstTypeExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
@@ -69,6 +70,17 @@ export function _compileDataEncodedConcreteType(
     if( typeExpr instanceof AstFuncType ) return undefined; // no data encoding for function types
     if( typeExpr instanceof AstNamedTypeExpr ) // struct, aliases and respective params
     {
+        // qualified name (`Ns.Type`, `Struct.Constructor`, `Contract.State`)
+        if( typeExpr.path.length > 0 )
+        {
+            return _compileQualifiedNamedTypeExpr(
+                ctx,
+                typeExpr,
+                false, // prefer data encoding
+                ( ctx, tyExpr ) => _compileDataEncodedConcreteType( ctx, tyExpr, optionalsAsSop )
+            );
+        }
+
         // generic type parameters take precedence: `T` in a generic function
         // body resolves directly to its TirTypeParam, leaving substitution
         // to `monomorphizeGeneric` at call time.

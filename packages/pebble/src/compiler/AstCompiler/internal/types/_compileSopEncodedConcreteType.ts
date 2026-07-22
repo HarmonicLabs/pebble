@@ -1,4 +1,5 @@
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
+import { _compileQualifiedNamedTypeExpr } from "./_compileQualifiedNamedTypeExpr";
 import { AstVoidType, AstBooleanType, AstIntType, AstBytesType, AstNativeOptionalType, AstListType, AstLinearMapType, AstFuncType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
 import { AstTypeExpr } from "../../../../ast/nodes/types/AstTypeExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
@@ -66,6 +67,17 @@ export function _compileSopEncodedConcreteType(
     if( typeExpr instanceof AstFuncType ) return undefined; // no data encoding for function types
     if( typeExpr instanceof AstNamedTypeExpr ) // struct, aliases and respective params
     {
+        // qualified name (`Ns.Type`, `Struct.Constructor`, `Contract.State`)
+        if( typeExpr.path.length > 0 )
+        {
+            return _compileQualifiedNamedTypeExpr(
+                ctx,
+                typeExpr,
+                true, // prefer sop encoding
+                _compileSopEncodedConcreteType
+            );
+        }
+
         // generic type parameters take precedence over named-type lookup
         const typeParam = ctx.scope.resolveTypeParam( typeExpr.name.text );
         if( typeParam ) return typeParam;

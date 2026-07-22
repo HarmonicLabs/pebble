@@ -344,7 +344,11 @@ export function getBranchStmtReturnType(
         return new TirVariableAccessExpr(
             {
                 variableInfos: {
-                    name: varName,
+                    // `varExpr.name`, NOT `varName`: when the variable was threaded
+                    // through a previous non-terminating statement's continuation
+                    // pattern, the current binding is a func param with a fresh
+                    // SSA name; the original name is not bound at IR level.
+                    name: varExpr.name,
                     type: varExpr.type,
                     isConstant: false
                 },

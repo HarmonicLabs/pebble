@@ -57,6 +57,7 @@ import { SourceTypeMap, CheckResult } from "../SourceTypeMap";
 import { isIdentifier } from "../../utils/text";
 import { TestStmt } from "../../ast/nodes/statements/TestStmt";
 import { NamespaceDecl, NamespaceMember } from "../../ast/nodes/statements/declarations/NamespaceDecl";
+import { TirSimpleVarDecl } from "../tir/statements/TirVarDecl/TirSimpleVarDecl";
 
 export interface AstTypeDefCompilationResult {
     sop: TirType | undefined,
@@ -681,7 +682,7 @@ export class AstCompiler extends DiagnosticEmitter
     ): void
     {
         const astName = decl.name.text;
-        // const tirConstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + astName + "_" + srcUid;
+        const tirConstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + astName + "_" + srcUid;
         const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
 
         const tirVarDecl = _compileSimpleVarDecl(
@@ -695,14 +696,51 @@ export class AstCompiler extends DiagnosticEmitter
             tirVarDecl.range,
         );
 
-        if( this.program.constants.has( astName ) ) {
-            throw new Error("not_implemented::AstCompiler::_collectTopLevelConst::const_redefinition_check");
-        }
-
-        this.program.constants.set(
-            astName,
-            tirVarDecl
+        // `program.constants` is a single global map; key by the file-unique
+        // tir name (like functions do) so same-named consts in different
+        // modules never collide. The module scope keeps the source name as
+        // key but resolves to the unique name.
+        const uniqueVarDecl = new TirSimpleVarDecl(
+            tirConstName,
+            tirVarDecl.type,
+            tirVarDecl.initExpr,
+            tirVarDecl.isConst,
+            tirVarDecl.range,
+            tirVarDecl.typeAnnotationRange,
+            tirVarDecl.sourceName ?? astName
         );
+
+        const scopeInfos = topLevelScope.variables.get( astName );
+        if( scopeInfos ) scopeInfos.name = tirConstName;
+
+        // same-module redefinition is already rejected by `_compileSimpleVarDecl`
+        // (duplicate identifier in scope); this can only collide on a
+        // same-file recompilation, where the last definition wins.
+        this.program.constants.set(
+            tirConstName,
+            uniqueVarDecl
+        );
+
+        if( exportRange && srcExports )
+        {
+            if(
+                srcExports.functions.has( astName )
+                || srcExports.variables.has( astName )
+            )
+            return this.error(
+                DiagnosticCode._0_is_already_exported,
+                exportRange,
+                astName
+            );
+            // key by the source name (what importers reference); the infos
+            // carry the unique tir name so accesses resolve to the right
+            // entry of `program.constants`.
+            srcExports.variables.set( astName, {
+                name: tirConstName,
+                type: uniqueVarDecl.type,
+                isConstant: true
+            });
+        }
     }
 
     private _collectTopLevelFuncDeclSig(

@@ -51,12 +51,8 @@ function insertUniqueSortedInpalce( target: string[], elem: string, start: numbe
         else if( target[mid] > elem ) end = mid;
     }
 
-    if( start === target.length ) {
-        target.push( elem );
-        return start;
-    }
-    else {
-        target.unshift( elem );
-        return 0;
-    }
+    // binary search exhausted: the element belongs exactly at `start`
+    // (which may be `target.length`, i.e. an append)
+    target.splice( start, 0, elem );
+    return start;
 }

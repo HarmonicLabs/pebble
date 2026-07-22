@@ -1114,14 +1114,41 @@ function _exprReplaceParamsAndAssertNoLitContext(
         || expr instanceof LitFalseExpr
         || expr instanceof LitThisExpr
         || expr instanceof LitContextExpr
-        || expr instanceof LitArrExpr
-        || expr instanceof LitObjExpr
-        || expr instanceof LitNamedObjExpr
         || expr instanceof LitStrExpr
         || expr instanceof LitIntExpr
         || expr instanceof LitHexBytesExpr
         || expr instanceof LitFailExpr
     ) return expr;
+    if( expr instanceof LitArrExpr ) {
+        for( let i = 0; i < expr.elems.length; i++ ) {
+            const newElem = _exprReplaceParamsAndAssertNoLitContext(
+                compiler,
+                expr.elems[i],
+                paramsInternalNamesMap,
+                renamedVariables
+            );
+            if( !newElem ) return undefined;
+            expr.elems[i] = newElem;
+        }
+        return expr;
+    }
+    if(
+        expr instanceof LitObjExpr
+        || expr instanceof LitNamedObjExpr
+    ) {
+        // only the field *values* are expressions; field names are not variables
+        for( let i = 0; i < expr.values.length; i++ ) {
+            const newValue = _exprReplaceParamsAndAssertNoLitContext(
+                compiler,
+                expr.values[i],
+                paramsInternalNamesMap,
+                renamedVariables
+            );
+            if( !newValue ) return undefined;
+            expr.values[i] = newValue;
+        }
+        return expr;
+    }
     if( isBinaryExpr( expr ) ) {
         const newLeft = _exprReplaceParamsAndAssertNoLitContext(
             compiler,

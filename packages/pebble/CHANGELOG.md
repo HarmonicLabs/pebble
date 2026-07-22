@@ -2,6 +2,72 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.3.6
+
+Bug fixes (all reported against `0.3.5` from the `the-cardano-masterpiece`
+project, each covered by a regression test under
+`src/compiler/__tests__/compiler.masterpieceBugs.0_3_5*.test.ts`):
+
+- **Multi-use functions are no longer inlined at every call site (script size
+  multiplied).** Each call site converted its own copy of the function body to
+  IR with fresh symbols; since IR hashing is symbol-identity based, the copies
+  hashed differently and the hash-based sharing pass treated each as
+  single-use, inlining a full copy of the body per call. The conversion is now
+  memoized per function (symbol-preserving clones per site), so all call sites
+  hash identically and the body is bound once. Measured on real contracts:
+  17704 → 8107 and 7458 → 4292 bytes, with no source changes.
+
+- **Qualified type names (`Ns.Type`, `Struct.Constructor`, `Contract.State`).**
+  The type parser stopped at the first identifier, so `od as SC.First` parsed
+  as `(od as SC).First` (ERROR 2339) and state/struct variants could not be
+  named as types at all. Dotted type paths now parse (TS-style; type args bind
+  to the last segment) and resolve as namespace members or as the struct/state
+  union NARROWED to the named constructor — decoding checks the constructor's
+  tag in the parent type, so casting the wrong variant fails at runtime
+  instead of silently mis-decoding.
+
+- **Context-destructured variables resolve inside nested struct/array
+  literals.** After `const { tx, policy } = context;`, using `policy` as a
+  field value of a (nested) struct literal failed with `'policy' is not
+  defined` — the contract-body renamer did not recurse into container-literal
+  elements/field values.
+
+- **`let` accumulator assigned in `if` branches no longer crashes IR
+  generation** (`variable 'k' is missing in […]`). When a reassigned variable
+  was threaded through a previous branch's continuation under a fresh SSA
+  name, the next branch's initial state still referenced the original name.
+
+- **"only closed terms can be hoisted" crash with two-plus validators.**
+  Case-arm field bindings (registered under raw method-parameter names)
+  shadowed same-named parameters of hoisted helper functions across the whole
+  scope chain, capturing the enclosing match's binders inside the hoisted
+  body. Scope lookup is now innermost-out, and hoisted bodies convert in a
+  fresh root scope. Covers both reported shapes: a struct-param function with
+  a second `mint`, and a builtin-typed helper called from two state `spend`
+  methods.
+
+- **`export const` works across modules, and same-named consts in different
+  modules no longer collide** (previously `not_implemented::…::const_redefinition_check`).
+  Top-level constants are now keyed by a file-unique name (like functions) and
+  registered in the module's exports.
+
+- **`LinearMap<K, V>` is accepted in type positions** (struct fields, `type`
+  alias targets, annotations). It was only registered under its internal tir
+  key, so the source-level name never resolved outside inference. Also fixed
+  two missing-`return` fall-throughs for `List`/`LinearMap` in the type
+  parser's keyword path.
+
+- **A global const defined from another const no longer crashes when used
+  inside a free function** (`variable 'LINE_LENGTH' is missing`). Const-to-const
+  references in top-level initializers are now resolved before hoisting.
+
+- **Nested index expression with a loop variable no longer crashes**
+  (`variable 'n' not found in the context`, e.g.
+  `tx.refInputs[ idxs[n] ]` in a loop building accumulators). The sorted-array
+  merge helper used by dependency tracking inserted mid-array elements at the
+  front, corrupting `deps()` and leaking the loop variable into the threaded
+  loop state.
+
 ## v0.3.5
 
 - **`case`-arm field aliases no longer shadow same-named outer variables

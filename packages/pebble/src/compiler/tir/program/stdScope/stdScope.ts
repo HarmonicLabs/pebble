@@ -160,7 +160,21 @@ export function populateStdScope( program: TypedProgram ): void
             isGeneric: true
         }
     );
-    
+    // AST-facing name: the tir key is "list_pair_data", but user code writes
+    // `LinearMap<K, V>` in type position (struct fields, aliases, annotations)
+    stdScope.defineType(
+        "LinearMap",
+        {
+            sopTirName: linearMap_name,
+            dataTirName: linearMap_name,
+            allTirNames: new Set([
+                linearMap_name
+            ]),
+            methodsNames: new Map(),
+            isGeneric: true
+        }
+    );
+
     stdScope.readonly();
 }
 

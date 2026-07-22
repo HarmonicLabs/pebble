@@ -73,36 +73,35 @@ export class ToIRTermCtx
     }
 
     getVarAccessIR( name: string ): IRTerm | undefined {
-        // deferred accesses (lazy field extraction in case-arms etc.)
-        // shadow symbol-based lookups when present.
-        const deferred = this.getDeferredAccessFactory( name );
-        if( deferred ) return deferred();
-
-        const accessSym = this.getVarAccessSym( name );
-        if( typeof accessSym !== "symbol" ) return undefined;
-
-        // Recursive accesses must use IRSelfCall (the recursive symbol is
-        // bound by an IRRecursive, not an IRFunc — IRVar references would
-        // not find a binder during the unused-var pass). Walk the parent
-        // chain to find the ctx that owns `name`; that ctx may not be the
-        // current one when we're deep inside the recursive function's body
-        // (e.g. inside a `case` continuation that newChild'd from it).
+        // Walk the scope chain innermost-out so that the NEAREST binding
+        // wins, whether it is a deferred access (lazy field extraction in
+        // case-arms etc.) or a regular symbol binding. A deferred access
+        // only shadows symbol bindings of the same or outer scopes — an
+        // inner re-definition of the name (e.g. a function parameter of a
+        // hoisted function converted at a call site inside a case-arm)
+        // must NOT resolve to the outer arm's field extraction.
         let cur: ToIRTermCtx | undefined = this;
         while( cur )
         {
+            const deferred = cur.deferredAccess.get( name );
+            if( deferred ) return deferred();
+
             const localSym = cur.localVars.get( name );
             if( localSym !== undefined )
             {
+                // Recursive accesses must use IRSelfCall (the recursive symbol
+                // is bound by an IRRecursive, not an IRFunc — IRVar references
+                // would not find a binder during the unused-var pass).
                 if(
                     cur._firstVariableIsRecursive
                     && name === cur.localVars.keys().next().value
-                ) return new IRSelfCall( accessSym );
-                break;
+                ) return new IRSelfCall( localSym );
+                return new IRVar( localSym );
             }
             cur = cur.parent;
         }
 
-        return new IRVar( accessSym );
+        return undefined;
     }
 
     /**

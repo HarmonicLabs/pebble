@@ -2317,7 +2317,7 @@ export class Parser extends DiagnosticEmitter
                     return undefined;
                 }
 
-                new AstListType( tyArg, tn.range( startPos, tn.pos ) );
+                return new AstListType( tyArg, tn.range( startPos, tn.pos ) );
             }
             case Token.LinearMap: {
 
@@ -2353,12 +2353,28 @@ export class Parser extends DiagnosticEmitter
                     return undefined;
                 }
 
-                new AstLinearMapType( keyTy, valTy, tn.range( startPos, tn.pos ) );
+                return new AstLinearMapType( keyTy, valTy, tn.range( startPos, tn.pos ) );
             }
             case Token.Identifier: {
 
-                const name = new Identifier( tn.readIdentifier(), tn.range() );
-                
+                let name = new Identifier( tn.readIdentifier(), tn.range() );
+
+                // TS-style qualified type name (`Ns.Type`, `Struct.Constructor`);
+                // type args (if any) belong to the LAST segment
+                const path: Identifier[] = [];
+                while( tn.skip( Token.Dot ) )
+                {
+                    if( !tn.skipIdentifier() ) {
+                        canError && this.error(
+                            DiagnosticCode.Identifier_expected,
+                            tn.range()
+                        );
+                        return undefined;
+                    }
+                    path.push( name );
+                    name = new Identifier( tn.readIdentifier(), tn.range() );
+                }
+
                 const params = new Array<AstTypeExpr>();
 
                 if( tn.skip( Token.LessThan ) )
@@ -2382,7 +2398,8 @@ export class Parser extends DiagnosticEmitter
                 return new AstNamedTypeExpr(
                     name,
                     params,
-                    tn.range( startPos, tn.pos )
+                    tn.range( startPos, tn.pos ),
+                    path
                 );
             }
             default: {
