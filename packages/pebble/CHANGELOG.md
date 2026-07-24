@@ -2,6 +2,156 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.0
+
+Planned as 0.3.7; promoted to 0.4.0 for scope: cross-contract type
+access, a long list of miscompilation fixes, one breaking encoding
+change, and an optimizer campaign that cut the benchmark contracts'
+CPU, memory and size by 2-3x (see "Performance").
+
+### Features
+
+- **`export contract C { ... }` is now legal.** Exports the contract's
+  TYPE-level symbols (derived from method signatures only): `import { C }`
+  enables `od as C` and `od as C.State`. Non-exported contracts stay
+  opaque. Covered by `compiler.contractExports.test.ts`.
+
+- **New `redeemerof` type operator.** `redeemerof C` is the union of the
+  contract's direct methods; `redeemerof C.State` is that state's
+  spend-method union. Works in casts, matches, annotations, behind
+  namespaces, and can be named with `type X = redeemerof C;`. Contextual
+  keyword — a user type named `redeemerof` keeps working. Misuse gets
+  diagnostics 30201-30206.
+
+- **Import cycles are allowed for type/contract exchange** (the "each
+  validates the other's UTxOs" pattern): files in a cycle get a
+  types-only pre-pass. Importing a VALUE across an unfinished cycle is
+  diagnostic 6056. Covered by `compiler.circularImports.test.ts`.
+
+- **⚠ BREAKING: one merged redeemer union per contract's direct
+  methods**, tagged in order *spend, mint, withdraw, certify, propose,
+  vote*; method names must be unique across purposes (diagnostic 30200).
+  Contracts with a SINGLE direct-method purpose (the common case) stay
+  byte-identical to 0.3.6; contracts mixing purposes change their
+  redeemer encoding and must be redeployed. Per-state redeemers
+  unchanged.
+
+- **New rule: lambdas can only capture `const` bindings** (diagnostic
+  30207). Closures cannot observe later `let` reassignments on-chain, so
+  such code silently misread; loop bodies are unaffected.
+
+- Fixed `pebble run` breaking on `import { X } from "..."`.
+
+### Fixes
+
+Miscompilations reported from `the-cardano-masterpiece` against 0.3.6,
+each covered by a `compiler.masterpieceBugs.*` regression test:
+
+- **⚠ Redeemer field extractors could run in OTHER dispatch arms**
+  (`force headList []` from a sibling method): letted placement climbed
+  out of `Case` branches; it now stops at branch boundaries. Recompile
+  contracts with multiple methods per purpose.
+
+- **⚠ Extractors shared by several arms still ran in every arm** (their
+  LCA sat above the dispatch): non-closed shared letteds are now
+  duplicated into each referencing branch.
+
+- **⚠ Single-use letted values could escape their dispatch arm** (BUG 23:
+  editing one method miscompiled an untouched one): the one placement
+  climb without the branch stop now has it.
+
+- **⚠ Repeated same-constructor destructures corrupted earlier bindings**
+  (two `const Some{ value: x } = ...` in one method remapped the first
+  binding to the second): user patterns now key SSA renames by binding
+  name, not struct field name. Could silently validate with the wrong
+  subject — recompile.
+
+- **⚠ PERF: `const`s referenced inside lambdas re-evaluated per call**
+  (measured up to 58.8B CPU on-chain): total `const` values now float
+  out of closures and evaluate once; const integer arithmetic — including
+  division by a non-zero constant (BUG 24) — is comptime-evaluated for
+  the totality check. Placement changes compiled bytes: recompiling with
+  0.4.0 can change script hashes; data encodings are unaffected.
+
+- **⚠ `Value ==` failed on values with negative quantities (burns)**:
+  now lowered as `equalsData(valueData a, valueData b)` — exact,
+  order-independent, total. `contains` keeps its per-spec semantics.
+
+- **⚠ Bare fallback `spend` is now reachable for ill-formed datums**: the
+  state dispatch guards the decode instead of crashing before the
+  fallback could run.
+
+- **IR rewrite pass could silently replace the program with a dead
+  fragment** (stale queued nodes of already-replaced subtrees).
+
+- **Custom natives could survive to the forcing pass**
+  (`getNRequiredForces ... -48`): the drain loop now re-runs native
+  lowering to a fixpoint.
+
+- **Under-forced / double-forced shared builtin bindings** (three root
+  causes); a structural audit test now verifies every compiled builtin
+  carries exactly its required forces.
+
+- **`lookup` on a typed `LinearMap` compared the key RAW**
+  (`equalsData :: not data`): keys are now converted to data at the call
+  site.
+
+- **Prelude types usable in cast position** (`tagData as TxOutRef`
+  previously "not defined").
+
+- **Doc fix: single-state contract datum ABI** is (and always was) the
+  wrapped `Constr 0 [fields]` form, not bare fields.
+
+- **Note on the parameter ABI** (not a code change): contract `param`s
+  are applied as their RUNTIME representation — native constants for
+  scalars, plain data for data-encoded types. Do not wrap scalar params
+  in `DataB`/`DataI` off-chain.
+
+- Companion fixes in `@harmoniclabs/plutus-machine` (3.0.5): the CEK
+  machine halts immediately on builtin errors, matching the node
+  (scripts the node rejects no longer pass locally), and a `case` on an
+  error value propagates the underlying message. Update the machine
+  wherever tx evaluation happens off-chain.
+
+### Performance
+
+Optimizer campaign driven by CEK-level profiling of the
+`the-cardano-masterpiece` contracts (full analysis in that repo's
+`BENCHMARK_ANALYSIS.md`). Policy is
+MEMORY-FIRST: machine steps carry memory cost, and real transactions hit
+the memory limit before the CPU limit.
+
+- **Decode-once field extraction**: property accesses on the same
+  data-struct subject share one set of field extractors instead of
+  re-decoding at every access site (scripts -15-22%, init CPU
+  2.26B -> 1.39B).
+
+- **`.length()`** is a recursive counter (~200k CPU per element) instead
+  of `lengthOfArray(listToArray(xs))` (20-360M per call).
+
+- **Letted grouping across loop continuations**: grouping no longer
+  splits at delays, eliminating per-iteration re-evaluations (226 in the
+  masterpiece contract, incl. duplicate sha256-of-14KB chains).
+
+- **Expensive closed values bind per dispatch arm** instead of running at
+  the script root on every execution (~350M saved per unrelated method).
+
+- **List helper templates** (`find`, `lookup`, `some`, `every`,
+  `filter`) use case binders instead of per-element
+  `headList`/`tailList` (~180k per element per pass).
+
+- **Late single-use inline pass** clears bindings minted by the UPLC
+  optimization passes themselves (91 -> 14 residual).
+
+- **Raw-data `amountOf`**: fresh-fromData subjects walk the raw
+  `unMapData` pair-list instead of paying `unValueData`'s whole-map
+  conversion (~7M per call). Not applied where the extra steps would
+  raise memory.
+
+- **Data round-trip elimination (IR peephole)**: always-safe
+  decode-after-encode rewrites (`unX(X(v)) -> v`,
+  `headList(mkCons(x, xs)) -> x`, `unConstrData(constrData(...))`).
+
 ## v0.3.6
 
 Bug fixes (all reported against `0.3.5` from the `the-cardano-masterpiece`

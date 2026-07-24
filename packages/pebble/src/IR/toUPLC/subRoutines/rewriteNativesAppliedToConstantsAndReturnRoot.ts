@@ -26,9 +26,17 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
         const parent = current.parent;
         if( parent ) {
             _modifyChildFromTo( parent, current, newTerm );
-        } else {
+        } else if( current === term ) {
             term = newTerm;
             term.parent = undefined;
+        } else {
+            // `current` has no parent and is NOT the root: it is a STALE
+            // node of a subtree an earlier rewrite already replaced (the
+            // stack keeps queued descendants of replaced terms). rewriting
+            // it would CLOBBER the root with a detached fragment — the
+            // whole program silently became one of these fragments (e.g. a
+            // bare unbound `IRVar`). ignore it.
+            return;
         }
         stack.unshift( newTerm ); // reprocess new term for further optimizations (if any)
     }
@@ -36,6 +44,8 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
     while( stack.length > 0 )
     {
         const current = stack.pop()!;
+        // skip stale nodes of already-replaced subtrees (see above)
+        if( current !== term && current.parent === undefined ) continue;
         // const parent = current.parent;
         const appTerms = getApplicationTerms( current );
 

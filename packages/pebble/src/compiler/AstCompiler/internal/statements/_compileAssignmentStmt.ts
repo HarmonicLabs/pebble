@@ -30,6 +30,10 @@ export function _compileAssignmentStmt(
             stmt.varIdentifier.range, stmt.varIdentifier.text
         );
         const { variableInfos, isDefinedOutsideFuncScope } =  resolvedValue;
+        if( resolvedValue.crossesFunctionBoundary ) return ctx.error(
+            DiagnosticCode.Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda,
+            stmt.varIdentifier.range, stmt.varIdentifier.text
+        );
         const varType = variableInfos.type;
         if( !canAssignTo( varType, int_t ) ) return ctx.error(
             DiagnosticCode.Type_0_is_not_assignable_to_type_1,
@@ -86,6 +90,11 @@ export function _compileExplicitAssignmentStmt(
     const { variableInfos, isDefinedOutsideFuncScope } = resovleResult;
     if( variableInfos.isConstant ) return ctx.error(
         DiagnosticCode.Cannot_assign_to_0_because_it_is_a_constant,
+        stmt.varIdentifier.range, stmt.varIdentifier.text
+    );
+    // a closure cannot write to a variable of an enclosing function
+    if( resovleResult.crossesFunctionBoundary ) return ctx.error(
+        DiagnosticCode.Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda,
         stmt.varIdentifier.range, stmt.varIdentifier.text
     );
     const varType = variableInfos.type;

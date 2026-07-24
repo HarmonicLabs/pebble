@@ -23,10 +23,22 @@ import { getNRequiredForces, UPLCBuiltinTag } from "@harmoniclabs/uplc";
 // type StackEntry = [ term: IRTerm, dbn: number ];
 type StackEntry = IRTerm;
 
+import { sanifyTree } from "../sanifyTree";
+
 export function ensureProperlyForcedBuiltinsAndReturnRoot(
     root: IRTerm
 ): IRTerm
 {
+    // The wrapping below replaces nodes through their PARENT pointers; stale
+    // parents (a node instance shared/moved by earlier passes whose .parent
+    // points into a detached tree) make the replacement silently land in the
+    // detached copy, leaving bare under-forced builtins in the real output
+    // (found as an on-chain MISCOMPILATION: `[(λ f ...) (builtin tailList)]`
+    // bindings from letted forced-natives never got their force wrapper).
+    // sanifyTree clones any child whose parent pointer disagrees, so every
+    // parent pointer below is trustworthy.
+    sanifyTree( root );
+
     // const opts = options.uplcOptimizations;
     // if( isDebugUplcOptimizations( opts ) ) return root;
 

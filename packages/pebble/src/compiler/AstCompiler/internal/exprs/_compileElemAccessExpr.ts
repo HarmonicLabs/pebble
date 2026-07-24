@@ -74,6 +74,7 @@ export function _compileElemAccessExpr(
                         {
                             variableInfos: { name: "value", type: vT, isConstant: true },
                             isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false,
                         },
                         expr.range
                     ),

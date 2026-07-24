@@ -290,6 +290,15 @@ export enum DiagnosticCode {
     Enum_must_have_at_least_one_member = 30102,
     Property_0_is_not_a_member_of_enum_1 = 30103,
     Enum_member_pattern_cannot_have_fields = 30104,
+    Duplicate_method_name_0_in_contract_1_method_names_must_be_unique_across_all_purposes = 30200,
+    _0_is_not_a_contract_redeemerof_can_only_be_applied_to_an_exported_contract_or_one_of_its_states = 30201,
+    Contract_0_has_no_methods_it_has_no_redeemer_type = 30202,
+    Contract_0_has_no_state_1 = 30203,
+    State_0_of_contract_1_has_no_spend_methods_it_has_no_redeemer_type = 30204,
+    _redeemerof_expects_a_contract_or_a_contract_state_per_method_redeemer_types_do_not_exist = 30205,
+    Contract_0_declares_no_states_so_it_has_no_datum_type = 30206,
+    Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda = 30207,
+    Circular_import_of_0_may_only_reference_types_and_contracts = 6056,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -584,6 +593,15 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 30102: return "Enum must have at least one member.";
         case 30103: return "Property '{0}' is not a member of enum '{1}'.";
         case 30104: return "Enum member pattern cannot have fields.";
+        case 30200: return "Duplicate method name '{0}' in contract '{1}'; method names must be unique across all purposes.";
+        case 30201: return "'{0}' is not a contract; 'redeemerof' can only be applied to an exported contract or one of its states.";
+        case 30202: return "Contract '{0}' has no methods; it has no redeemer type.";
+        case 30203: return "Contract '{0}' has no state '{1}'.";
+        case 30204: return "State '{0}' of contract '{1}' has no spend methods; it has no redeemer type.";
+        case 30205: return "'redeemerof' expects a contract or a contract state; per-method redeemer types do not exist.";
+        case 30206: return "Contract '{0}' declares no states, so it has no datum type.";
+        case 30207: return "Lambdas can only capture 'const' bindings; '{0}' is a mutable 'let'. Copy it into a 'const' before the lambda.";
+        case 6056: return "Circular import of '{0}' may only reference types and contracts.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

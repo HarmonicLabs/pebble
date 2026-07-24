@@ -112,6 +112,7 @@ export function _compileOptionalPropAccessExpr(
                                 type: objType,
                             },
                             isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false,
                         },
                         optionalObjExpr.range
                     ),

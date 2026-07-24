@@ -12,7 +12,7 @@ import { DiagnosticCode } from "../../diagnostics/diagnosticMessages.generated";
 import { CompilerOptions } from "../../IR/toUPLC/CompilerOptions";
 import { Parser } from "../../parser/Parser";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "../io/CompilerIoApi";
-import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName } from "./scope/AstScope";
+import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol } from "./scope/AstScope";
 import { TypedProgram } from "../tir/program/TypedProgram";
 import { TirAliasType } from "../tir/types/TirAliasType";
 import { TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
@@ -58,6 +58,29 @@ import { isIdentifier } from "../../utils/text";
 import { TestStmt } from "../../ast/nodes/statements/TestStmt";
 import { NamespaceDecl, NamespaceMember } from "../../ast/nodes/statements/declarations/NamespaceDecl";
 import { TirSimpleVarDecl } from "../tir/statements/TirVarDecl/TirSimpleVarDecl";
+import { deriveContractTypes, DerivedContractTypes } from "./internal/_deriveContractBody/_deriveContractTypes";
+import { AstRedeemerOfTypeExpr } from "../../ast/nodes/types/AstRedeemerOfTypeExpr";
+
+const enum SrcCompilationState {
+    Parsed = 0,
+    /** types/interfaces/exported-contract symbols collected + (partial) exports published */
+    TypesCollected = 1,
+    /** functions/consts/contract bodies compiled too */
+    FullyCompiled = 2,
+}
+
+interface SrcCompilationInfo {
+    state: SrcCompilationState;
+    /** working copy of the file's statements (the passes splice it) */
+    stmts: TopLevelStmt[];
+    importsScope: AstScope;
+    topLevelScope: AstScope;
+    srcExports: AstScope;
+    /** import statements deferred during a partial (cycle) types pass */
+    pendingImports: TopLevelStmt[];
+    /** re-entrance guard for `_partialTypesPassForCycleTarget` */
+    typesPassRunning?: boolean;
+}
 
 export interface AstTypeDefCompilationResult {
     sop: TirType | undefined,
@@ -353,75 +376,151 @@ export class AstCompiler extends DiagnosticEmitter
         return src;
     }
 
-    private readonly _srcDonelogUids = new Set<string>();
+    /**
+     * per-file compilation progress. a file inside an import CYCLE first
+     * runs a TYPES-ONLY pass (so cycle mates can bind its type/contract
+     * exports) and completes its values pass when its own frame unwinds.
+     */
+    private readonly _srcCompilations = new Map<string /* absoluteProjPath */, SrcCompilationInfo>();
+
+    private _getOrBeginSrcCompilation( src: Source ): SrcCompilationInfo
+    {
+        let info = this._srcCompilations.get( src.absoluteProjPath );
+        if( info ) return info;
+
+        const importsScope = this.preludeScope.newChildScope({ isFunctionDeclScope: false });
+        info = {
+            state: SrcCompilationState.Parsed,
+            // clone array so we don't remove stmts from the original AST
+            stmts: src.statements.slice(),
+            importsScope,
+            topLevelScope: importsScope.newChildScope({ isFunctionDeclScope: false }),
+            srcExports: this.preludeScope.newChildScope({ isFunctionDeclScope: false }),
+            pendingImports: [],
+        };
+        this._srcCompilations.set( src.absoluteProjPath, info );
+        return info;
+    }
+
+    /**
+     * imports + namespaces + types + interfaces + exported-contract type
+     * symbols; publishes (possibly partial) exports.
+     *
+     * `partial === true` (cycle back-edge): imports whose exporter has not
+     * published anything yet are DEFERRED to `info.pendingImports` instead
+     * of erroring — the values pass re-consumes them strictly.
+     */
+    private _runTypesPass( src: Source, info: SrcCompilationInfo, partial: boolean ): void
+    {
+        // defines imported symbols on top level scope, modifies stmts array
+        this._consumeImportsAddSymsInScope(
+            info.stmts,
+            src.absoluteProjPath,
+            info.importsScope,
+            partial ? info.pendingImports : undefined
+        );
+
+        // collect namespace declarations (recursively) so that types/interfaces/signatures
+        // can refer to symbols defined inside namespaces.
+        this._collectNamespaceDeclarations(
+            info.stmts,
+            src.uid,
+            info.topLevelScope,
+            info.srcExports
+        );
+
+        // collect top level **type** (struct and aliases) declarations.
+        // `type X = redeemerof C;` aliases are deferred: they resolve
+        // through contract symbols that only exist after the
+        // exported-contract pass below.
+        this._collectTypeDeclarations(
+            info.stmts,
+            src.uid,
+            info.topLevelScope,
+            info.srcExports,
+            true // deferRedeemerOfAliases
+        );
+
+        // collect top level **interface** declarations (NOT implementations)
+        this._collectInterfaceDeclarations(
+            info.stmts,
+            info.topLevelScope,
+            info.srcExports,
+        );
+
+        // register `export contract` type-level symbols
+        // (datum union + redeemer unions, from signatures only)
+        this._collectExportedContractTypes(
+            info.stmts,
+            src.uid,
+            info.topLevelScope,
+            info.srcExports
+        );
+
+        // second types round: the deferred `redeemerof` aliases
+        this._collectTypeDeclarations(
+            info.stmts,
+            src.uid,
+            info.topLevelScope,
+            info.srcExports
+        );
+
+        // publish exports; the values pass keeps mutating the SAME scope
+        // object, so importers of a partially-compiled cycle member see the
+        // complete exports once this file finishes.
+        this.program.setExportedSymbols(
+            src.absoluteProjPath,
+            info.srcExports
+        );
+
+        info.state = SrcCompilationState.TypesCollected;
+    }
+
+    private _runValuesPass( src: Source, info: SrcCompilationInfo, isEntryFile: boolean ): void
+    {
+        // imports deferred during a partial (cycle) types pass: by now the
+        // exporters are as complete as they will ever get — consume strictly
+        if( info.pendingImports.length > 0 )
+        {
+            const pending = info.pendingImports.splice( 0 );
+            this._consumeImportsAddSymsInScope(
+                pending,
+                src.absoluteProjPath,
+                info.importsScope,
+                undefined
+            );
+        }
+
+        // collects top level functions, methods (interface impls), and consts types
+        this._collectAllTopLevelSignatures(
+            info.stmts,
+            src.uid,
+            info.topLevelScope,
+            info.srcExports,
+            isEntryFile
+        );
+
+        this.program.setExportedSymbols(
+            src.absoluteProjPath,
+            info.srcExports
+        );
+
+        info.state = SrcCompilationState.FullyCompiled;
+    }
+
     /**
      * translates the source AST statements
      * to TIR statements; and saves the result in `this.program`
      */
     private async _compileParsedSource( src: Source, isEntryFile = false ): Promise<void>
     {
-        if( this._srcDonelogUids.has( src.uid ) ) return;
+        const info = this._getOrBeginSrcCompilation( src );
+        if( info.state >= SrcCompilationState.FullyCompiled ) return;
 
-        // clone array so we don't remove stmts from the original AST
-        const stmts = src.statements.slice();
+        if( info.state < SrcCompilationState.TypesCollected )
+            this._runTypesPass( src, info, false );
 
-        const importsScope = this.preludeScope.newChildScope({ isFunctionDeclScope: false });
-
-        // defines imported symbols on top level scope, modifies stmts array
-        this._consumeImportsAddSymsInScope( stmts, src.absoluteProjPath, importsScope );
-
-        const topLevelScope = importsScope.newChildScope({ isFunctionDeclScope: false });
-
-        const srcExports = this.preludeScope.newChildScope({ isFunctionDeclScope: false });
-
-        // collect namespace declarations (recursively) so that types/interfaces/signatures
-        // can refer to symbols defined inside namespaces.
-        this._collectNamespaceDeclarations(
-            stmts,
-            src.uid,
-            topLevelScope,
-            srcExports
-        );
-
-        // collect top level **type** (struct and aliases) declarations
-        this._collectTypeDeclarations(
-            stmts,
-            src.uid,
-            topLevelScope,
-            srcExports
-        );
-
-        // collect top level **interface** declarations (NOT implementations)
-        this._collectInterfaceDeclarations(
-            stmts,
-            topLevelScope,
-            srcExports,
-        );
-
-        // collects top level functions, methods (interface impls), and consts types
-        this._collectAllTopLevelSignatures(
-            stmts,
-            src.uid,
-            topLevelScope,
-            srcExports,
-            isEntryFile
-        );
-
-        /*
-        this._compileTopLevelFunctionsAndConsts(
-            stmts,
-            src.uid,
-            topLevelScope,
-            srcExports
-        );
-        //*/
-
-        this.program.setExportedSymbols(
-            src.absoluteProjPath,
-            srcExports
-        );
-
-        this._srcDonelogUids.add( src.uid );
+        this._runValuesPass( src, info, isEntryFile );
     }
 
     private _collectAllTopLevelSignatures(
@@ -540,7 +639,10 @@ export class AstCompiler extends DiagnosticEmitter
                     srcUid,
                     topLevelScope,
                     srcExports,
-                    exportRange,
+                    // `export contract` exports the contract's TYPE symbols
+                    // (handled by `_collectExportedContractTypes`), NOT the
+                    // synthesized main function as a value
+                    undefined, // exportRange
                     // set main
                     true // isEntryFile
                 );
@@ -1161,11 +1263,127 @@ export class AstCompiler extends DiagnosticEmitter
         );
     }
 
-    private _collectTypeDeclarations(
+    /**
+     * registers the type-level symbols of every `export contract` in the
+     * file: the state-datum union (under the contract's own name), the
+     * merged direct redeemer union and per-state redeemer unions (under
+     * internal names, reachable via `redeemerof`), plus an
+     * `AstContractSymbol` in both the module scope and the exports.
+     *
+     * signature-only: method BODIES are neither read nor compiled here.
+     * does NOT splice the declarations — `_collectAllTopLevelSignatures`
+     * still owns entry-contract handling.
+     */
+    private _collectExportedContractTypes(
         stmts: TopLevelStmt[],
         srcUid: string,
         topLevelScope: AstScope,
         srcExports: AstScope
+    ): void
+    {
+        for( const stmt of stmts )
+        {
+            if(!( stmt instanceof ExportStmt )) continue;
+            const contractDecl = stmt.stmt;
+            if(!( contractDecl instanceof ContractDecl )) continue;
+
+            const derived = this.getOrDeriveContractTypes( contractDecl, topLevelScope, srcUid );
+            if( !derived ) continue; // validation errors already reported
+
+            const name = contractDecl.name.text;
+            const sym: AstContractSymbol = {
+                name,
+                datumTirName: derived.datumTirName,
+                directRedeemerTirName: derived.directRedeemerTirName,
+                stateRedeemerTirNames: derived.stateRedeemerTirNames,
+                stateNames: derived.stateNames,
+            };
+
+            if( srcExports.contracts.has( name ) )
+            {
+                this.error(
+                    DiagnosticCode._0_is_already_exported,
+                    stmt.range, name
+                );
+                continue;
+            }
+
+            topLevelScope.defineContract( sym );
+            srcExports.defineContract( sym );
+
+            // stateful contract: the datum union is a user-visible type
+            // registered under the contract's own name — export it so
+            // `import { C }` binds it and `od as C` / `od as C.State`
+            // work through the existing qualified-name machinery.
+            if( derived.datumTypeDef )
+            {
+                const possible = topLevelScope.resolveType( name );
+                if( possible && !srcExports.types.has( name ) )
+                    srcExports.types.set( name, possible );
+            }
+        }
+    }
+
+    /**
+     * per-`ContractDecl` cache of the derived + registered type-level
+     * symbols (datum union, merged direct redeemer union, per-state
+     * redeemer unions). `null` marks a failed derivation so validation
+     * errors are not reported twice.
+     *
+     * the cache is REQUIRED for correctness when a contract is both
+     * exported and the entry: re-deriving would mint new unique names and
+     * collide on the datum union's `defineType(contractName)`.
+     */
+    private readonly _derivedContractTypes = new WeakMap<ContractDecl, DerivedContractTypes | null>();
+
+    getOrDeriveContractTypes(
+        contractDecl: ContractDecl,
+        scope: AstScope = this._internalDeclScope ?? this.preludeScope,
+        srcUid: string = this._internalDeclSrcUid
+    ): DerivedContractTypes | undefined
+    {
+        const cached = this._derivedContractTypes.get( contractDecl );
+        if( cached !== undefined ) return cached ?? undefined;
+
+        const derived = deriveContractTypes( this, contractDecl );
+        if( !derived )
+        {
+            this._derivedContractTypes.set( contractDecl, null );
+            return undefined;
+        }
+
+        const registerAndGetTirName = ( decl: StructDecl ): string | undefined => {
+            this.registerInternalTypeDecl( decl, scope, srcUid );
+            const possible = scope.resolveType( decl.name.text );
+            return possible?.dataTirName ?? possible?.sopTirName;
+        };
+
+        if( derived.datumTypeDef )
+            derived.datumTirName = registerAndGetTirName( derived.datumTypeDef );
+        if( derived.directRedeemerTypeDef )
+            derived.directRedeemerTirName = registerAndGetTirName( derived.directRedeemerTypeDef );
+        for( const [ stateName, def ] of derived.stateRedeemerTypeDefs )
+        {
+            const tirName = registerAndGetTirName( def );
+            if( tirName ) derived.stateRedeemerTirNames.set( stateName, tirName );
+        }
+
+        this._derivedContractTypes.set( contractDecl, derived );
+        return derived;
+    }
+
+    private _collectTypeDeclarations(
+        stmts: TopLevelStmt[],
+        srcUid: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope,
+        /**
+         * first types round: `type X = redeemerof C;` aliases are left in
+         * `stmts` untouched — they can only resolve AFTER
+         * `_collectExportedContractTypes` registered the contract symbols,
+         * so a second round collects them.
+         */
+        deferRedeemerOfAliases: boolean = false
     ): void
     {
         for( let i = 0; i < stmts.length; i++ )
@@ -1182,6 +1400,23 @@ export class AstCompiler extends DiagnosticEmitter
                 || stmt instanceof TypeAliasDecl
                 || stmt instanceof EnumDecl
             )) continue;
+
+            if(
+                deferRedeemerOfAliases
+                && stmt instanceof TypeAliasDecl
+                && stmt.aliasedType instanceof AstRedeemerOfTypeExpr
+            ) {
+                // only defer when the target contract is not resolvable YET
+                // (a SAME-FILE contract, registered by the exported-contract
+                // pass that runs after this round). imported contracts are
+                // already bound, so those aliases compile right away — and
+                // stay usable by structs collected in this same round.
+                const head = stmt.aliasedType.target.path[0] ?? stmt.aliasedType.target.name;
+                const resolvableNow =
+                    topLevelScope.resolveContract( head.text ) !== undefined
+                    || topLevelScope.resolveNamespace( head.text ) !== undefined;
+                if( !resolvableNow ) continue;
+            }
 
             const isGeneric = stmt instanceof EnumDecl ? false : stmt.typeParams.length > 0;
 
@@ -1462,7 +1697,13 @@ export class AstCompiler extends DiagnosticEmitter
     private _consumeImportsAddSymsInScope(
         stmts: TopLevelStmt[],
         srcAbsPath: string,
-        srcImportsScope: AstScope
+        srcImportsScope: AstScope,
+        /**
+         * when set (partial/cycle types pass): imports whose exporter has
+         * not published anything yet are moved here instead of erroring;
+         * the values pass re-consumes them strictly.
+         */
+        deferTo: TopLevelStmt[] | undefined = undefined
     ): void
     {
         for( let i = 0; i < stmts.length; i++ )
@@ -1474,11 +1715,18 @@ export class AstCompiler extends DiagnosticEmitter
                 const importedSymbols = this.program.getExportedSymbols( importAbsPath );
                 if( !importedSymbols )
                 {
-                    this.error(
-                        DiagnosticCode.File_0_not_found,
-                        stmt.fromPath.range,
-                        importAbsPath
-                    );
+                    if( deferTo )
+                    {
+                        deferTo.push( stmt );
+                    }
+                    else
+                    {
+                        this.error(
+                            DiagnosticCode.File_0_not_found,
+                            stmt.fromPath.range,
+                            importAbsPath
+                        );
+                    }
                     void stmts.splice( i, 1 );
                     i--;
                     continue;
@@ -1506,6 +1754,13 @@ export class AstCompiler extends DiagnosticEmitter
             const importedSymbols = this.program.getExportedSymbols( importAbsPath );
             if( !importedSymbols )
             {
+                if( deferTo )
+                {
+                    deferTo.push( stmt );
+                    void stmts.splice( i, 1 );
+                    i--;
+                    continue;
+                }
                 return this.error(
                     DiagnosticCode.File_0_not_found,
                     stmt.fromPath.range,
@@ -1521,6 +1776,7 @@ export class AstCompiler extends DiagnosticEmitter
                 const isFunction = importedSymbols.functions.has( declName );
                 const isInterface = importedSymbols.interfaces.has( declName );
                 const isNamespace = importedSymbols.namespaces.has( declName );
+                const isContract = importedSymbols.contracts.has( declName );
 
                 if(!(
                     isValue
@@ -1528,7 +1784,22 @@ export class AstCompiler extends DiagnosticEmitter
                     || isFunction
                     || isInterface
                     || isNamespace
+                    || isContract
                 )) {
+                    // exporter only ran its types pass (we are on a
+                    // cycle-closing edge): values/functions are not
+                    // published yet — and never will be for this importer
+                    if(
+                        this._srcCompilations.get( importAbsPath )?.state
+                            === SrcCompilationState.TypesCollected
+                    ) {
+                        this.error(
+                            DiagnosticCode.Circular_import_of_0_may_only_reference_types_and_contracts,
+                            importDecl.identifier.range,
+                            declName,
+                        );
+                        continue;
+                    }
                     this.error(
                         DiagnosticCode.Module_0_has_no_exported_member_1,
                         importDecl.identifier.range,
@@ -1556,6 +1827,7 @@ export class AstCompiler extends DiagnosticEmitter
                 if( isType ) srcImportsScope.types.set( declName, importedSymbols.types.get( declName )! );
                 if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! );
                 if( isNamespace ) srcImportsScope.defineNamespace( importedSymbols.namespaces.get( declName )! );
+                if( isContract ) srcImportsScope.defineContract( importedSymbols.contracts.get( declName )! );
             }
 
             // remove from array so we don't process it again
@@ -1610,8 +1882,17 @@ export class AstCompiler extends DiagnosticEmitter
 
         if( isCycle )
         {
-            this._reportCircularDependency( src, resolveStack );
-            return false;
+            // import cycles are allowed as long as only TYPE and CONTRACT
+            // symbols cross the cycle-closing edge (checked at import
+            // consumption — value members of a partially-compiled module
+            // produce diagnostic 6056). run a types-only pass on the
+            // in-flight target so the importer can bind those symbols.
+            const info = this._srcCompilations.get( src.absoluteProjPath );
+            if( !info || info.state < SrcCompilationState.TypesCollected )
+            {
+                await this._partialTypesPassForCycleTarget( src, resolveStack );
+            }
+            return this.diagnostics.every( d => d.category !== DiagnosticCategory.Error );
         }
 
         // if already parsed
@@ -1643,6 +1924,42 @@ export class AstCompiler extends DiagnosticEmitter
         this._compileParsedSource( src, isEntryFile );
 
         return true;
+    }
+
+    /**
+     * types-only pass for the TARGET of a cycle-closing import edge (the
+     * file is in-flight on the resolve stack: parsed, values pass pending).
+     *
+     * for determinism (same result whichever cycle member is the entry),
+     * the target's NON-cycle dependencies are fully compiled first — its
+     * types pass then sees the same environment in every entry order.
+     */
+    private async _partialTypesPassForCycleTarget(
+        src: Source,
+        resolveStack: ResolveStackNode
+    ): Promise<void>
+    {
+        const info = this._getOrBeginSrcCompilation( src );
+        if(
+            info.state >= SrcCompilationState.TypesCollected
+            || info.typesPassRunning
+        ) return;
+        info.typesPassRunning = true;
+
+        const imports = src.statements.filter( isImportStmtLike );
+        const paths = this.importPathsFromStmts( imports, src.absoluteProjPath );
+        for( const p of paths )
+        {
+            if( resolveStack.includesInternalPath( p ) ) continue; // in-cycle
+            const depSrc = await this.getAbsoulteProjPathSource( p );
+            if( !depSrc ) continue;
+            await this.compileAllDeps( new ResolveStackNode( resolveStack, depSrc ) );
+        }
+
+        if( info.state < SrcCompilationState.TypesCollected )
+            this._runTypesPass( src, info, true );
+
+        info.typesPassRunning = false;
     }
 
     private importPathsFromStmts(
@@ -1953,9 +2270,17 @@ function _wrapSourceTextForRun( text: string, funcName: string ): string
                 pos++;
                 if( braceDepth <= 0 && parenDepth <= 0 )
                 {
-                    // consume optional trailing semicolon
                     let p2 = pos;
                     while( p2 < len && _isWhitespace( text.charCodeAt( p2 ) ) ) p2++;
+                    // `import { X } from "..."` / `export { X } from "..."`:
+                    // the braces do NOT end the statement — the from-clause
+                    // (and its terminating `;`) belongs to it
+                    if( _readWord( text, p2 ) === "from" )
+                    {
+                        pos = p2 + 4; // skip `from`, keep scanning to the `;`
+                        continue;
+                    }
+                    // consume optional trailing semicolon
                     if( p2 < len && text.charCodeAt( p2 ) === 0x3B /* ; */ ) pos = p2 + 1;
                     ended = true;
                 }
@@ -2092,9 +2417,17 @@ function _wrapSourceTextForRepl( text: string, funcName: string ): string
                 pos++;
                 if( braceDepth <= 0 && parenDepth <= 0 )
                 {
-                    // consume optional trailing semicolon
                     let p2 = pos;
                     while( p2 < len && _isWhitespace( text.charCodeAt( p2 ) ) ) p2++;
+                    // `import { X } from "..."` / `export { X } from "..."`:
+                    // the braces do NOT end the statement — the from-clause
+                    // (and its terminating `;`) belongs to it
+                    if( _readWord( text, p2 ) === "from" )
+                    {
+                        pos = p2 + 4; // skip `from`, keep scanning to the `;`
+                        continue;
+                    }
+                    // consume optional trailing semicolon
                     if( p2 < len && text.charCodeAt( p2 ) === 0x3B /* ; */ ) pos = p2 + 1;
                     ended = true;
                 }

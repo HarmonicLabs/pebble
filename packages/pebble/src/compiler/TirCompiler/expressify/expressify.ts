@@ -136,7 +136,15 @@ export function expressifyFuncBody(
             const initExpr = expressifyVars( ctx, stmt.initExpr );
             stmt.initExpr = initExpr;
 
-            const lettedExpr = initExpr instanceof TirLettedExpr ? initExpr : ctx.introduceLettedConstant(
+            // NOTE: the init may already BE a shared letted (a decode-once
+            // field extractor, `const spentOut = spent.resolved;`) — the
+            // declared name must still be introduced in THIS ctx (the
+            // wrapper letted's value is the shared one, so the IR dedups
+            // them); skipping the introduction leaves the name unresolvable.
+            const initWasSharedExpr =
+                initExpr instanceof TirVariableAccessExpr
+                || initExpr instanceof TirLettedExpr;
+            const lettedExpr = ctx.introduceLettedConstant(
                 stmt.name,
                 initExpr,
                 stmt.range
@@ -147,10 +155,19 @@ export function expressifyFuncBody(
 
             if( !isSingleConstrStruct( stmt.type ) ) continue;
 
-            if(
-                ( initExpr instanceof TirVariableAccessExpr || initExpr instanceof TirLettedExpr )
-                && ctx.properties.has( initExpr.varName )
-            ) continue; // field extraction was already done
+            if( initWasSharedExpr && stmt.isConst )
+            {
+                // share the init's registered field map (if any) under the
+                // declared name, so `alias.field` reuses the SAME field
+                // letteds instead of re-registering (or re-extracting) them
+                const srcName = ( initExpr as TirVariableAccessExpr | TirLettedExpr ).varName;
+                const registeredFields = ctx.findPropResolution( srcName, "" ).definingCtx
+                    ?.properties.get( srcName );
+                if( registeredFields ) {
+                    ctx.properties.set( stmt.name, registeredFields );
+                    continue;
+                }
+            }
             
             if( stmt.type instanceof TirSoPStructType )
             {
@@ -256,7 +273,15 @@ export function expressifyFuncBody(
             {
                 const nestedDeconstructs = flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
                     stmt,
-                    ctx
+                    ctx,
+                    // user destructure statement (`const P{ field: alias } = ...`):
+                    // the body references `alias`, NOT the struct field name.
+                    // Keying the rename by field name corrupted UNRELATED
+                    // variables via the SSA chain: two `Some{ value: x }`
+                    // destructures in the same scope chained `value -> x1`,
+                    // then `value -> x2` which recursively remapped `x1 -> x2`
+                    // (masterpiece BUG 22).
+                    false,
                 );
                 // nested single constr structs
                 // are added as destructed variables in the matcher body
@@ -611,7 +636,11 @@ export function expressifyFuncBody(
 
                         flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
                             _case.pattern,
-                            caseCtx
+                            caseCtx,
+                            // user case-arm pattern: bindings are referenced by
+                            // their own names; field-name keying shadows outer
+                            // variables (see BUG 22 note above)
+                            false,
                         );
 
                         const caseBody = expressifyFuncBody(
@@ -686,7 +715,11 @@ export function expressifyFuncBody(
 
                     const nestedDeconstructs = flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct(
                         _case.pattern,
-                        caseCtx
+                        caseCtx,
+                        // user case-arm pattern: bindings are referenced by
+                        // their own names; field-name keying shadows outer
+                        // variables (see BUG 22 note above)
+                        false,
                     );
 
                     const branchStmts = _case.body instanceof TirBlockStmt

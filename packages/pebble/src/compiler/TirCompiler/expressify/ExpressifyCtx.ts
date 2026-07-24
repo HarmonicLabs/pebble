@@ -191,6 +191,39 @@ export class ExpressifyCtx
         );
     }
 
+    private _definesLocally( name: string ): boolean
+    {
+        return (
+            this.variables.has( name )
+            || this.funcParams.has( name )
+            || this.lettedConstants.has( name )
+        );
+    }
+
+    /**
+     * Property lookup that walks the scope chain, RESPECTING SHADOWING:
+     * the walk stops at the first ctx that locally (re)defines `name`, so
+     * an inner shadowing binding never resolves against an outer variable's
+     * registered fields. Returns the ctx the search stopped at (the
+     * variable's defining scope) so a miss can register the decode-once
+     * field letteds exactly there — visible to every use site below it.
+     */
+    findPropResolution(
+        name: string,
+        prop: string
+    ): { constName: string | undefined, definingCtx: ExpressifyCtx | undefined }
+    {
+        let ctx: ExpressifyCtx | undefined = this;
+        while( ctx )
+        {
+            const map = ctx.properties.get( name );
+            if( map ) return { constName: map.get( prop ), definingCtx: ctx };
+            if( ctx._definesLocally( name ) ) return { constName: undefined, definingCtx: ctx };
+            ctx = ctx.parent;
+        }
+        return { constName: undefined, definingCtx: undefined };
+    }
+
     introduceFuncParams(
         params: readonly TirSimpleVarDecl[]
     ): void
@@ -204,7 +237,9 @@ export class ExpressifyCtx
     introduceLettedConstant(
         name: string,
         lettedExpr: TirExpr,
-        declRange: SourceRange
+        declRange: SourceRange,
+        /** see `IRLettedMeta.siteScoped` */
+        siteScoped: boolean = false
     ): TirLettedExpr
     {
         // if( this.lettedConstants.has( name ) ) throw new Error(`constant '${name}' already introduced in the context`);
@@ -213,7 +248,10 @@ export class ExpressifyCtx
         const result = new TirLettedExpr(
             name,
             lettedExpr,
-            declRange
+            declRange,
+            undefined, // _unsafeVarSym
+            undefined, // _creationStack
+            siteScoped
         );
         this.lettedConstants.set(
             name,
@@ -267,7 +305,9 @@ export class ExpressifyCtx
     introduceSingleConstrDataLettedFields(
         varName: string,
         structExpr: TirExpr,
-        structType: TirDataStructType
+        structType: TirDataStructType,
+        /** see `IRLettedMeta.siteScoped` */
+        siteScoped: boolean = false
     ): void
     {
         const constr = structType.constructors[0];
@@ -276,22 +316,19 @@ export class ExpressifyCtx
         const lettedRawFieldsName = getUniqueInternalName(`${varName}_fields`);
         const lettedFields = this.introduceLettedConstant(
             lettedRawFieldsName,
-            new TirLettedExpr(
-                lettedRawFieldsName,
-                new TirCallExpr(
-                    TirNativeFunc.unConstrDataResultFields,
-                    [new TirCallExpr(
-                        TirNativeFunc.unConstrData,
-                        [ structExpr ],
-                        new TirUnConstrDataResultT(),
-                        structExpr.range
-                    )],
-                    new TirListT( data_t ),
-                    structExpr.range,
-                ),
-                structExpr.range
+            new TirCallExpr(
+                TirNativeFunc.unConstrDataResultFields,
+                [new TirCallExpr(
+                    TirNativeFunc.unConstrData,
+                    [ structExpr ],
+                    new TirUnConstrDataResultT(),
+                    structExpr.range
+                )],
+                new TirListT( data_t ),
+                structExpr.range,
             ),
-            structExpr.range
+            structExpr.range,
+            siteScoped
         );
 
         const fieldsMap: Map<string, string> = new Map();
@@ -319,6 +356,7 @@ export class ExpressifyCtx
                     structExpr.range
                 ),
                 structExpr.range,
+                siteScoped
             );
 
             fieldsMap.set(
@@ -336,7 +374,8 @@ export class ExpressifyCtx
                 this.introduceSingleConstrDataLettedFields(
                     fieldVarName,
                     lettedField,
-                    fieldType
+                    fieldType,
+                    siteScoped
                 );
             }
         }

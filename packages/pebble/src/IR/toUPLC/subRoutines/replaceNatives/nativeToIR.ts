@@ -110,28 +110,22 @@ export const hoisted_negateValue = new IRHoisted(
 );
 hoisted_negateValue.hash;
 
-// valueEq a b = if valueContains(a, b) then valueContains(b, a) else false
-//   Bidirectional containment is equality for canonical Values (the
-//   only form the runtime ever produces). Short-circuits on the first
-//   non-containment to save the second `valueContains` traversal.
+// valueEq a b = equalsData( valueData a, valueData b )
+//   Builtin Values are canonically normalized (sorted, no zero entries),
+//   so data equality is exact, order-independent Value equality.
+//   NOT bidirectional `valueContains`: that builtin FAILS on any negative
+//   quantity, making `==` error at runtime on mint values that include
+//   burns (masterpiece BUG 18).
 export const hoisted_valueEq = new IRHoisted(
     (() => {
         const a = Symbol("valueEq_a");
         const b = Symbol("valueEq_b");
         return new IRFunc(
             [ a, b ],
-            _ir_lazyIfThenElse(
-                _ir_apps(
-                    IRNative.valueContains,
-                    new IRVar( a ),
-                    new IRVar( b )
-                ),
-                _ir_apps(
-                    IRNative.valueContains,
-                    new IRVar( b ),
-                    new IRVar( a )
-                ),
-                IRConst.bool( false )
+            _ir_apps(
+                IRNative.equalsData,
+                new IRApp( IRNative.valueData, new IRVar( a ) ),
+                new IRApp( IRNative.valueData, new IRVar( b ) )
             )
         );
     })()
@@ -259,34 +253,28 @@ hoisted_sub4.hash;
 
 const self_length = Symbol("self_length");
 const length_list_sym = Symbol("length_list_sym");
+const length_head_sym = Symbol("length_head_unused");
+const length_tail_sym = Symbol("length_tail");
+// recursive counter: ~200k CPU per element. The previous
+// `lengthOfArray(listToArray(list))` lowering costs 20-360M PER CALL under
+// the real cost model (flat listToArray pricing) — measured as the single
+// biggest cost in several masterpiece benchmark scenarios.
 export const hoisted_length = new IRHoisted(
-    // new IRRecursive(
-    //     self_length,
-    //     new IRFunc(
-    //         [ length_list_sym ],
-    //         _ir_caseList(
-    //             new IRVar( length_list_sym ),
-    //             IRConst.int( 0 ),
-    //             _ir_apps(
-    //                 hoisted_incr.clone(),
-    //                 new IRApp(
-    //                     new IRSelfCall( self_length ), // self
-    //                     new IRApp(
-    //                         IRNative.tailList,
-    //                         new IRVar( length_list_sym )  // list
-    //                     )
-    //                 )
-    //             )
-    //         )
-    //     )
-    // )
-    new IRFunc(
-        [length_list_sym],
-        _ir_apps(
-            IRNative.lengthOfArray,
-            _ir_apps(
-                IRNative.listToArray,
-                new IRVar( length_list_sym )
+    new IRRecursive(
+        self_length,
+        new IRFunc(
+            [ length_list_sym ],
+            _ir_caseList(
+                new IRVar( length_list_sym ),
+                IRConst.int( 0 ),
+                _ir_apps(
+                    hoisted_incr.clone(),
+                    new IRApp(
+                        new IRSelfCall( self_length ),
+                        new IRVar( length_tail_sym )
+                    )
+                ),
+                { head: length_head_sym, tail: length_tail_sym }
             )
         )
     )
@@ -340,6 +328,7 @@ const findSop_predicate = Symbol("predicate");
 const findSop_self = Symbol("findOpt_self");
 const findSop_list = Symbol("list");
 const findSop_head = Symbol("head");
+const findSop_tail = Symbol("tail");
 export const hoisted_findSopOptional = new IRHoisted(
     new IRFunc(
         [ findSop_predicate ],
@@ -351,29 +340,22 @@ export const hoisted_findSopOptional = new IRHoisted(
                     new IRVar( findSop_list ),
                     // case nil
                     new IRConstr( 1, [] ), // None
-                    // case cons
-                    new IRApp(
-                        new IRFunc(
-                            [ findSop_head ],
-                            _ir_lazyIfThenElse(
-                                _ir_apps(
-                                    new IRVar( findSop_predicate ),
-                                    new IRVar( findSop_head )
-                                ),
-                                // then => Some(head)
-                                new IRConstr( 0, [ new IRVar( findSop_head ) ] ), // Some{ head }
-                                // else => self(tail)
-                                _ir_apps(
-                                    new IRSelfCall( findSop_self ),
-                                    _ir_apps(
-                                        IRNative.tailList,
-                                        new IRVar( findSop_list )
-                                    )
-                                )
-                            )
+                    // case cons: head/tail from the case binders — no
+                    // headList/tailList builtin re-derivation per element
+                    _ir_lazyIfThenElse(
+                        _ir_apps(
+                            new IRVar( findSop_predicate ),
+                            new IRVar( findSop_head )
                         ),
-                        new IRApp( IRNative.headList, new IRVar( findSop_list ) )
-                    )
+                        // then => Some(head)
+                        new IRConstr( 0, [ new IRVar( findSop_head ) ] ), // Some{ head }
+                        // else => self(tail)
+                        _ir_apps(
+                            new IRSelfCall( findSop_self ),
+                            new IRVar( findSop_tail )
+                        )
+                    ),
+                    { head: findSop_head, tail: findSop_tail }
                 )
             )
         )
@@ -387,6 +369,7 @@ const lookup_key = Symbol("lookup_key");
 const lookup_self = Symbol("lookup_self");
 const lookup_map = Symbol("lookup_map");
 const lookup_head = Symbol("lookup_head");
+const lookup_tail = Symbol("lookup_tail");
 export const hoisted_lookupLinearMap = new IRHoisted(
     new IRFunc(
         [ lookup_key ],
@@ -398,38 +381,30 @@ export const hoisted_lookupLinearMap = new IRHoisted(
                     new IRVar( lookup_map ),
                     // case nil => None
                     new IRConstr( 1, [] ),
-                    // case cons
-                    new IRApp(
-                        new IRFunc(
-                            [ lookup_head ],
-                            _ir_lazyIfThenElse(
-                                _ir_apps(
-                                    IRNative.equalsData,
-                                    _ir_apps(
-                                        IRNative.fstPair,
-                                        new IRVar( lookup_head )
-                                    ),
-                                    new IRVar( lookup_key )
-                                ),
-                                // then => Some(sndPair(head))
-                                new IRConstr( 0, [
-                                    _ir_apps(
-                                        IRNative.sndPair,
-                                        new IRVar( lookup_head )
-                                    )
-                                ]),
-                                // else => self(tailList(map))
-                                _ir_apps(
-                                    new IRSelfCall( lookup_self ),
-                                    _ir_apps(
-                                        IRNative.tailList,
-                                        new IRVar( lookup_map )
-                                    )
-                                )
-                            )
+                    // case cons: head/tail from the case binders
+                    _ir_lazyIfThenElse(
+                        _ir_apps(
+                            IRNative.equalsData,
+                            _ir_apps(
+                                IRNative.fstPair,
+                                new IRVar( lookup_head )
+                            ),
+                            new IRVar( lookup_key )
                         ),
-                        new IRApp( IRNative.headList, new IRVar( lookup_map ) )
-                    )
+                        // then => Some(sndPair(head))
+                        new IRConstr( 0, [
+                            _ir_apps(
+                                IRNative.sndPair,
+                                new IRVar( lookup_head )
+                            )
+                        ]),
+                        // else => self(tail)
+                        _ir_apps(
+                            new IRSelfCall( lookup_self ),
+                            new IRVar( lookup_tail )
+                        )
+                    ),
+                    { head: lookup_head, tail: lookup_tail }
                 )
             )
         )
@@ -519,6 +494,8 @@ hoisted_strictOr.hash;
 const some_pred = Symbol("predicate");
 const some_lst = Symbol("lst");
 const some_self = Symbol("self");
+const some_head = Symbol("head");
+const some_tail = Symbol("tail");
 export const hoisted_some = new IRHoisted(
     new IRFunc(
         [ some_pred ],
@@ -533,20 +510,15 @@ export const hoisted_some = new IRHoisted(
                         // either predicate(head) is true
                         _ir_apps(
                             new IRVar( some_pred ),
-                            new IRApp(
-                                IRNative.headList,
-                                new IRVar( some_lst )
-                            )
+                            new IRVar( some_head )
                         ),
                         // or self(tail) is true
                         _ir_apps(
                             new IRSelfCall( some_self ),
-                            new IRApp(
-                                IRNative.tailList,
-                                new IRVar( some_lst )
-                            )
+                            new IRVar( some_tail )
                         )
-                    )
+                    ),
+                    { head: some_head, tail: some_tail }
                 )
             )
         )
@@ -558,6 +530,8 @@ hoisted_some.hash;
 const every_pred = Symbol("predicate");
 const every_self = Symbol("self");
 const every_lst = Symbol("lst");
+const every_head = Symbol("head");
+const every_tail = Symbol("tail");
 export const hoisted_every = new IRHoisted(
     new IRFunc(
         [ every_pred ],
@@ -572,20 +546,15 @@ export const hoisted_every = new IRHoisted(
                         // both predicate(head) is true
                         _ir_apps(
                             new IRVar( every_pred ),
-                            new IRApp(
-                                IRNative.headList,
-                                new IRVar( every_lst )
-                            )
+                            new IRVar( every_head )
                         ),
                         // AND self(tail) is true
                         _ir_apps(
                             new IRSelfCall( every_self ),
-                            new IRApp(
-                                IRNative.tailList,
-                                new IRVar( every_lst )
-                            )
+                            new IRVar( every_tail )
                         )
-                    )
+                    ),
+                    { head: every_head, tail: every_tail }
                 )
             )
         )
@@ -598,6 +567,7 @@ const filt_pred = Symbol("predicate");
 const filt_self = Symbol("filter_self");
 const filt_list = Symbol("list");
 const filt_elem = Symbol("elem");
+const filt_tail = Symbol("tail");
 export const hoisted_filter = new IRHoisted(
     new IRFunc(
         [ filt_pred ],
@@ -609,37 +579,28 @@ export const hoisted_filter = new IRHoisted(
                     new IRVar( filt_list ),
                     // case nil
                     new IRVar( filt_list ), // nil
-                    // case cons
-                    _ir_let_sym(
-                        filt_elem,
-                        _ir_apps( IRNative.headList, new IRVar( filt_list ) ),
-                        _ir_lazyIfThenElse(
-                            _ir_apps(
-                                new IRVar( filt_pred ),
-                                new IRVar( filt_elem )
-                            ),
-                            // then => cons(elem, self(tail))
-                            _ir_apps(
-                                IRNative.mkCons,
-                                new IRVar( filt_elem ),
-                                _ir_apps(
-                                    new IRSelfCall( filt_self ),
-                                    _ir_apps(
-                                        IRNative.tailList,
-                                        new IRVar( filt_list )
-                                    )
-                                )
-                            ),
-                            // else => self(tail)
+                    // case cons: head/tail from the case binders
+                    _ir_lazyIfThenElse(
+                        _ir_apps(
+                            new IRVar( filt_pred ),
+                            new IRVar( filt_elem )
+                        ),
+                        // then => cons(elem, self(tail))
+                        _ir_apps(
+                            IRNative.mkCons,
+                            new IRVar( filt_elem ),
                             _ir_apps(
                                 new IRSelfCall( filt_self ),
-                                _ir_apps(
-                                    IRNative.tailList,
-                                    new IRVar( filt_list )
-                                )
+                                new IRVar( filt_tail )
                             )
+                        ),
+                        // else => self(tail)
+                        _ir_apps(
+                            new IRSelfCall( filt_self ),
+                            new IRVar( filt_tail )
                         )
-                    )
+                    ),
+                    { head: filt_elem, tail: filt_tail }
                 )
             )
         )

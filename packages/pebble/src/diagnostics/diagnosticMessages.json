@@ -298,5 +298,17 @@
   "Property '{0}' is not a member of enum '{1}'.": 30103,
   "Enum member pattern cannot have fields.": 30104,
 
+  "Duplicate method name '{0}' in contract '{1}'; method names must be unique across all purposes.": 30200,
+  "'{0}' is not a contract; 'redeemerof' can only be applied to an exported contract or one of its states.": 30201,
+  "Contract '{0}' has no methods; it has no redeemer type.": 30202,
+  "Contract '{0}' has no state '{1}'.": 30203,
+  "State '{0}' of contract '{1}' has no spend methods; it has no redeemer type.": 30204,
+  "'redeemerof' expects a contract or a contract state; per-method redeemer types do not exist.": 30205,
+  "Contract '{0}' declares no states, so it has no datum type.": 30206,
+
+  "Lambdas can only capture 'const' bindings; '{0}' is a mutable 'let'. Copy it into a 'const' before the lambda.": 30207,
+
+  "Circular import of '{0}' may only reference types and contracts.": 6056,
+
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }

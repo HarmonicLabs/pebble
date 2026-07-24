@@ -1,6 +1,9 @@
 import { IRHoisted, IRFunc, IRNative, IRVar, _ir_apps } from "../../IRNodes";
+import { IRForced } from "../../IRNodes/IRForced";
 
-const tailList = new IRHoisted( IRNative.tailList );
+// hoist the FORCED builtin: the binding value must be pre-forced, since all
+// use sites apply the bound variable directly ([f [f lst]]) without forcing
+const tailList = new IRHoisted( new IRForced( IRNative.tailList ) );
 tailList.hash;
 
 const drop2_lst = Symbol("lst");

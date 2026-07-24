@@ -352,7 +352,8 @@ export function getBranchStmtReturnType(
                     type: varExpr.type,
                     isConstant: false
                 },
-                isDefinedOutsideFuncScope: false
+                isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false
             },
             stmtRange
         );

@@ -4,38 +4,53 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, prettyUPLC } from "@harmoniclabs/uplc";
 
+async function compile( srcText: string ) {
+    const fileName = "test.pebble";
+    const ioApi = createMemoryCompilerIoApi({
+        sources: new Map([
+            [fileName, fromUtf8(srcText)],
+        ]),
+        useConsoleAsOutput: true,
+    });
+    const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
+    try {
+        await complier.compile({ entry: fileName, root: "/" });
+    } catch {
+        // diagnostics inspected below
+    }
+    return {
+        diagnostics: complier.diagnostics,
+        output: ioApi.outputs.get("out/out.flat"),
+    };
+}
+
 describe("parseMain", () => {
 
-    test("parseMain", async () => {
+    test("spend + mint methods in one contract compile", async () => {
+        const { diagnostics, output } = await compile(`
+contract OnlySpend {
+    spend allowSpend() {}
+    mint allowMint() {}
+}
+        `);
+        expect( diagnostics.length ).toBe( 0 );
+        expect( output instanceof Uint8Array ).toBe( true );
+    });
 
-        const fileName = "test.pebble";
-        const srcText = `
+    // since 0.3.7 method names must be unique across ALL purposes:
+    // all direct methods share one merged redeemer union (one constructor
+    // per method), so a cross-purpose duplicate is a constructor collision.
+    test("same method name under two purposes is rejected", async () => {
+        const { diagnostics, output } = await compile(`
 contract OnlySpend {
     spend allow() {}
     mint allow() {}
 }
-        `;
-
-        const ioApi = createMemoryCompilerIoApi({
-            sources: new Map([
-                [fileName, fromUtf8(srcText)],
-            ]),
-            useConsoleAsOutput: true,
-        });
-        const complier = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
-    
-        await complier.compile({ entry: fileName, root: "/" });
-        const diagnostics = complier.diagnostics;
-
-        // console.log( diagnostics );
-        // console.log( diagnostics.map( d => d.toString() ) );
-        expect( diagnostics.length ).toBe( 0 );
-
-        const output = ioApi.outputs.get("out/out.flat")!;
-        expect( output instanceof Uint8Array ).toBe( true );
-
-        // console.log( toHex( output ) );
-        // console.log( prettyUPLC( parseUPLC( output ).body, 2 ) )
+        `);
+        expect(
+            diagnostics.some( d => d.toString().includes("30200") )
+        ).toBe( true );
+        expect( output ).toBe( undefined );
     });
-    
+
 });

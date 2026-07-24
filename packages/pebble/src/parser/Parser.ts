@@ -28,6 +28,7 @@ import { ArrowKind } from "../ast/nodes/expr/functions/ArrowKind";
 import { FuncExpr, TypeParamDecl } from "../ast/nodes/expr/functions/FuncExpr";
 import { AstBooleanType, AstBytesType, AstListType, AstIntType, AstNativeOptionalType, AstVoidType, AstLinearMapType, AstFuncType } from "../ast/nodes/types/AstNativeTypeExpr";
 import { AstNamedTypeExpr } from "../ast/nodes/types/AstNamedTypeExpr";
+import { AstRedeemerOfTypeExpr } from "../ast/nodes/types/AstRedeemerOfTypeExpr";
 import { LitArrExpr } from "../ast/nodes/expr/litteral/LitArrExpr";
 import { LitNamedObjExpr } from "../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../ast/nodes/expr/litteral/LitObjExpr";
@@ -201,11 +202,8 @@ export class Parser extends DiagnosticEmitter
             const exportEnd = tn.pos;
             const stmt = this.parseTopLevelStatement();
             if( !stmt ) return undefined;
-            if( stmt instanceof ContractDecl )
-            return this.error(
-                DiagnosticCode.Contract_declarations_cannot_be_exported,
-                stmt.range
-            );
+            // `export contract` is allowed since 0.3.7: it exports the
+            // contract's TYPE-level symbols (datum union, redeemer unions)
             return new ExportStmt( stmt, tn.range( startPos, exportEnd ) );
         }
 
@@ -2358,6 +2356,31 @@ export class Parser extends DiagnosticEmitter
             case Token.Identifier: {
 
                 let name = new Identifier( tn.readIdentifier(), tn.range() );
+
+                // `redeemerof C` / `redeemerof C.State` — contextual keyword:
+                // two consecutive identifiers are never otherwise valid in
+                // type position, so this is unambiguous; a user type actually
+                // named `redeemerof` (not followed by an identifier) still
+                // parses as a plain named type below.
+                if(
+                    name.text === "redeemerof"
+                    && tn.peek() === Token.Identifier
+                ) {
+                    const target = this.parseTypeExpr( suppressErrors );
+                    if( !target ) return undefined;
+                    if(!( target instanceof AstNamedTypeExpr ))
+                    {
+                        canError && this.error(
+                            DiagnosticCode.Type_expected,
+                            tn.range()
+                        );
+                        return undefined;
+                    }
+                    return new AstRedeemerOfTypeExpr(
+                        target,
+                        tn.range( startPos, tn.pos )
+                    );
+                }
 
                 // TS-style qualified type name (`Ns.Type`, `Struct.Constructor`);
                 // type args (if any) belong to the LAST segment

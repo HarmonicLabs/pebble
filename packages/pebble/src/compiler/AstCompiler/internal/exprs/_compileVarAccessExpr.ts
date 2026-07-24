@@ -23,6 +23,22 @@ export function _compileVarAccessExpr(
             expr.range, expr.text
         );
     }
+
+    // lambdas may only CAPTURE `const` bindings: a `const` is a real
+    // let-binding computed once at its declaration, so accessing it from a
+    // closure is a plain variable read. A mutable `let` crossing a function
+    // boundary has no sound meaning (closures cannot observe later
+    // reassignments) — reject it.
+    if(
+        resolvedValue.crossesFunctionBoundary
+        && !resolvedValue.variableInfos.isConstant
+    ) {
+        return ctx.error(
+            DiagnosticCode.Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda,
+            expr.range, expr.text
+        );
+    }
+
     // const { variableInfos, isDefinedOutsideFuncScope } = resolvedValue;
     return new TirVariableAccessExpr(
         resolvedValue,

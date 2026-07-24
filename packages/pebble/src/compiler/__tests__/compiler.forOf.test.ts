@@ -274,10 +274,12 @@ export function main( xs: List<int>, base: int ): int {
         expect((lettedRes.result as CEKConst).value)
             .toBe((inlinedRes.result as CEKConst).value);
 
-        // Letted version should be CHEAPER than inlined (computes the
-        // base*100+5 expression once, not 20 times).
-        expect(lettedRes.budgetSpent.cpu).toBeLessThan(inlinedRes.budgetSpent.cpu);
-        expect(lettedRes.budgetSpent.mem).toBeLessThan(inlinedRes.budgetSpent.mem);
+        // Letted version must never be MORE expensive than inlined.
+        // (Since the anchor-based letted grouping, the hand-inlined
+        // duplicates are hash-deduped and shared too, so the two variants
+        // compile to the same compute-once program: EQUAL cost.)
+        expect(lettedRes.budgetSpent.cpu <= inlinedRes.budgetSpent.cpu).toBe(true);
+        expect(lettedRes.budgetSpent.mem <= inlinedRes.budgetSpent.mem).toBe(true);
     });
 
     // ── inliner behaviour matrix ──
@@ -364,8 +366,9 @@ export function main( xs: List<int> ): int {
 
         expect((lettedRes.result as CEKConst).value)
             .toBe((inlinedRes.result as CEKConst).value);
-        expect(lettedRes.budgetSpent.cpu).toBeLessThan(inlinedRes.budgetSpent.cpu);
-        expect(lettedRes.budgetSpent.mem).toBeLessThan(inlinedRes.budgetSpent.mem);
+        // equal since anchor-based letted grouping dedups the inlined copies too
+        expect(lettedRes.budgetSpent.cpu <= inlinedRes.budgetSpent.cpu).toBe(true);
+        expect(lettedRes.budgetSpent.mem <= inlinedRes.budgetSpent.mem).toBe(true);
     });
 
     test("vectorMul", async () => {

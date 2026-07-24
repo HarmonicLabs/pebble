@@ -11,6 +11,8 @@ import { handleHoistedAndReturnRoot } from "./subRoutines/handleHoistedAndReturn
 import { replaceNativesAndReturnRoot } from "./subRoutines/replaceNatives";
 import { replaceClosedLettedWithHoisted } from "./subRoutines/replaceClosedLettedWithHoisted";
 import { hoistForcedNatives } from "./subRoutines/hoistForcedNatives";
+import { iterTree } from "./_internal/iterTree";
+import { isForcedNativeTag } from "../IRNodes/IRNative/isForcedNative";
 import { handleRootRecursiveTerm } from "./subRoutines/handleRecursiveTerms";
 import { CompilerOptions, completeCompilerOptions, defaultOptions } from "./CompilerOptions";
 import { replaceHoistedWithLetted } from "./subRoutines/replaceHoistedWithLetted";
@@ -18,15 +20,18 @@ import { IRApp, IRCase, IRConstr, IRFunc, IRNative, IRVar } from "../IRNodes";
 import { replaceForcedNativesWithHoisted } from "./subRoutines/replaceForcedNativesWithHoisted";
 import { performUplcOptimizationsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/performUplcOptimizationsAndReturnRoot";
 import { rewriteNativesAppliedToConstantsAndReturnRoot } from "./subRoutines/rewriteNativesAppliedToConstantsAndReturnRoot";
+import { eliminateDataRoundTripsAndReturnRoot } from "./subRoutines/eliminateDataRoundTripsAndReturnRoot";
 import { rewriteToCaseOverConstAndReturnRoot } from "./subRoutines/rewriteToCaseOverConstAndReturnRoot";
 import { rewriteHeadTailInCaseConsAndReturnRoot } from "./subRoutines/rewriteHeadTailInCaseConsAndReturnRoot";
 import { introduceCaseForDualHeadTailAndReturnRoot } from "./subRoutines/introduceCaseForDualHeadTailAndReturnRoot";
 import { inlineSingleUseLetBindingsAndReturnRoot } from "./subRoutines/inlineSingleUseLetBindingsAndReturnRoot";
-import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr } from "../utils";
+import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr, prettyIRText } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusuedVarsAndReturnRoot/removeUnusuedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
 import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/ensureProperlyForcedBuiltinsAndReturnRoot";
+
+
 
 export function compileIRToUPLC(
     term: IRTerm,
@@ -44,6 +49,7 @@ export function compileIRToUPLC(
     ///////////////////////////////////////////////////////////////////////////////
 
     const options = completeCompilerOptions( paritalOptions );
+
 
     // const debugAsserts = (options as any).debugAsserts ?? false;
 
@@ -67,6 +73,10 @@ export function compileIRToUPLC(
 
     // term = preEvaluateDefinedTermsAndReturnRoot( term );
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
+    // struct-literal construction consumed in place produces
+    // decode-after-encode chains; eliminate them before anything else
+    // duplicates or shares them (see eliminateDataRoundTrips docs)
+    term = eliminateDataRoundTripsAndReturnRoot( term );
     // debugAsserts && _debug_assertions( term );
 
     // removing unused variables BEFORE going into the rest of the compilation
@@ -166,18 +176,34 @@ export function compileIRToUPLC(
 
     // debugAsserts && _debug_assertions( term );
 
-    // replaced hoisted terms might include new letted terms
+    // replaced hoisted terms might include new letted terms.
+    //
+    // ALSO: handling letted/hoisted terms can re-materialize custom
+    // (negative-tag) IRNatives from cached/cloned values that the earlier
+    // `replaceNativesAndReturnRoot` sweeps never saw (this shows up in
+    // contracts with enough methods for bodies to be shared — the natives
+    // then survive to the forcing pass and crash with
+    // "getNRequiredForces ... input was: -<tag>"). Lower them here too;
+    // `nativeToIR` introduces fresh IRHoisted wrappers, so the loop keeps
+    // draining until natives, letted and hoisted are ALL gone.
     while(
         includesNode(
             term,
-            node => 
+            node =>
                 node instanceof IRLetted
                 || node instanceof IRHoisted
+                || ( node instanceof IRNative && node.tag < 0 )
         )
     ) {
+        term = replaceNativesAndReturnRoot( term );
         term = handleLettedAndReturnRoot( term );
         term = handleHoistedAndReturnRoot( term );
     }
+
+    // second round-trip sweep: the letted/hoisted drain exposes
+    // encoder/decoder adjacencies that were wrapped in letted/hoisted
+    // nodes at the early sweep (constructions bound as letted values)
+    term = eliminateDataRoundTripsAndReturnRoot( term );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -236,15 +262,22 @@ export function compileIRToUPLC(
     // nodes the inliner doesn't recognize). Single-use uses trapped
     // inside nested closures are skipped — see the pass for details.
     term = inlineSingleUseLetBindingsAndReturnRoot( term );
+    // inlining brings encoders adjacent to their decoders: final sweep
+    term = eliminateDataRoundTripsAndReturnRoot( term );
     term = removeUnusedVarsAndReturnRoot( term );
 
     term = performUplcOptimizationsAndReturnRoot( term, options );
+
+    // the optimization passes can create fresh single-use bindings
+    // (case-of-known-constr rewrites etc.) — inline them too
+    term = inlineSingleUseLetBindingsAndReturnRoot( term );
 
     // Rewrite strictIfThenElse into IRCase-over-Const, and prune
     // trailing IRError continuations from any IRCase.
     term = rewriteToCaseOverConstAndReturnRoot( term );
 
     term = ensureProperlyForcedBuiltinsAndReturnRoot( term );
+
 
     if(
         options.addMarker &&
@@ -269,6 +302,13 @@ export function compileIRToUPLC(
     // );
 
     // debugAsserts && _debug_assertions( term );
+
+    // Debug aid: dump the final IR (pretty text, symbol descriptions) to
+    // stderr between markers when PEBBLE_DUMP_FINAL_IR is set. Used by the
+    // benchmark/optimization tooling in the-cardano-masterpiece.
+    if( process.env.PEBBLE_DUMP_FINAL_IR ) {
+        console.error( "===IR-DUMP-BEGIN===\n" + prettyIRText( term, 2 ) + "\n===IR-DUMP-END===" );
+    }
 
     // const srcmap = {};
     const uplc = term.toUPLC( ToUplcCtx.root() );

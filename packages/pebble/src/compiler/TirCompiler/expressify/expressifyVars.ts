@@ -42,7 +42,7 @@ import { TirUnaryMinus } from "../../tir/expressions/unary/TirUnaryMinus";
 import { TirUnaryPlus } from "../../tir/expressions/unary/TirUnaryPlus";
 import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
-import { bool_t, bytes_t, data_t, int_t, valueMapAmountOfName } from "../../tir/program/stdScope/stdScope";
+import { bool_t, bytes_t, data_t, int_t, valueMapAmountOfName, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { currentCompilationCtx } from "../../../IR/CompilationCtx";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
@@ -60,6 +60,8 @@ import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearM
 import { TirDataStructType, TirSoPStructType } from "../../tir/types/TirStructType";
 import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../tir/types/utils/getUnaliased";
+import { TirValueT } from "../../tir/types/TirNativeType/native/value";
+import { TirUnConstrDataResultT } from "../../tir/types/TirNativeType";
 import { expressify, expressifyFuncBody, LoopReplacements } from "./expressify";
 import { ExpressifyCtx, isExpressifyFuncParam } from "./ExpressifyCtx";
 import { flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct } from "./flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct";
@@ -405,7 +407,54 @@ function expressifyPropAccess(
             || expr instanceof TirLettedExpr
             || expr instanceof TirVariableAccessExpr
         ) {
-            let varName = ctx.properties.get( expr.varName )?.get( prop );
+            const resolution = ctx.findPropResolution( expr.varName, prop );
+            let varName = resolution.constName;
+
+            // DECODE-ONCE: on a cache miss for a single-constructor
+            // data-struct subject, register letted field extractors for ALL
+            // its fields in the subject's DEFINING scope, then resolve the
+            // property from the cache. Every later access to any field of
+            // this subject (from any scope below) reuses the SAME letted —
+            // sharing the `unConstrData`/fields decode instead of
+            // rebuilding the whole chain per access site (2-3.5x the
+            // `unConstrData` sites vs equivalent hand-shared code; see
+            // the-cardano-masterpiece BENCHMARK_ANALYSIS.md). Placement /
+            // evaluation position is unchanged in kind: the letted
+            // machinery inlines single refs and places multi-refs at their
+            // LCA with the usual case-branch barriers.
+            //
+            // Mutable subjects are excluded (a reassignment would make the
+            // cached extraction stale); multi-constructor and untagged
+            // structs keep the inline lowering below (they need a tag
+            // match / a different decode shape).
+            if( varName === undefined && resolution.definingCtx !== undefined )
+            {
+                const subjType = getUnaliased( expr.type );
+                const isConstSubject =
+                    !( expr instanceof TirVariableAccessExpr )
+                    || expr.resolvedValue.variableInfos.isConstant === true;
+                // The shared letteds are marked `siteScoped`: placement
+                // in `handleLetted` shares a PARTIAL extractor only where
+                // a spine witness proves evaluation-order neutrality, and
+                // falls back to per-reference inlining (the exact pre-
+                // decode-once code) otherwise.
+                if(
+                    isConstSubject
+                    && subjType instanceof TirDataStructType
+                    && subjType.constructors.length === 1
+                    && !subjType.untagged
+                    && subjType.constructors[0].fields.some( f => f.name === prop )
+                ) {
+                    resolution.definingCtx.introduceSingleConstrDataLettedFields(
+                        expr.varName,
+                        expr,
+                        subjType,
+                        true // siteScoped: per-use-site source semantics
+                    );
+                    varName = ctx.findPropResolution( expr.varName, prop ).constName;
+                }
+            }
+
             if( varName ) {
                 varName = ctx.getVariableSSA( varName )?.latestName ?? varName;
     
@@ -583,8 +632,24 @@ function expressifyMethodCall(
         // fast-path: `Value.amountOf(policy, name)` compiles directly to
         // `_amountOfValue(eqByteString(policy))(value)(eqByteString(name))`
         // skipping the wrapper function indirection.
+        // for the NATIVE-Value amountOf, the fast-path only applies when
+        // the object is a fresh fromData conversion whose RAW data we can
+        // walk instead (see `amountSubject` below) — a native Value is not
+        // caseable and must keep its `lookupCoin` wrapper.
+        // NOTE: deliberately NOT extended to the inline case-extraction
+        // shape (per-output predicate lookups): the walk's extra machine
+        // steps raised MEMORY across the board (steps carry mem cost) for
+        // a net-negative trade at the benchmark level.
+        const amountConv =
+            objectExpr instanceof TirLettedExpr
+            && objectExpr.expr instanceof TirFromDataExpr
+                ? objectExpr.expr
+                : ( objectExpr instanceof TirFromDataExpr ? objectExpr : undefined );
         if(
-            tirMethodName === valueMapAmountOfName
+            ( tirMethodName === valueMapAmountOfName
+              || ( tirMethodName === valueAmountOfName
+                   && amountConv !== undefined
+                   && getUnaliased( objectExpr.type ) instanceof TirValueT ) )
             && methodCall.args.length === 2
         ) {
             const [ policyArg, nameArg ] = methodCall.args;
@@ -616,9 +681,31 @@ function expressifyMethodCall(
                 )
             );
 
+            // RAW-DATA walk: `_amountOfValue` cases over the value's
+            // pair-list, so it works just as well on `unMapData( d )` as
+            // on `unValueData( d )` — and skips unValueData's whole-map
+            // validation/conversion cost (~7M per call on typical output
+            // values, the top remaining benchmark line in several
+            // scenarios). Ledger-provided values are canonical, and for
+            // a LOOKUP canonicity does not affect the result the ledger
+            // would compute anyway. Only applied when the object is a
+            // fresh fromData conversion (shared converted values keep
+            // their conversion for other uses; if this was the only use,
+            // the conversion letted dies as unused).
+            let amountSubject: TirExpr = objectExpr;
+            if( amountConv !== undefined && getUnaliased( objectExpr.type ) instanceof TirValueT )
+            {
+                amountSubject = new TirCallExpr(
+                    TirNativeFunc.unMapData,
+                    [ amountConv.dataExpr.clone() ],
+                    objectExpr.type, // runtime shape is the same pair-list
+                    callRange
+                );
+            }
+
             return new TirCallExpr(
                 amountOfValueNative,
-                [ isPolicy, objectExpr, isTokenName ],
+                [ isPolicy, amountSubject, isTokenName ],
                 int_t,
                 callRange
             );
@@ -730,9 +817,20 @@ function expressifyMethodCall(
             if( methodCall.args.length !== 1 ) throw new Error(
                 `Method 'lookup' of type 'LinearMap' takes 1 argument, ${methodCall.args.length} provided`
             );
+            // the native compares entry keys with `equalsData`: for a TYPED
+            // map (`LinearMap<bytes, bytes>` struct fields etc.) the key must
+            // be encoded to data first — otherwise the raw key reaches
+            // `equalsData` on-chain (`equalsData :: not data`). identity when
+            // the key type is already `data`.
+            //
+            // the RESULT stays a raw-data payload: by convention the `Some`
+            // of a SoP optional wraps raw data, and every consumer
+            // (destructure, `!`, `??`) applies `_inlineFromData` on
+            // extraction — see `TirCaseExpr._sopStructToIR`.
+            const keyData = new TirToDataExpr( methodCall.args[0], methodCall.args[0].range );
             return new TirCallExpr(
                 TirNativeFunc._lookupLinearMap( objectType.keyTypeArg, objectType.valTypeArg ),
-                [ methodCall.args[0], objectExpr ],
+                [ keyData, objectExpr ],
                 methodCall.type,
                 exprRange
             );

@@ -57,6 +57,7 @@ export function _compileOptionalDefaultExpr(
                 isConstant: true
             },
             isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false,
         },
         expr.range
     );

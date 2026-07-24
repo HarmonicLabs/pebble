@@ -49,7 +49,18 @@ export interface IRLettedMeta extends BaseIRMetadata {
     **/
     forceHoist: boolean,
     __src__?: string | undefined,
-    isClosed: boolean
+    isClosed: boolean,
+    /**
+     * `true` for letted values whose SOURCE semantics are per-use-site
+     * (decode-once shared field extractors introduced at property-access
+     * sites, NOT at a declaration statement): sharing them is an
+     * optimization that must never evaluate the value on a path where no
+     * use site would have — `handleLetted` only places them at a position
+     * with a "spine witness" (some reference reached without crossing a
+     * branch/lambda/delay edge) and falls back to per-reference inlining
+     * otherwise.
+     */
+    siteScoped?: boolean
 }
 
 export interface IRLettedMetadata extends IRMetadata {

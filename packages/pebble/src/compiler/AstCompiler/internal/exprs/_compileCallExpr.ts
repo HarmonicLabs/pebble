@@ -206,6 +206,7 @@ export function _compileCallExpr(
                         isConstant: true,
                     },
                     isDefinedOutsideFuncScope: true,
+                        crossesFunctionBoundary: false,
                 },
                 expr.funcExpr.range
             );

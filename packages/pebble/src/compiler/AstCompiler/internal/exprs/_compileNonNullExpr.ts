@@ -61,6 +61,7 @@ export function _compileNonNullExpr(
                             isConstant: true
                         },
                         isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false,
                     },
                     expr.range
                 ),

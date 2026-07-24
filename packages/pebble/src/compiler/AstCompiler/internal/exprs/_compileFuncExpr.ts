@@ -322,6 +322,7 @@ function _getDestructuredParamsAsVarDecls(
                     isConstant: true
                 },
                 isDefinedOutsideFuncScope: false,
+                        crossesFunctionBoundary: false,
             },
             tirParam.range
         );

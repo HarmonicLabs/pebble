@@ -36,7 +36,9 @@ import { ContractDecl } from "../../../../ast/nodes/statements/declarations/Cont
 import { StateDecl } from "../../../../ast/nodes/statements/declarations/StateDecl";
 import { FuncDecl } from "../../../../ast/nodes/statements/declarations/FuncDecl";
 import { ArrowKind } from "../../../../ast/nodes/expr/functions/ArrowKind";
-import { AstFuncType, AstVoidType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
+import { AstBooleanType, AstFuncType, AstVoidType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
+import { LessThanExpr } from "../../../../ast/nodes/expr/binary/BinaryExpr";
+import { DotPropAccessExpr } from "../../../../ast/nodes/expr/PropAccessExpr";
 import { StructConstrDecl, StructDecl, StructDeclAstFlags } from "../../../../ast/nodes/statements/declarations/StructDecl";
 import { NamedDeconstructVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/NamedDeconstructVarDecl";
 import { SimpleVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
@@ -62,6 +64,7 @@ import { TirDataStructType, TirStructConstr, TirStructField } from "../../../tir
 import { AstCompiler } from "../../AstCompiler";
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
 import { NonNullExpr } from "../../../../ast/nodes/expr/unary/NonNullExpr";
+import { DerivedContractTypes } from "./_deriveContractTypes";
 
 /**
  * 
@@ -90,6 +93,12 @@ export function _deriveContractBody(
     ) return new BlockStmt([
         new FailStmt( undefined, contractRange )
     ], contractRange);
+
+    // derive (or reuse, if the contract is also exported) the type-level
+    // symbols: datum union, merged direct redeemer union, per-state
+    // redeemer unions. also validates method-name uniqueness.
+    const derived = compiler.getOrDeriveContractTypes( contractDecl );
+    if( !derived ) return undefined;
 
     // contract body alwyas looks like:
     //
@@ -206,6 +215,7 @@ export function _deriveContractBody(
         const bodyStmts = _buildSpendCaseBlock(
             compiler,
             contractDecl,
+            derived,
             paramsInternalNamesMap,
             baseContextVars,
             contractRange
@@ -251,7 +261,7 @@ export function _deriveContractBody(
                 redeemerData: redeemerUniqueName,
                 policy: policyUniqueName,
             }),
-            "MintRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
@@ -295,7 +305,7 @@ export function _deriveContractBody(
                 redeemerData: redeemerUniqueName,
                 policy: credentialUniqueName,
             }),
-            "WithdrawRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
@@ -345,7 +355,7 @@ export function _deriveContractBody(
                 certificateIndex: indexUniqueName,
                 certificate: certificateUniqueName,
             }),
-            "CertifyRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
@@ -395,7 +405,7 @@ export function _deriveContractBody(
                 proposalIndex: indexUniqueName,
                 proposal: proposalUniqueName,
             }),
-            "ProposeRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
@@ -438,7 +448,7 @@ export function _deriveContractBody(
                 redeemerData: redeemerUniqueName,
                 voter: voterUniqueName,
             }),
-            "VoteRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( bodyStmts ) ) return undefined;
@@ -484,13 +494,14 @@ function _getMatchedPurposeBlockStatements(
     methods: FuncDecl[],
     paramsInternalNamesMap: Map<string, string>,
     contextVarsMapping: RenamedVariables,
-    baseRedeemerName: string,
+    /**
+     * pre-derived (and already registered) redeemer union for this
+     * dispatch site: the contract's MERGED direct union for direct-purpose
+     * arms (its constructors may be a superset of `methods`), or the
+     * per-state union for state spend arms.
+     */
+    redeemerTypeDef: StructDecl,
     contractRange: SourceRange,
-    // txUniqueName: string,
-    // purposeUniqueName: string,
-    // redeemerUniqueName: string,
-    // spendingRefUniqueName: string,
-    // optionalDatumUniqueName: string,
 ): BodyStmt[] | undefined
 {
     // usually 0 methods is checked before calling
@@ -499,15 +510,11 @@ function _getMatchedPurposeBlockStatements(
         new FailStmt( undefined, contractRange )
     ];
 
-    const redeemerTypeDef = _deriveRedeemerTypeDef(
-        baseRedeemerName, // "SpendRedeemer",
-        methods,
-        contractRange
-    );
-    compiler.registerInternalTypeDecl( redeemerTypeDef );
-
-    // if only one method, we can inline it
-    if( methods.length === 1 ) {
+    // inline shortcut ONLY when the whole union has a single constructor:
+    // with the merged direct union, an arm whose purpose has one method but
+    // whose union has more constructors must still go through the redeemer
+    // match so the constructor tag is actually checked.
+    if( redeemerTypeDef.constrs.length === 1 && methods.length === 1 ) {
         const method = methods[0];
         const stmts = _getRedeemerMethodBlockStatemets(
             compiler,
@@ -1374,33 +1381,10 @@ function _exprReplaceParamsAndAssertNoLitContext(
     throw new Error("unreachable::_exprReplaceParamsAndAssertNoLitContext");
 }
 
-function _deriveContractDatumTypeDef(
-    contractName: string,
-    stateDecls: readonly StateDecl[],
-    contractRange: SourceRange,
-): StructDecl
-{
-    let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
-
-    return new StructDecl(
-        new Identifier( contractName, contractRange ),
-        [], // typeParams
-        stateDecls.map( s =>
-            new StructConstrDecl(
-                new Identifier( s.name.text, s.name.range ),
-                s.fields,
-                s.range
-            )
-        ),
-        defFlags,
-        contractRange
-    );
-}
-
 function _buildSpendCaseBlock(
     compiler: AstCompiler,
     contractDecl: ContractDecl,
+    derived: DerivedContractTypes,
     paramsInternalNamesMap: Map<string, string>,
     baseContextVars: RenamedVariables,
     contractRange: SourceRange,
@@ -1417,18 +1401,13 @@ function _buildSpendCaseBlock(
             contractDecl.spendMethods,
             paramsInternalNamesMap,
             baseContextVars,
-            "SpendRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
     }
 
-    // synthetic union datum type
-    const datumTypeDef = _deriveContractDatumTypeDef(
-        contractDecl.name.text,
-        contractDecl.stateDecls,
-        contractRange
-    );
-    compiler.registerInternalTypeDecl( datumTypeDef );
+    // synthetic union datum type (derived + registered upfront)
+    const datumTypeDef = derived.datumTypeDef!;
     const datumTypeName = datumTypeDef.name.text;
 
     // build fallback (used when datum is absent or doesn't match any state)
@@ -1462,7 +1441,7 @@ function _buildSpendCaseBlock(
             contractDecl.spendMethods,
             paramsInternalNamesMap,
             baseContextVars,
-            "SpendRedeemer",
+            derived.directRedeemerTypeDef!,
             contractRange,
         );
         if( !Array.isArray( plainBody ) ) return undefined;
@@ -1579,7 +1558,7 @@ function _buildSpendCaseBlock(
                 stateDecl.spendMethods,
                 paramsInternalNamesMap,
                 perStateContextVars,
-                `${stateDecl.name.text}Redeemer`,
+                derived.stateRedeemerTypeDefs.get( stateDecl.name.text )!,
                 stateDecl.range,
             );
             if( !Array.isArray( redeemerStmts ) ) return undefined;
@@ -1649,6 +1628,66 @@ function _buildSpendCaseBlock(
         contractRange
     );
 
+    // BUG 20 (masterpiece): the datum is UNTRUSTED data — the state match
+    // lowers to a bare `case` over the union constructors, so an ill-formed
+    // datum (non-constr, or an unknown constructor tag) crashed BEFORE
+    // dispatch instead of reaching the bare-`spend` fallback. Guard the
+    // decode explicitly:
+    //   if( chooseData<bool>( datum, true, false.. ) )   // is it a constr?
+    //       if( unConstrData( datum ).index < nStates )  // known state tag?
+    //           <cast + state match>
+    //       else fallback
+    //   else fallback
+    const mkStdBuiltin = ( fn: string ) => new DotPropAccessExpr(
+        new DotPropAccessExpr(
+            new Identifier( "std", mockRange ),
+            new Identifier( "builtins", mockRange ),
+            mockRange
+        ),
+        new Identifier( fn, mockRange ),
+        mockRange
+    );
+    const datumIsConstrCond = new CallExpr(
+        mkStdBuiltin( "chooseData" ),
+        [ new AstBooleanType( mockRange ) ],
+        [
+            new Identifier( datumUniqueName, mockRange ),
+            new LitTrueExpr( mockRange ),   // caseConstr
+            new LitFalseExpr( mockRange ),  // caseMap
+            new LitFalseExpr( mockRange ),  // caseList
+            new LitFalseExpr( mockRange ),  // caseIData
+            new LitFalseExpr( mockRange ),  // caseBData
+        ],
+        mockRange
+    );
+    const datumTagInRangeCond = new LessThanExpr(
+        new DotPropAccessExpr(
+            new CallExpr(
+                mkStdBuiltin( "unConstrData" ),
+                undefined, // genericTypeArgs
+                [ new Identifier( datumUniqueName, mockRange ) ],
+                mockRange
+            ),
+            new Identifier( "index", mockRange ),
+            mockRange
+        ),
+        new LitIntExpr( BigInt( contractDecl.stateDecls.length ), mockRange ),
+        mockRange
+    );
+    const guardedDatumDispatch = new IfStmt(
+        datumIsConstrCond,
+        new BlockStmt([
+            new IfStmt(
+                datumTagInRangeCond,
+                new BlockStmt( [ datumAsUnionBindStmt, datumMatchStmt ], contractRange ),
+                new BlockStmt( makeFallbackBody(), contractRange ),
+                mockRange
+            )
+        ], contractRange ),
+        new BlockStmt( makeFallbackBody(), contractRange ),
+        mockRange
+    );
+
     // outer match: optionalDatum -> Some{ value: datum } / Nothing
     const optionalMatch = new MatchStmt(
         new Identifier( baseContextVars.optionalDatum, mockRange ),
@@ -1669,7 +1708,7 @@ function _buildSpendCaseBlock(
                     contractRange
                 ),
                 new BlockStmt(
-                    [ datumAsUnionBindStmt, datumMatchStmt ],
+                    [ guardedDatumDispatch ],
                     contractRange
                 ),
                 contractRange
@@ -1696,53 +1735,4 @@ function _buildSpendCaseBlock(
     if( fallbackBindStmt ) result.push( fallbackBindStmt );
     result.push( optionalMatch );
     return result;
-}
-
-function _deriveRedeemerTypeDef(
-    redeemerName: string,
-    methods: FuncDecl[],
-    contractRange: SourceRange,
-): StructDecl
-{
-    let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( methods.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
-
-    const uniqueName = getUniqueInternalName( redeemerName );
-    return new StructDecl(
-        new Identifier( uniqueName, SourceRange.mock ),
-        [], // typeParams
-        methods.map( m => {
-            const methodParams = m.expr.signature.params;
-            if(!methodParams.every( p =>
-                p instanceof SimpleVarDecl && !p.initExpr && p.type
-            )) throw new Error("Contract method parameters not simplified befor inferring redeemer definition.");
-
-            return new StructConstrDecl(
-                new Identifier( m.expr.name.text, m.expr.name.range ),
-                methodParams as SimpleVarDecl[],
-                contractRange
-            );
-        }), // contructors
-        defFlags,
-        contractRange
-    );
-    /*
-    return new TirDataStructType(
-        uniqueName,
-        "", // fileUid
-        methods.map( m =>
-            new TirStructConstr(
-                m.expr.name.text,
-                m.expr.signature.params.map( p =>
-                    new TirStructField(
-                        p.name.text,
-                        p.type!,
-                    )
-                )
-            )
-        ),
-        new Map(), // no methods
-        methods.length <= 1, // untagged if there is only one method
-    );
-    //*/
 }

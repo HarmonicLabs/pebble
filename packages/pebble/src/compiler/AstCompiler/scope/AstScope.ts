@@ -56,6 +56,14 @@ export interface JsonScope {
 export interface ResolveValueResult {
     variableInfos: IVariableInfos;
     isDefinedOutsideFuncScope: boolean;
+    /**
+     * `true` iff resolving crossed the START of a function (a lambda /
+     * function / method body scope): the binding belongs to an ENCLOSING
+     * function and is being CAPTURED by a closure.
+     * (unlike `isDefinedOutsideFuncScope`, block/branch/loop scopes inside
+     * the same function do NOT count.)
+     */
+    crossesFunctionBoundary?: boolean;
 }
 
 export interface IVariableInfos {
@@ -94,6 +102,22 @@ export interface PossibleTirTypes {
     allTirNames: Set<string>;
     methodsNames: Map<AstFuncName, TirFuncName>;
     isGeneric: boolean;
+}
+
+/**
+ * type-level symbols of an `export contract` declaration
+ * (`redeemerof C` / `redeemerof C.State` resolve through this).
+ */
+export interface AstContractSymbol {
+    name: string;
+    /** data-encoded state-datum union TIR key; `undefined` if the contract has no states */
+    datumTirName: string | undefined;
+    /** merged direct-methods redeemer union TIR key; `undefined` if no direct methods */
+    directRedeemerTirName: string | undefined;
+    /** state name -> that state's spend redeemer union TIR key */
+    stateRedeemerTirNames: ReadonlyMap<string, string>;
+    /** all state names, including spend-less ones (for diagnostics) */
+    stateNames: readonly string[];
 }
 
 export class AstScope
@@ -143,6 +167,11 @@ export class AstScope
      * namespaces are compile-time only; they do not emit IR
      */
     readonly namespaces: Map<string, NamespaceSymbol> = new Map();
+    /**
+     * ast name -> exported-contract symbol (see `AstContractSymbol`);
+     * compile-time only, like namespaces
+     */
+    readonly contracts: Map<string, AstContractSymbol> = new Map();
 
     /**
      * Generic type parameters in scope, e.g. while compiling the signature
@@ -164,6 +193,8 @@ export class AstScope
         parent: AstScope | undefined,
         readonly program: TypedProgram,
         infos: Partial<ScopeInfos>,
+        /** `true` ONLY for the scope where a function/lambda/method BODY starts */
+        readonly isFunctionBoundary: boolean = false,
     ) {
         this.infos = normalizeScopeInfos( infos );
         this._isReadonly = false;
@@ -193,7 +224,8 @@ export class AstScope
             variableInfos: narrowed
                 ? { ...localValue, type: narrowed }
                 : localValue,
-            isDefinedOutsideFuncScope: false
+            isDefinedOutsideFuncScope: false,
+            crossesFunctionBoundary: false
         };
 
         if( this.parent )
@@ -205,7 +237,10 @@ export class AstScope
                 variableInfos: narrowed
                     ? { ...parentValue.variableInfos, type: narrowed }
                     : parentValue.variableInfos,
-                isDefinedOutsideFuncScope: parentValue.isDefinedOutsideFuncScope || this.infos.isFunctionDeclScope
+                isDefinedOutsideFuncScope: parentValue.isDefinedOutsideFuncScope || this.infos.isFunctionDeclScope,
+                // the binding lives above; if THIS scope starts a function
+                // body, the access captures it from an enclosing function
+                crossesFunctionBoundary: parentValue.crossesFunctionBoundary || this.isFunctionBoundary
             };
         }
 
@@ -313,9 +348,9 @@ export class AstScope
 
     readonly(): void { this._isReadonly = true; }
 
-    newChildScope( infos: Partial<ScopeInfos> ): AstScope
+    newChildScope( infos: Partial<ScopeInfos>, isFunctionBoundary: boolean = false ): AstScope
     {
-        return new AstScope( this, this.program, infos );
+        return new AstScope( this, this.program, infos, isFunctionBoundary );
     }
 
     /**
@@ -370,6 +405,25 @@ export class AstScope
         return (
             this.namespaces.get( name )
             ?? this.parent?.resolveNamespace( name )
+        );
+    }
+
+    /** define an exported-contract symbol; returns `false` if shadowed in current scope */
+    defineContract( sym: AstContractSymbol ): boolean
+    {
+        if( this._isReadonly ) return false;
+        if( invalidSymbolNames.has( sym.name ) ) return false;
+        if( this.contracts.has( sym.name ) ) return false;
+        this.contracts.set( sym.name, sym );
+        return true;
+    }
+
+    /** resolve an exported-contract symbol by walking the scope chain */
+    resolveContract( name: string ): AstContractSymbol | undefined
+    {
+        return (
+            this.contracts.get( name )
+            ?? this.parent?.resolveContract( name )
         );
     }
 
@@ -486,6 +540,9 @@ export class AstScope
 
         for( const [ name, ns ] of this.namespaces )
             cloned.namespaces.set( name, ns );
+
+        for( const [ name, sym ] of this.contracts )
+            cloned.contracts.set( name, sym );
 
         return cloned;
     }

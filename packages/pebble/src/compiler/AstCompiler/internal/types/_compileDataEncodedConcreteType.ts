@@ -1,5 +1,7 @@
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
+import { AstRedeemerOfTypeExpr } from "../../../../ast/nodes/types/AstRedeemerOfTypeExpr";
 import { _compileQualifiedNamedTypeExpr } from "./_compileQualifiedNamedTypeExpr";
+import { _compileRedeemerOfTypeExpr } from "./_compileRedeemerOfTypeExpr";
 import { AstVoidType, AstBooleanType, AstIntType, AstBytesType, AstNativeOptionalType, AstListType, AstLinearMapType, AstFuncType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
 import { AstTypeExpr } from "../../../../ast/nodes/types/AstTypeExpr";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
@@ -17,6 +19,8 @@ export function _compileDataEncodedConcreteType(
     optionalsAsSop: boolean = false
 ): TirType | undefined
 {
+    if( typeExpr instanceof AstRedeemerOfTypeExpr )
+        return _compileRedeemerOfTypeExpr( ctx, typeExpr );
     if( typeExpr instanceof AstVoidType ) return ctx.program.stdTypes.void;
     if( typeExpr instanceof AstBooleanType ) return ctx.program.stdTypes.bool;
     if( typeExpr instanceof AstIntType ) return ctx.program.stdTypes.int;

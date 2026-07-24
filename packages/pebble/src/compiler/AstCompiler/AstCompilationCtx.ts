@@ -57,11 +57,14 @@ export class AstCompilationCtx extends DiagnosticEmitter
     {
         return new AstCompilationCtx(
             this.program,
-            this.scope.newChildScope({
-                ...this.scope.infos,
-                isFunctionDeclScope: true,
-                isMethodScope: isMethod
-            }),
+            this.scope.newChildScope(
+                {
+                    ...this.scope.infos,
+                    isFunctionDeclScope: true,
+                    isMethodScope: isMethod
+                },
+                true // function BOUNDARY: accesses crossing it are captures
+            ),
             { // function ctx
                 parentFunctionCtx: this.functionCtx,
                 returnType

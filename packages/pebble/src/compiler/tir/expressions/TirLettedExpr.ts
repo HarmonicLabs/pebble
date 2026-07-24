@@ -22,6 +22,8 @@ export class TirLettedExpr
         readonly range: SourceRange,
         _unsafeVarSym?: symbol | undefined,
         _creationStack?: string | undefined,
+        /** see `IRLettedMeta.siteScoped` */
+        readonly siteScoped: boolean = false,
     ) {
         if(!(
             typeof varName === "string"
@@ -59,7 +61,8 @@ export class TirLettedExpr
             this.expr.clone() as any,
             this.range.clone(),
             this._irVarSym,
-            this._creationStack
+            this._creationStack,
+            this.siteScoped
         );
     }
     
@@ -69,7 +72,8 @@ export class TirLettedExpr
     {
         return new IRLetted(
             this._irVarSym,
-            this.expr.toIR( ctx )
+            this.expr.toIR( ctx ),
+            this.siteScoped ? { siteScoped: true } : {}
         );
     }
 }

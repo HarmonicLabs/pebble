@@ -104,6 +104,7 @@ export function tryResolveNamespaceChain(
                             type: funcExpr.type,
                         },
                         isDefinedOutsideFuncScope: true,
+                        crossesFunctionBoundary: false,
                     },
                     seg.range
                 )
