@@ -139,6 +139,18 @@ function comptimeInt( term: IRTerm ): bigint | undefined {
  * loop body: evaluating it eagerly (possibly more often than the closure
  * would have, e.g. zero times) must not introduce a crash that the lazy
  * placement would have avoided.
+ *
+ * KNOWN OVER-APPROXIMATION (higher-order redexes): the walk pushes a
+ * redex's body and args separately without substituting, so an argument
+ * that is itself a closure is treated as an unapplied "never runs" value.
+ * A loop is a fixpoint `(λrecBody. … recBody …) loopBodyFunc`, so a loop
+ * CALL is reported total even when its body can fail. Do NOT rely on this
+ * predicate to prove a loop call's totality (that mistake let dead-code
+ * elimination delete a whole ownership-check loop — masterpiece BUG 26,
+ * fixed at the source in `expressify`'s bare-loop lowering instead).
+ * Tightening it here is unsafe for PERFORMANCE: `const`s whose value is a
+ * recursive helper call would stop floating out of closures and be
+ * re-evaluated per call — the BUG 16 / BUG 24 compute-once regressions.
  */
 export function isSafeToEagerlyEvaluate( term: IRTerm ): boolean {
     const stack: IRTerm[] = [ term ];

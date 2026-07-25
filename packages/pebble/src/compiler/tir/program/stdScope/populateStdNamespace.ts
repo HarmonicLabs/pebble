@@ -33,6 +33,7 @@ import {
     valueInsertCoinName, valueUnionName, valueContainsName,
     valueScaleName, valueToDataName,
     getCredentialHashFuncName,
+    valueZeroConstName,
 } from "./stdScope";
 
 /**
@@ -838,6 +839,27 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineAliasFromProgram( valueNsScope,      "contains",  valueContainsName );
     defineAliasFromProgram( valueNsScope,      "scale",     valueScaleName );
     defineAliasFromProgram( valueNsScope,      "toData",    valueToDataName );
+
+    // std.value.zero — the empty native Value. The constant itself (and the
+    // IR that builds it) lives in `stdScope`, next to the `Value` alias whose
+    // method table it must carry; here we only expose it as a namespace
+    // member. Keyed by the SOURCE name so `std.value.zero` resolves, while
+    // the infos carry the unique tir name that indexes `program.constants`
+    // (same shape as top-level user consts — see `AstCompiler`).
+    {
+        const zeroDecl = program.constants.get( valueZeroConstName );
+        if( zeroDecl )
+        {
+            valueNsScope.defineValue({
+                name: "zero",
+                type: zeroDecl.type,
+                isConstant: true,
+            });
+            const zeroInfos = valueNsScope.variables.get("zero");
+            if( zeroInfos ) zeroInfos.name = valueZeroConstName;
+        }
+    }
+
     // std.valueMap.* — methods on the legacy AssocMap-of-AssocMap representation
     defineAliasFromProgram( valueMapNsScope,   "amountOf",  valueMapAmountOfName );
     defineAliasFromProgram( valueMapNsScope,   "lovelaces", valueMapLovelacesName );

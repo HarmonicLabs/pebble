@@ -47,6 +47,8 @@ export const valueUnionName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueUnion";
 export const valueContainsName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueContains";
 export const valueScaleName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueScale";
 export const valueToDataName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueToData";
+/** the `std.value.zero` program constant (the empty native Value) */
+export const valueZeroConstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueZero";
 export const getCredentialHashFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "getCredentialHash";
 
 export function populateStdScope( program: TypedProgram ): void
@@ -888,6 +890,47 @@ export function populatePreludeScope( program: TypedProgram ): void
             [ "toData",    valueToDataName   ],
         ])
     );
+
+    // `std.value.zero` — the EMPTY native Value.
+    //
+    // There is no UPLC constant of the builtin Value type (it is not even
+    // caseable), so it must be BUILT at runtime out of an empty map:
+    //
+    //     unValueData( mapData( mkNilPairData( () ) ) )
+    //
+    // Registering it in `program.constants` is what makes it shared:
+    // `expressify` turns every program constant into a `TirHoistedExpr`, and
+    // `TirInlineClosedIR.toIR` wraps the term in an `IRHoisted` — so however
+    // many times a contract mentions `std.value.zero`, the script builds it
+    // ONCE, and scripts that never mention it don't contain it at all.
+    //
+    // Typed with the `Value` ALIAS (not the bare native type) so it carries
+    // the method table above: `std.value.zero.lovelaces()` and friends work
+    // like on any other Value. The namespace member itself is bound in
+    // `populateStdNamespace` (which reads this constant back by name).
+    program.constants.set(
+        valueZeroConstName,
+        new TirSimpleVarDecl(
+            valueZeroConstName,
+            value_t,
+            new TirInlineClosedIR(
+                value_t,
+                () => _ir_apps(
+                    IRNative.unValueData,
+                    _ir_apps(
+                        IRNative.mapData,
+                        _ir_apps( IRNative.mkNilPairData, IRConst.unit )
+                    )
+                ),
+                SourceRange.unknown
+            ),
+            true, // isConst
+            SourceRange.unknown,
+            undefined, // no type-annotation range
+            "zero" // source name
+        )
+    );
+
     // Value.lovelaces(): int  -- lookupCoin "" "" self
     preludeScope.program.functions.set(
         valueLovelacesName,

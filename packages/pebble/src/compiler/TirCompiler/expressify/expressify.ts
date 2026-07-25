@@ -825,10 +825,25 @@ export function expressifyFuncBody(
             // are tail-positioned and their value must match the outer
             // function's expected return type — we don't try to reconcile
             // that here).
+            // ...and only when the reassigned variable is actually READ
+            // after the loop. If it is not, the bare result is bound as a
+            // letted constant nothing references, and letteds only
+            // materialize at their references — the binding, and with it
+            // the WHOLE LOOP (including any `assert` in its body), was
+            // dropped from the compiled script. That silently deleted an
+            // ownership-check loop: masterpiece BUG 26. With the result
+            // dead we keep the SoP path instead, where the loop call is
+            // the scrutinee of an `IRCase` and therefore always evaluated.
+            const bareVarName: string | undefined = reassignedAndFlow.reassigned[0];
+            const bareVarIsReadAfterLoop = (
+                typeof bareVarName === "string"
+                && bodyStmts.some( s => s.deps().includes( bareVarName ) )
+            );
             const canBareLower = (
                 reassignedAndFlow.reassigned.length === 1
                 && !reassignedAndFlow.returns
                 && !definitelyTerminates
+                && bareVarIsReadAfterLoop
             );
 
             const loopExprCtx = ctx.newChild();
@@ -852,6 +867,8 @@ export function expressifyFuncBody(
                 // existing `letted[varName] = initialValue` binding (from
                 // the original `let varName = ...` statement) isn't
                 // shadowed by a no-op `introduceLettedConstant` call.
+                // Sound only because `canBareLower` requires the variable
+                // to be read after the loop (see above).
                 const [ varName ] = reassignedAndFlow.reassigned;
                 const loopResultName = getUniqueInternalName( varName );
                 const lettedExpr = ctx.introduceLettedConstant(

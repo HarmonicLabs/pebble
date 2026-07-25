@@ -55,15 +55,13 @@ export function tryResolveNamespaceChain(
         const variable = pub.variables.get( name );
         if( variable )
         {
-            // last segment must end here; if not, the chain is invalid
-            if( i !== segments.length - 1 )
-            {
-                ctx.error(
-                    DiagnosticCode.Property_0_does_not_exist_on_type_1,
-                    seg.range, segments[i + 1].text, variable.type.toString()
-                );
-                return { kind: "incomplete" };
-            }
+            // A namespace VALUE member may be dotted further — the rest of
+            // the chain is property/method access ON THAT VALUE, not more
+            // namespace segments (`std.value.zero.lovelaces()`). Bail out
+            // silently so the caller compiles the prefix as an expression
+            // and resolves the remaining props the normal way (which also
+            // produces the right diagnostic when a prop truly is missing).
+            if( i !== segments.length - 1 ) return undefined;
             return {
                 kind: "value",
                 expr: new TirVariableAccessExpr(

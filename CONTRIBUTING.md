@@ -17,6 +17,7 @@ Here you find some guidelines that will help you get the best the community has 
 - [Before you get started](#before_get_started)
     - [best practices](#best_practices)
     - [code style guide](#style_guide)
+    - [dependency audits](#dep_audits)
 - [What can I do to contribute?]
     - [Report Bugs](#)
     - [Suggest Enhancements](#)
@@ -54,3 +55,36 @@ Before you start contributing to ```plu-ts``` consider having a look at the [bes
 <a name="best_practices"></a>
 
 ### best practices
+
+<a name="dep_audits"></a>
+
+### dependency audits
+
+`npm install` currently prints a banner about ~19 *high severity* advisories.
+**They do not affect anything we publish.** Every one of them comes from a
+single root cause inside jest's own dependency chain
+(`brace-expansion` → `minimatch` → `glob` → `test-exclude` / `@jest/reporters`
+/ `babel-plugin-istanbul`), all of it `devDependencies`. We publish `dist`
+only, so none of it reaches users.
+
+Audit what actually ships:
+
+```bash
+npm run audit    # npm audit --omit=dev  ->  found 0 vulnerabilities
+```
+
+**Never run `npm audit fix --force` in this repo.** Two traps:
+
+- npm's proposed "fix" is `jest@19.0.2` (a 2017 release). Forcing it swaps
+  jest between majors — 30 → 25 → 30 — and the same advisory reappears from
+  whichever tree it lands in, so it never converges. All it achieves is
+  lockfile churn.
+- Do not add an `overrides` entry for `brace-expansion@^5` either. Version 5
+  changed its CommonJS export from a bare function to `{ expand }`, while
+  `minimatch` still calls it as a function — forcing it breaks the whole test
+  runner with `expand is not a function`. Only `minimatch@10.2.5+` is built
+  for the new API, and `test-exclude@6` still requires `minimatch@3`, so the
+  chain can only be resolved upstream by jest.
+
+If the banner bothers you in CI, gate on `npm run audit` instead of
+`npm audit`.

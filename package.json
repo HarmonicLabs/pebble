@@ -11,7 +11,8 @@
     "build-cli:no-commit": "cd packages/pebble-cli && npm run build && cd ../..",
     "pub": "npm run pub-pebble && sleep 10 && npm run build-cli",
     "buidl": "npm run build",
-    "test": "jest"
+    "test": "jest",
+    "audit": "npm audit --omit=dev"
   },
   "author": "Harmonic Labs",
   "license": "Apache-2.0",

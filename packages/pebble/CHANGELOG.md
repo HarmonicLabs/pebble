@@ -2,6 +2,36 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.1
+
+- **New `std.value.zero`** — the empty native `Value`. There is no UPLC
+  constant of the builtin Value type, so it is built at runtime from an
+  empty map (`unValueData( mapData( mkNilPairData( () ) ) )`) and HOISTED:
+  however many times a contract mentions it the script builds it once, and
+  scripts that never mention it don't contain it. Carries the full `Value`
+  method table (`.lovelaces()`, `.amountOf(..)`, `.union(..)`, ...) and
+  works as the identity for `+` / `union` and as a loop-accumulator seed.
+
+- A namespace member that is a VALUE can now be dotted further —
+  `std.value.zero.lovelaces()` — instead of being rejected as an
+  incomplete namespace path.
+
+- **⚠ SECURITY: a loop whose checks were its only purpose was DELETED.**
+  When a loop's single reassigned variable was dead after the loop, its
+  result was bound as a letted constant nothing referenced — and letteds
+  only materialize at their references, so the whole loop, asserts
+  included, never reached the compiled script. A validator's "for every
+  owned item, require the holder's signature" loop compiled to nothing
+  (masterpiece BUG 26: anyone could edit anyone's plot; the reduced repro
+  compiled to a 36-byte always-accept script). Such loops now keep the SoP
+  lowering, where the loop call is a `case` scrutinee and is therefore
+  always evaluated. Perf-neutral; affected scripts get bigger because the
+  missing checks are back. **Recompile and redeploy any contract with a
+  loop whose checks are its only effect.** Covered by 13 tests in
+  `compiler.masterpieceBugs.0_4_0.effectOnlyLoop.test.ts` (`for`/`while`/
+  `for-of`, sequential and nested loops, per-iteration and no-over-run
+  checks, a structural check, and the `find`-destructure symptom).
+
 ## v0.4.0
 
 Planned as 0.3.7; promoted to 0.4.0 for scope: cross-contract type
