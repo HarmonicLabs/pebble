@@ -100,8 +100,13 @@ export class TirLitNamedObjExpr
         }
         
         if( type instanceof TirSoPStructType ) {
+            // the runtime tag is the constructor's index in the ORIGINAL
+            // (un-narrowed) type — `case` dispatches by that same index.
+            // Previously hardcoded to 0, so every non-first variant ran the
+            // first arm (masterpiece/audit BUG 27). `parentCtorIdx` is
+            // identity for un-narrowed types.
             return new IRConstr(
-                0,
+                type.parentCtorIdx( ctorIdx ),
                 namedFields.map(({ expr }) => expr.toIR( ctx ) )
             );
         }

@@ -258,13 +258,37 @@ export function _compileCallExpr(
     if( funcType.argTypes.length < expr.args.length )
         expr.args.length = funcType.argTypes.length; // drop extra
 
+    const args = expr.args.map((arg, i) =>
+        _compileExpr( ctx, arg, funcType.argTypes[i] )
+    ) as TirExpr[]; // we early return in case of undefined
+    if( args.some( a => !a ) ) return undefined;
+
+    // A non-template callee whose signature still carries free `TirTypeParam`s
+    // — the built-in `List.map` / `LinearMap.map`, whose callback `(A) => B`
+    // introduces a `B` that only the argument determines. Infer those params
+    // from the (now concrete) arguments and substitute them into the
+    // signature, so the RESULT type is concrete (`List<B>` → `List<int>`) and
+    // the per-argument checks below compare against resolved types (audit
+    // BUG 39). Concrete signatures skip this and behave exactly as before.
+    if( !funcType.isConcrete() )
+    {
+        const env = new Map<symbol, TirType>();
+        for( let i = 0; i < args.length && i < funcType.argTypes.length; i++ )
+        {
+            // best-effort: an arg that does not unify just leaves params
+            // unbound, and the canAssignTo check below reports it precisely.
+            inferTypeArgs( funcType.argTypes[i], args[i].type, env );
+        }
+        if( env.size > 0 )
+        {
+            funcType = substituteTypeParams( funcType, env ) as TirFuncT;
+        }
+    }
+
     const finalCallExprType = funcType.argTypes.length === expr.args.length ?
         funcType.returnType :
         new TirFuncT( funcType.argTypes.slice( expr.args.length ), funcType.returnType );
 
-    const args = expr.args.map((arg, i) =>
-        _compileExpr( ctx, arg, funcType.argTypes[i] )
-    ) as TirExpr[]; // we early return in case of undefined
     for( let i = 0; i < args.length; i++ )
     {
         const arg = args[i];

@@ -13,11 +13,20 @@ import { isTirType, TirType } from "../types/TirType";
 import { populatePreludeScope, populateStdScope } from "./stdScope/stdScope";
 import { populateStdNamespace } from "./stdScope/populateStdNamespace";
 import { populateBuiltinInterfaces } from "./stdScope/populateBuiltinInterfaces";
+import { getAppliedTirTypeName } from "./getAppliedTirTypeName";
 import { StdTypes } from "./stdScope/StdTypes";
 
 export interface IGenericType {
     arity: number;
     apply: ( argsTirNames: string[] ) => (TirType | undefined);
+    /**
+     * Build the applied type directly from TirType arguments (which MAY be
+     * `TirTypeParam`s). Unlike `apply` this does not resolve names or require
+     * concreteness, and does not cache — used to lower a generic container in
+     * a still-generic signature, e.g. `List<T>` inside `function f<T>(...)`
+     * (audit BUG 32). Monomorphization later substitutes the type params.
+     */
+    mkApplied: ( tyArgs: TirType[] ) => TirType;
 }
 
 /**
@@ -253,9 +262,28 @@ export class TypedProgram extends DiagnosticEmitter
     {
         const genericInfos = this.genericTypes.get( genericTirKey );
         if( typeof genericInfos !== "object" ) return undefined;
-        const { arity, apply } = genericInfos;
+        const { arity, apply, mkApplied } = genericInfos;
         if( concreteArgsNames.length < arity ) return undefined;
         concreteArgsNames = concreteArgsNames.slice( 0, arity );
+
+        // If any argument is a still-generic TirType (a `TirTypeParam`, or a
+        // container that itself embeds one), we cannot resolve it to a
+        // concrete registered name. Build the applied type SYMBOLICALLY
+        // instead — e.g. `List<T>` in a generic signature becomes
+        // `TirListT(TirTypeParam T)`; monomorphization substitutes it later
+        // (audit BUG 32). This never caches (the result is not concrete).
+        const someArgIsGeneric = concreteArgsNames.some(
+            t => typeof t !== "string" && !t.isConcrete()
+        );
+        if( someArgIsGeneric )
+        {
+            return mkApplied(
+                concreteArgsNames.map( t =>
+                    typeof t === "string" ? this.types.get( t )! : t
+                )
+            );
+        }
+
         // `apply` also defines the applied concrete type
         const applied = apply( concreteArgsNames.map( t => typeof t === "string" ? t : t.toConcreteTirTypeName() ) );
         if( !applied ) return undefined;
@@ -270,6 +298,7 @@ export class TypedProgram extends DiagnosticEmitter
     {
         return {
             arity,
+            mkApplied,
             apply: _genericInfosApply.bind({
                 program: this,
                 tirKey,
@@ -295,13 +324,6 @@ export class TypedProgram extends DiagnosticEmitter
 // it can be removed,
 // and in `_genericInfosApply` the method `.toConcreteTirTypeName()`
 // should be used to save the type in the program
-export function getAppliedTirTypeName(
-    baseName: string,
-    args: string[]
-): string
-{
-    return `${baseName}<${args.join(",")}>`;
-}
 
 interface GenericInfosApplyScope {
     program: TypedProgram;

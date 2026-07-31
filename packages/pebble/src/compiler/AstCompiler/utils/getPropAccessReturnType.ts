@@ -62,6 +62,7 @@ export function getPropAccessReturnType(
             || objType instanceof TirDataT
             || objType instanceof TirListT
             || objType instanceof TirLinearMapT
+            || objType instanceof TirValueT
             || isTirOptType( objType )
         )
         return new TirFuncT([], bytes_t );
@@ -203,7 +204,17 @@ function getStructPropAccessReturnType(
         }
     }
 
-    return findPropInImpls( ctx, structType.methodNamesPtr, propName );
+    const userImpl = findPropInImpls( ctx, structType.methodNamesPtr, propName );
+    if( userImpl ) return userImpl;
+
+    // Universal `.show(): bytes` fallback for structs with no user-declared
+    // `show` impl: data-encoded structs auto-derive via `_showIR`
+    // (serialiseData + hex). The universal-type branch above only lists the
+    // primitive/container types, so without this a plain `data struct`
+    // reported "Property 'show' does not exist" despite the lowering existing.
+    if( propName === "show" ) return new TirFuncT([], bytes_t );
+
+    return undefined;
 }
 
 function findPropInImpls(

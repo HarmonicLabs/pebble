@@ -11,6 +11,7 @@ import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop
 import { TirType } from "../../../tir/types/TirType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileDataEncodedConcreteType } from "./_compileDataEncodedConcreteType";
+import { getDataFuncSignature } from "./getDataFuncSignature";
 
 
 export function _compileSopEncodedConcreteType(
@@ -68,7 +69,14 @@ export function _compileSopEncodedConcreteType(
             [ kArg, vArg ]
         );
     }
-    if( typeExpr instanceof AstFuncType ) return undefined; // no data encoding for function types
+    if( typeExpr instanceof AstFuncType )
+    {
+        // higher-order function type annotation `(a: T) => R`. Compile it to
+        // the SAME `TirFuncT` a function DECLARATION with that signature
+        // would produce, so a top-level function or a lambda can be passed
+        // for it and type-check identically.
+        return getDataFuncSignature( ctx, typeExpr );
+    }
     if( typeExpr instanceof AstNamedTypeExpr ) // struct, aliases and respective params
     {
         // qualified name (`Ns.Type`, `Struct.Constructor`, `Contract.State`)

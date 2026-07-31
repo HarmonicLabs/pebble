@@ -1,4 +1,5 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
+import { debugCreationStack } from "../../../utils/debugCreationStack";
 import { IRLetted } from "../../../IR/IRNodes/IRLetted";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { TirType } from "../types/TirType";
@@ -30,7 +31,7 @@ export class TirLettedExpr
             && varName.length > 0
         )) throw new Error("TirLettedExpr: varName must be a non empty string");
 
-        this._creationStack = _creationStack ?? (new Error()).stack;
+        this._creationStack = _creationStack ?? debugCreationStack();
 
         this._irVarSym = (
             typeof _unsafeVarSym === "symbol"

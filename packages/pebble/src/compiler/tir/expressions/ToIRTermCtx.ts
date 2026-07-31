@@ -1,4 +1,5 @@
 import { IRVar } from "../../../IR/IRNodes/IRVar";
+import { debugCreationStack } from "../../../utils/debugCreationStack";
 import { IRSelfCall } from "../../../IR/IRNodes/IRSelfCall";
 import type { IRTerm } from "../../../IR/IRTerm";
 
@@ -27,7 +28,7 @@ export class ToIRTermCtx
     ) {
         this.parent?._children.push( this );
 
-        this._creationStack = new Error().stack;
+        this._creationStack = debugCreationStack();
         this.localVars = new Map();
 
         // DO NOT SET _parentDbn HERE

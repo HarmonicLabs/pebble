@@ -18,6 +18,7 @@ import { getDeconstructableType, DeconstructableTirType } from "../../../tir/typ
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { wrapManyStatements } from "../../utils/wrapManyStatementsOrReturnSame";
 import { _compileExpr } from "../exprs/_compileExpr";
+import { _nestedPatternRange } from "../exprs/_compileCaseExpr";
 import { _compileStatement } from "./_compileStatement";
 import { _compileArrayLikeDeconstr, _compileNamedDeconstructVarDecl, _compileSingleDeconstructVarDecl, _compileVarDecl } from "./_compileVarStmt";
 
@@ -149,6 +150,17 @@ export function _compileTirMatchStmtCase(
     if( !pattern ) return undefined;
     //*/
     const pattern = matchCase.pattern;
+
+    // Nested deconstruct patterns (`when W{ i: A{ x } }`) parse but the
+    // arm-body codegen does not bind the inner variables (audit BUG 33).
+    // Emit one clear diagnostic instead of crashing in codegen.
+    const nestedRange = _nestedPatternRange( pattern );
+    if( nestedRange ) return ctx.error(
+        DiagnosticCode.Not_implemented_0,
+        nestedRange,
+        "nested patterns are not supported yet; bind the field (e.g. `W{ i }`) "
+        + "then `case`/`match` on it"
+    );
 
     if( pattern instanceof SimpleVarDecl ) {
         // bare-name pattern: only valid for enum scrutinees (`when Apple: ...`)

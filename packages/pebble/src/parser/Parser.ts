@@ -200,6 +200,21 @@ export class Parser extends DiagnosticEmitter
         // `export default` is NOT supported (`export default` should have never exsisted)
         if( tn.skip( Token.Export ) ) {
             const exportEnd = tn.pos;
+            // Re-export forms `export * from "..."` / `export { x } from "..."`
+            // are not implemented. Emit ONE clear diagnostic instead of the
+            // misleading "Statement expected" the generic path produced
+            // (audit BUG 38). Direct `import { x } from "..."` works.
+            const afterExport = tn.peek();
+            if( afterExport === Token.Asterisk || afterExport === Token.OpenBrace )
+            {
+                this.skipStatement();
+                return this.error(
+                    DiagnosticCode.Not_implemented_0,
+                    tn.range( startPos, exportEnd ),
+                    "re-export (`export ... from`) is not supported yet; "
+                    + "import the symbol and re-declare/re-export it directly"
+                );
+            }
             const stmt = this.parseTopLevelStatement();
             if( !stmt ) return undefined;
             // `export contract` is allowed since 0.3.7: it exports the
@@ -805,6 +820,11 @@ export class Parser extends DiagnosticEmitter
 
             const memberStartPos = tn.tokenPos;
             const isPrivate = tn.skip( Token.Private );
+            // namespace members are PUBLIC by default (only `private` hides
+            // them), so a leading `export` is redundant — but tolerate it
+            // rather than erroring, for consistency with `export namespace`
+            // and TypeScript-shaped expectations (audit BUG 38).
+            if( !isPrivate ) tn.skip( Token.Export );
 
             const member = this.parseNamespaceMember();
             if( !member ) return undefined;
@@ -1410,6 +1430,11 @@ export class Parser extends DiagnosticEmitter
                     tn.range( startPos, tn.pos )
                 )
             );
+
+            // tolerate an optional `;` after a method signature/body — the
+            // TypeScript-shaped syntax leads people to write it, and every
+            // other declaration form already accepts it (audit BUG 36).
+            tn.skip( Token.Semicolon );
         }
 
         tn.skip( Token.Semicolon ); // if any
@@ -2031,7 +2056,15 @@ export class Parser extends DiagnosticEmitter
             }            
             // else ther is colon (eg: { field: ... })
 
-            element = this._parseVarDecl( flags );
+            // A nested pattern field (`W{ i: A{ x } }`) must inherit the
+            // enclosing pattern's `skipTypeAndInitializer`. Without this, a
+            // nested deconstruct parsed inside a `match`/`when` clause (which
+            // parses with the flag set) still ran `_parseTypeAndInitializer`
+            // and mis-consumed the trailing `}: { ... }`, producing spurious
+            // "Statement expected" errors (audit BUG 33). The
+            // `const`-destructure form worked only because there the flag was
+            // already false on both levels.
+            element = this._parseVarDecl( flags, skipTypeAndInitializer );
             if( !element ) // field: ... what?
             {
                 this.error(
@@ -2423,6 +2456,31 @@ export class Parser extends DiagnosticEmitter
                     params,
                     tn.range( startPos, tn.pos ),
                     path
+                );
+            }
+            case Token.OpenParen: {
+                // TypeScript-style function type annotation:
+                //   ( name: Type, ... ) => ReturnType
+                // used for higher-order function parameters, e.g.
+                //   function ap( f: (a: int) => int, x: int ): int { ... }
+                // the `(` was already consumed by `tn.next()` above, so
+                // `parseParameters()` starts at the first parameter.
+                const params = this.parseParameters();
+                if( !params ) return undefined;
+                if( !tn.skip( Token.FatArrow ) )
+                {
+                    canError && this.error(
+                        DiagnosticCode._0_expected,
+                        tn.range(), "=>"
+                    );
+                    return undefined;
+                }
+                const returnType = this.parseTypeExpr( suppressErrors );
+                if( !returnType ) return undefined;
+                return new AstFuncType(
+                    params,
+                    returnType,
+                    tn.range( startPos, tn.pos )
                 );
             }
             default: {
@@ -4263,6 +4321,10 @@ export class Parser extends DiagnosticEmitter
 
         let elseCase: MatchStmtElseCase | undefined = undefined;
         if( tn.skip( Token.Else ) ) {
+            // tolerate an optional `:` after `else`, mirroring the required
+            // `:` on `when <pattern>:` arms — the parallel form is what users
+            // naturally write (audit BUG 33 repro used `else: { ... }`).
+            tn.skip( Token.Colon );
             const body = this.parseStatement({ topLevel: false, isExport: false });
             if( !body ) return this.error(
                 DiagnosticCode.Statement_expected,

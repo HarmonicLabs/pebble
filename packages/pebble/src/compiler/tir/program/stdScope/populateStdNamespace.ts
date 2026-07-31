@@ -22,6 +22,8 @@ import { TirLinearMapEntryT } from "../../types/TirNativeType/native/linearMapEn
 import { TirListT } from "../../types/TirNativeType/native/list";
 import { TirArrayT } from "../../types/TirNativeType/native/array";
 import { TirValueT } from "../../types/TirNativeType/native/value";
+import { TirAliasType } from "../../types/TirAliasType";
+import { isTirStructType } from "../../types/TirStructType";
 import { TirSopOptT } from "../../types/TirNativeType/native/Optional/sop";
 import { TirTypeParam } from "../../types/TirTypeParam";
 import { TirType } from "../../types/TirType";
@@ -204,12 +206,6 @@ export function populateStdNamespace( program: TypedProgram ): void
         methodName: string,
     ): string | undefined
     {
-        // dynamic require to avoid bootstrap-time load order issues
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { TirAliasType }  = require( "../../types/TirAliasType" );
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { isTirStructType } = require( "../../types/TirStructType" );
-
         // `TirAliasType` and `isTirStructType` come back as `any` from the
         // dynamic require, so TypeScript cannot narrow `cur` by the guards
         // alone — cast through the relevant shapes explicitly.

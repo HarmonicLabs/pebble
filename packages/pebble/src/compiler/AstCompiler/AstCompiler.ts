@@ -38,7 +38,8 @@ import { CommonFlags } from "../../common";
 import { SimpleVarDecl } from "../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
 import { Identifier } from "../../ast/nodes/common/Identifier";
 import { ArrowKind } from "../../ast/nodes/expr/functions/ArrowKind";
-import { _compileFuncExpr, getDataFuncSignature } from "./internal/exprs/_compileFuncExpr";
+import { _compileFuncExpr } from "./internal/exprs/_compileFuncExpr";
+import { getDataFuncSignature } from "./internal/types/getDataFuncSignature";
 import { TirTypeParam } from "../tir/types/TirTypeParam";
 import { BodyStmt, TopLevelStmt } from "../../ast/nodes/statements/PebbleStmt";
 import { ContractDecl } from "../../ast/nodes/statements/declarations/ContractDecl";
@@ -1224,7 +1225,14 @@ export class AstCompiler extends DiagnosticEmitter
             )) continue;
 
             const isGeneric = stmt.typeParams.length > 0;
-            if( isGeneric ) throw new Error("not implemented; generic interfaces");
+            if( isGeneric ) {
+                this.error(
+                    DiagnosticCode.Not_implemented_0,
+                    ( stmt.typeParams[0] ?? stmt.name ).range,
+                    "generic interfaces are not supported yet"
+                );
+                continue;
+            }
 
             const methods: Map<string, AstFuncType> = new Map();
             for( const astMethod of stmt.methods ) {
@@ -1490,7 +1498,11 @@ export class AstCompiler extends DiagnosticEmitter
         topLevelScope: AstScope
     ): AstTypeDefCompilationResult | undefined
     {
-        if( stmt.typeParams.length > 0 ) throw new Error("not_implemented::AstCompiler::_compileStructDecl::typeParams");
+        if( stmt.typeParams.length > 0 ) return this.error(
+            DiagnosticCode.Not_implemented_0,
+            ( stmt.typeParams[0] ?? stmt.name ).range,
+            "generic structs are not supported yet"
+        );
         const compiler = this;
 
         const methodsNames: Map<AstFuncName, TirFuncName> = new Map();
@@ -1616,7 +1628,11 @@ export class AstCompiler extends DiagnosticEmitter
         topLevelScope: AstScope
     ): AstTypeDefCompilationResult | undefined
     {
-        if( stmt.typeParams.length > 0 ) throw new Error("not_implemented::AstCompiler::_compileTypeAliasDecl::typeParams");
+        if( stmt.typeParams.length > 0 ) return this.error(
+            DiagnosticCode.Not_implemented_0,
+            ( stmt.typeParams[0] ?? stmt.name ).range,
+            "generic type aliases are not supported yet"
+        );
         const compiler = this;
         const sopAliasedT = _compileSopEncodedConcreteType(
             AstCompilationCtx.fromScope( compiler.program, topLevelScope ),

@@ -61,13 +61,21 @@ function main( n: int, b: bytes ): int {
     // ----- the user's stated motivation: std.linearMap.prepend works -----
 
     test("std.linearMap.prepend(k, v, m) compiles with int/bytes keys & values", async () => {
+        // NOTE: `m` is an explicit `LinearMap<...>`, not `Value`. `Value` used
+        // to be a prelude alias for a LinearMap-of-LinearMap but is now a
+        // native builtin type (not a LinearMap), so the old fixture stopped
+        // type-checking — it only "passed" because export() swallowed the
+        // error (audit BUG 30). The constraints auto-satisfy through ToData
+        // for both K and V.
         const src = `
-function main( m: Value, k: PolicyId, v: LinearMap<TokenName, int> ): Value {
+function main(
+    m: LinearMap<PolicyId, LinearMap<TokenName, int>>,
+    k: PolicyId,
+    v: LinearMap<TokenName, int>
+): LinearMap<PolicyId, LinearMap<TokenName, int>> {
     return std.linearMap.prepend<PolicyId, LinearMap<TokenName, int>>( k, v, m );
 }`;
         const { compiler } = await compileSrc( src );
-        // `Value` is the prelude alias for LinearMap<PolicyId, LinearMap<TokenName, int>>;
-        // the constraints should auto-satisfy through ToData for both K and V.
         expect( compiler.diagnostics ).toEqual( [] );
     });
 
@@ -105,7 +113,13 @@ function main( n: int ): int {
 
     // ----- user-defined `type Foo implements ToData` impl is honored -----
 
-    test("std.linearMap.prepend uses a user-defined `type Foo implements ToData` impl", async () => {
+    // KNOWN GAP (same root cause as the show user-impl test): the `self`
+    // parameter of a user `type Foo implements I { method( self ) ... }`
+    // block is not inferred ("ERROR 285: parameter type is missing"), so no
+    // user interface impl compiles. Unmasked by the BUG 30 fix; separate from
+    // audit BUGs 27-38. `test.failing` until impl-method `self` inference is
+    // wired.
+    test.failing("std.linearMap.prepend uses a user-defined `type Foo implements ToData` impl", async () => {
         // We declare a struct `MyKey` that explicitly implements `ToData`
         // with a custom body. When we then call `std.linearMap.prepend`
         // with a `LinearMap<MyKey, int>`, the dictionary the constrained

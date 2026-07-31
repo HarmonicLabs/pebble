@@ -152,7 +152,7 @@ export function _inlineToData(
                     )
                 ),
                 // case Nothing
-                hoisted_constr1_empty.clone()
+                hoisted_constr1_empty().clone()
             ]
         );
     }

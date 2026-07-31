@@ -1,5 +1,5 @@
 import { ConstType, constT } from "@harmoniclabs/uplc";
-import { getAppliedTirTypeName } from "../../../../program/TypedProgram";
+import { getAppliedTirTypeName } from "../../../../program/getAppliedTirTypeName";
 import { TirDataStructType, TirStructConstr, TirStructField } from "../../../TirStructType";
 import { TirType, ITirType } from "../../../TirType";
 

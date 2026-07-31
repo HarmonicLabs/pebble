@@ -60,7 +60,13 @@ export function _compileQualifiedNamedTypeExpr(
             }
             current = nested;
         }
-        const possible = current.publicScope.resolveType( name.text );
+        // NON-walking lookup: a qualified path `M.T` must resolve `T` as a
+        // member of `M`'s own public scope, NOT walk up into the enclosing
+        // file scope. `resolveType` walks parents, and `publicScope` is a
+        // child of the file scope, so it used to resolve ANY file-level type
+        // (or non-exported type via `Lib.M.Private`) through any namespace
+        // path — a scope leak (audit BUG 37).
+        const possible = current.publicScope.resolveLocalType( name.text );
         if( !possible )
         {
             return ctx.error(

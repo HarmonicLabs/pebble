@@ -1,7 +1,7 @@
 import type { ITirType, TirType } from "../TirType";
 import { constT, ConstType } from "@harmoniclabs/uplc";
 import { TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../TirStructType";
-import { getAppliedTirTypeName } from "../../program/TypedProgram";
+import { getAppliedTirTypeName } from "../../program/getAppliedTirTypeName";
 import { TirBoolT } from "./native/bool";
 import { TirBytesT } from "./native/bytes";
 import { TirDataT } from "./native/data";

@@ -100,8 +100,11 @@ export class TirLitObjExpr
         }
         
         if( type instanceof TirSoPStructType ) {
+            // single-constructor unnamed literal: the runtime tag is that
+            // constructor's index in the ORIGINAL (un-narrowed) type, which
+            // `parentCtorIdx(0)` yields (identity, i.e. 0, for un-narrowed).
             return new IRConstr(
-                0,
+                type.parentCtorIdx( 0 ),
                 namedFields.map(({ expr }) => expr.toIR( ctx ) )
             );
         }

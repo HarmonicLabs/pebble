@@ -8,6 +8,12 @@ import { getUniqueInternalName } from "../../../internalVar";
 import { TirFuncExpr } from "../../../tir/expressions/TirFuncExpr";
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
 import { TirReturnStmt } from "../../../tir/statements/TirReturnStmt";
+import { TirBlockStmt } from "../../../tir/statements/TirBlockStmt";
+import { TirIfStmt } from "../../../tir/statements/TirIfStmt";
+import { TirMatchStmt } from "../../../tir/statements/TirMatchStmt";
+import { TirForStmt } from "../../../tir/statements/TirForStmt";
+import { TirWhileStmt } from "../../../tir/statements/TirWhileStmt";
+import { TirForOfStmt } from "../../../tir/statements/TirForOfStmt";
 import { TirStmt } from "../../../tir/statements/TirStmt";
 import { TirSimpleVarDecl } from "../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirFuncT } from "../../../tir/types/TirNativeType/native/function";
@@ -20,6 +26,7 @@ import { _compileBlockStmt } from "../statements/_compileBlockStmt";
 import { _compileVarDecl } from "../statements/_compileVarStmt";
 import { _compileDataEncodedConcreteType } from "../types/_compileDataEncodedConcreteType";
 import { _compileSopEncodedConcreteType } from "../types/_compileSopEncodedConcreteType";
+import { getDataFuncSignature } from "../types/getDataFuncSignature";
 import { _hasDuplicateTypeParams } from "./_hasDuplicateTypeParams";
 
 /*
@@ -114,7 +121,17 @@ export function _compileFuncExpr(
 
     const returnType = expectedFuncType.returnType;
 
+    // When the EXPECTED return type is still generic (a free `TirTypeParam`,
+    // e.g. the `B` of `List.map`'s callback `(A) => B`), a lambda must NOT
+    // adopt that type param as its own return type — that would make the
+    // lambda's type non-concrete (`(int) => B`), and it then fails to assign
+    // to itself (audit BUG 39). Instead infer the real return type from the
+    // body (`x => x + 1` → `int`) and skip the return-type assignability
+    // check while compiling (the param types from the hint are still used).
+    const returnTypeIsGeneric = !returnType.isConcrete();
+
     const funcCtx = ctx.newFunctionChildScope( returnType, isMethod );
+    if( returnTypeIsGeneric ) funcCtx.functionCtx!.inferReturnType = true;
     // define value in case of recursion
     funcCtx.scope.defineValue({
         name: expr.name.text,
@@ -158,10 +175,16 @@ export function _compileFuncExpr(
 
     body.stmts.unshift( ...blockInitStmts );
 
+    // If the expected return type was generic, use the type inferred from the
+    // body so the lambda is concrete (see `returnTypeIsGeneric` above).
+    const finalReturnType = returnTypeIsGeneric
+        ? ( _inferReturnType( body.stmts ) ?? returnType )
+        : returnType;
+
     const funcExpr = new TirFuncExpr(
         expr.name.text,
         params,
-        returnType,
+        finalReturnType,
         body,
         expr.range
     );
@@ -261,13 +284,49 @@ function _compileFuncExprInferReturnType(
 
 function _inferReturnType( stmts: TirStmt[] ): TirType | undefined
 {
+    // Return statements are not always top-level: `if(...) { return a }
+    // else { return b }`, `match`, and loop bodies all nest them. Scanning
+    // only the top level made any multi-branch function infer `void`
+    // (audit BUG 34). Recurse into every statement that can contain a
+    // `return` and take the first value type found (branches of a
+    // well-typed function share a return type; call-site checks catch the
+    // rest).
     for( const stmt of stmts )
     {
-        if( stmt instanceof TirReturnStmt && stmt.value )
-        {
-            return stmt.value.type;
-        }
+        const t = _returnTypeOfStmt( stmt );
+        if( t ) return t;
     }
+    return undefined;
+}
+
+function _returnTypeOfStmt( stmt: TirStmt ): TirType | undefined
+{
+    if( stmt instanceof TirReturnStmt )
+        return stmt.value ? stmt.value.type : undefined;
+
+    if( stmt instanceof TirBlockStmt )
+        return _inferReturnType( stmt.stmts );
+
+    if( stmt instanceof TirIfStmt )
+        return _returnTypeOfStmt( stmt.thenBranch )
+            ?? ( stmt.elseBranch ? _returnTypeOfStmt( stmt.elseBranch ) : undefined );
+
+    if( stmt instanceof TirMatchStmt )
+    {
+        for( const c of stmt.cases )
+        {
+            const t = _returnTypeOfStmt( c.body );
+            if( t ) return t;
+        }
+        return stmt.wildcardCase ? _returnTypeOfStmt( stmt.wildcardCase.body ) : undefined;
+    }
+
+    if(
+        stmt instanceof TirForStmt
+        || stmt instanceof TirWhileStmt
+        || stmt instanceof TirForOfStmt
+    ) return _returnTypeOfStmt( stmt.body );
+
     return undefined;
 }
 
@@ -334,68 +393,3 @@ function _getDestructuredParamsAsVarDecls(
     return { blockInitStmts, params };
 }
 
-/**
- * [NOTE: abmigous param encoding defaults to data]
- * 
- * when we can encode a struct (or alias of struct) both as sop or data,
- * we default to data encoding
- * 
- * this is because, not know much about what was the original encoding,
- * converting sop to data is usually cheaper
- * than data to sop, where we would need to decode all fields,
- * even if we don't use them.
- * 
- * encoding is cheaper than decoding and can be done outside the function, before the call
- * 
- * Optionals are sop, but the value is follows the rules above.
- * 
- * TODO: in the future we should implement a "fully extracted form" (FEF)
- * so that we don't care about data or sop. (only exception is if the function calls `equalsData` builtin)
-    **/
-export function getDataFuncSignature(
-    ctx: AstCompilationCtx,
-    signature: AstFuncType
-): TirFuncT | undefined
-{
-    const funcParams = signature.params;
-    const paramTypes = new Array<TirType>( funcParams.length );
-    for( let i = 0; i < funcParams.length; i++ )
-    {
-        const param = funcParams[i];
-        if( !param.type )
-        return ctx.error(
-            DiagnosticCode.Could_not_infer_function_signature_parameter_type_is_missing,
-            param.range,
-        );
-
-        const type = _compileDataEncodedConcreteType( ctx, param.type, true );
-        if( !type ) return undefined;
-
-        paramTypes[i] = type;
-    }
-
-    if( !signature.returnType )
-    return ctx.error(
-        DiagnosticCode.Could_not_infer_function_signature_return_type_is_missing,
-        signature.range,
-    );
-
-    const returnType = signature.returnType instanceof AstFuncType ?
-    getDataFuncSignature(
-        ctx,
-        signature.returnType
-    ) :
-    _compileSopEncodedConcreteType(
-        ctx,
-        signature.returnType
-    );
-
-    if( !returnType ) return undefined;
-    // NOTE: a bare `TirTypeParam` return type is valid here — it marks the
-    // template position. `monomorphizeGeneric` substitutes it at call sites.
-
-    return new TirFuncT(
-        paramTypes,
-        returnType
-    );
-}

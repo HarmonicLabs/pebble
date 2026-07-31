@@ -111,6 +111,28 @@ export function canAssignTo( a: TirType, b: TirType ): boolean
     return getCanAssign( a, b ) === CanAssign.Yes;
 }
 
+/**
+ * A common type that every one of `types` is assignable to, or `undefined`
+ * when the types are mutually incompatible. There is no real subtyping
+ * lattice, so this is the pragmatic join used to reconcile the arms of a
+ * `case`/`match` expression (audit BUGs 29/34): fold left, widening the
+ * accumulator to whichever side the other assigns to; incompatible pair →
+ * `undefined`.
+ */
+export function joinTypes( types: TirType[] ): TirType | undefined
+{
+    if( types.length === 0 ) return undefined;
+    let acc: TirType = types[0];
+    for( let i = 1; i < types.length; i++ )
+    {
+        const t = types[i];
+        if( canAssignTo( t, acc ) ) continue;      // t fits acc
+        if( canAssignTo( acc, t ) ) { acc = t; continue; } // acc fits t -> widen
+        return undefined;                          // incompatible
+    }
+    return acc;
+}
+
 export function getCanAssign( a: TirType, b: TirType ): CanAssign
 {
     // remove for tests

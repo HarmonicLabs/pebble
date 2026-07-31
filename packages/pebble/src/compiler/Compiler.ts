@@ -111,14 +111,22 @@ export class Compiler
 
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.export( cfg.functionName, cfg.entry );
-        if( this.diagnostics.length > 0 ) {
-            let msg: DiagnosticMessage;
-            const fstErrorMsg = this.diagnostics[0].toString();
-            const nDiags = this.diagnostics.length;
-            while( msg = this.diagnostics.shift()! ) {
+        // Surface diagnostics instead of silently swallowing them (audit
+        // BUG 30). Previously this DRAINED `this.diagnostics` with `.shift()`
+        // and had the throw commented out, so `export()` always succeeded and
+        // left an empty diagnostics array — making every
+        // `export(); expect(diagnostics).toEqual([])` assertion vacuous.
+        // Now: preserve the diagnostics, and throw when any is an ERROR
+        // (warnings are kept but do not fail the export).
+        const errs = this.diagnostics.filter( d => d.category === DiagnosticCategory.Error );
+        if( errs.length > 0 ) {
+            for( const msg of this.diagnostics ) {
                 this.io.stdout.write( msg.toString() + "\n" );
             }
-            // throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+            throw new Error(
+                "compilation failed with " + errs.length +
+                " error diagnostic messages; first message: " + errs[0].toString()
+            );
         }
         return this._compileBackend( cfg, program );
     }

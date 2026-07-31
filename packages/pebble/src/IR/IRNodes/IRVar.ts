@@ -15,13 +15,14 @@ import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
 import { hashVarSym } from "./utils/hashVarSym";
 import { UPLCTerm, UPLCVar } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { debugCreationStack } from "../../utils/debugCreationStack";
 
 export interface IRVarMetadata extends BaseIRMetadata {}
 
 export class IRVar
     implements IIRTerm, Cloneable<IRVar>, IIRParent, ToJson
 {
-    private readonly _creationStack: string;
+    private readonly _creationStack: string | undefined;
     readonly meta: IRVarMetadata
     readonly name: symbol;
 
@@ -40,7 +41,7 @@ export class IRVar
         this.meta = {};
         this._hash = isIRHash( _unsafeHash ) ? _unsafeHash : undefined;
 
-        this._creationStack = ( new Error() ).stack ?? "unknown";
+        this._creationStack = debugCreationStack();
     }
 
     toUPLC( ctx: ToUplcCtx ): UPLCVar

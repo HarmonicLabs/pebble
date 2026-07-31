@@ -21,6 +21,7 @@ import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
 import { TirListT } from "../types/TirNativeType/native/list";
+import { TirValueT } from "../types/TirNativeType/native/value";
 import { TirStringT } from "../types/TirNativeType/native/string";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirVoidT } from "../types/TirNativeType/native/void";
@@ -93,6 +94,29 @@ export class TirShowExpr
  * through the regular method-call path. The caller is expected to detect
  * that case before invoking `_showIR`.
  */
+/**
+ * `true` when `_showIR` has a built-in Show lowering for `type` (so it can
+ * be `.show()`n or `trace`d without a user-declared `implements Show`).
+ * Keep in sync with the type table in `_showIR` below.
+ */
+export function isBuiltinShowable( type: TirType ): boolean
+{
+    const t = getUnaliased( type );
+    return (
+        t instanceof TirIntT
+        || t instanceof TirBytesT
+        || t instanceof TirBoolT
+        || t instanceof TirDataT
+        || t instanceof TirVoidT
+        || t instanceof TirStringT
+        || t instanceof TirListT
+        || t instanceof TirLinearMapT
+        || t instanceof TirDataStructType
+        || t instanceof TirDataOptT
+        || t instanceof TirValueT
+    );
+}
+
 export function _showIR( origin_t: TirType, exprIR: IRTerm ): IRTerm
 {
     const t = getUnaliased( origin_t );
@@ -138,6 +162,13 @@ export function _showIR( origin_t: TirType, exprIR: IRTerm ): IRTerm
     return _ir_apps(
         hoisted_bytesToHex.clone(),
         _ir_apps( IRNative.serialiseData, exprIR ),
+    );
+
+    // native Value: convert to its data map first, then serialiseData + hex.
+    if( t instanceof TirValueT )
+    return _ir_apps(
+        hoisted_bytesToHex.clone(),
+        _ir_apps( IRNative.serialiseData, _ir_apps( IRNative.valueData, exprIR ) ),
     );
 
     throw new Error(
@@ -281,14 +312,14 @@ function _showLinearMapIR( mapT: TirLinearMapT, exprIR: IRTerm ): IRTerm
                 /* see TirLinearMapT.toUplcConstType */
                 /* TirDataT */
                 /* hack: reach the singleton via a fresh instance */
-                new (require("../types/TirNativeType/native/data").TirDataT)(),
+                new TirDataT(),
                 _ir_apps( IRNative.fstPair, entryIR ),
             ),
             _ir_apps(
                 IRNative.appendByteString,
                 _hoisted_litBytes( ": " ).clone(),
                 _showIR(
-                    new (require("../types/TirNativeType/native/data").TirDataT)(),
+                    new TirDataT(),
                     _ir_apps( IRNative.sndPair, entryIR ),
                 )
             )

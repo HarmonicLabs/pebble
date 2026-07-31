@@ -1,3 +1,9 @@
+import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
+import { TirShowExpr } from "../../../tir/expressions/TirShowExpr";
+import { TirCallExpr } from "../../../tir/expressions/TirCallExpr";
+import { TirNativeFunc } from "../../../tir/expressions/TirNativeFunc";
+import { TirBytesT } from "../../../tir/types/TirNativeType/native/bytes";
+import { bytes_t } from "../../../tir/program/stdScope/stdScope";
 import { LitArrExpr } from "../../../../ast/nodes/expr/litteral/LitArrExpr";
 import { LitContextExpr } from "../../../../ast/nodes/expr/litteral/LitContextExpr";
 import { LitFailExpr } from "../../../../ast/nodes/expr/litteral/LitFailExpr";
@@ -419,18 +425,6 @@ function _compileTemplateStrExpr(
     expr: TemplateStrExpr,
 ): TirExpr | undefined
 {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { fromUtf8 } = require( "@harmoniclabs/uint8array-utils" );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { TirShowExpr } = require( "../../../tir/expressions/TirShowExpr" );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { TirCallExpr } = require( "../../../tir/expressions/TirCallExpr" );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { TirNativeFunc } = require( "../../../tir/expressions/TirNativeFunc" );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { TirBytesT } = require( "../../../tir/types/TirNativeType/native/bytes" );
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { bytes_t } = require( "../../../tir/program/stdScope/stdScope" );
 
     const pieces: TirExpr[] = [];
 

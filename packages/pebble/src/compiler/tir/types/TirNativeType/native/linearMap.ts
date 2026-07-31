@@ -1,5 +1,5 @@
 import { ConstType, constT } from "@harmoniclabs/uplc";
-import { getAppliedTirTypeName } from "../../../program/TypedProgram";
+import { getAppliedTirTypeName } from "../../../program/getAppliedTirTypeName";
 import { TirType, ITirType } from "../../TirType";
 
 export class TirLinearMapT<K extends TirType = TirType,V extends TirType = TirType>

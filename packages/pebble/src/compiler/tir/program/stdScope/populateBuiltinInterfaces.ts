@@ -1,6 +1,8 @@
 import { Identifier } from "../../../../ast/nodes/common/Identifier";
 import { SourceRange } from "../../../../ast/Source/SourceRange";
 import { AstFuncType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
+import { _toDataUplcFunc } from "../../expressions/TirToDataExpr";
+import { _showUplcFunc } from "../../expressions/TirShowExpr";
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
 import { SimpleVarDecl } from "../../../../ast/nodes/statements/declarations/VarDecl/SimpleVarDecl";
 import { CommonFlags } from "../../../../common";
@@ -63,7 +65,6 @@ export function populateBuiltinInterfaces( program: TypedProgram ): void
     program.builtinInterfaceImpls.set( "ToData", new Map([
         [ "toData", ( concreteType: TirType ): IRTerm => {
             // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { _toDataUplcFunc } = require( "../../expressions/TirToDataExpr" );
             return _toDataUplcFunc( concreteType );
         }],
     ]));
@@ -87,7 +88,6 @@ export function populateBuiltinInterfaces( program: TypedProgram ): void
     program.builtinInterfaceImpls.set( "Show", new Map([
         [ "show", ( concreteType: TirType ): IRTerm => {
             // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { _showUplcFunc } = require( "../../expressions/TirShowExpr" );
             return _showUplcFunc( concreteType );
         }],
     ]));

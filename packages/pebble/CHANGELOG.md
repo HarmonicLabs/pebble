@@ -2,6 +2,53 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.2
+
+Type-system audit fixes, from an independent audit; regression coverage in
+`compiler.auditBugs.0_4_1.test.ts`.
+
+- **⚠ CORRECTNESS: SoP (`runtime struct`) multi-constructor literals ran
+  the wrong `case` arm.** Every SoP struct literal was emitted as
+  `IRConstr(0, …)` regardless of which constructor was named, so matching a
+  non-first variant silently ran the first arm. Now uses the constructor's
+  real index.
+- **`case` expressions are checked like `match` statements**: a
+  non-exhaustive `case` with no wildcard is now a compile error, and arms
+  with incompatible types are rejected via a type join instead of silently
+  taking the first arm's type.
+- **`export()` surfaces diagnostics** instead of draining them and
+  succeeding — it now throws on any ERROR (warnings tolerated), matching
+  `compile()`/`run()`. This unmasked that the `Show` interface was unwired
+  for structs, `Value`, and `trace` of a Show-able value — all now wired
+  through `_showIR`.
+- **Return-type inference recurses** into `if`/`match`/loop/block bodies, so
+  a function whose returns are all nested (`if(..) return a else return b`)
+  infers correctly instead of `void`.
+- **Generic type declarations no longer crash the compiler**: generic
+  structs/aliases/interfaces emit located "not supported yet" diagnostics,
+  and a generic container in a generic signature (`function wrap<T>():
+  List<T>`) now lowers symbolically and monomorphizes instead of throwing.
+- **Parser**: interface method signatures may end with `;`; nested `match`
+  patterns parse and `else:` is accepted, with nested *refinement* patterns
+  giving one clear diagnostic pointing at the bind-then-`case` workaround;
+  `export`/`private` on namespace members parse, and `export … from`
+  re-export gives a clear "not supported yet" diagnostic.
+- **Qualified type paths no longer leak**: `M.T` resolves only members of
+  `M`, not any file-level type reachable by walking scopes.
+- **`List.map` / `LinearMap.map` work with a lambda.** The callback's output
+  type (`(A) => B`) is now inferred from the lambda instead of leaving `B`
+  unresolved — previously `l.map( x => x + 1 )` failed with the maximally
+  confusing "Type `(int) => T` is not assignable to type `(int) => T`" (a
+  type not assignable to itself). Type-changing maps (`int -> bytes`,
+  `int -> bool`) work too.
+- **Higher-order functions can be declared.** A function type can now be
+  written in a parameter annotation with TypeScript syntax —
+  `function ap( f: (a: int) => int, x: int ): int { return f( x ); }` — so
+  users can write their own `map`/`fold`/etc. Lambdas passed to a user
+  higher-order function get exactly the same treatment as those passed to
+  the built-in combinators: the `const`-only capture rule still applies, and
+  a captured expensive `const` is still evaluated once (not per call).
+
 ## v0.4.1
 
 - **New `std.value.zero`** — the empty native `Value`. There is no UPLC
