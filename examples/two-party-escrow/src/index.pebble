@@ -1,0 +1,96 @@
+// ===========================================================================
+//  Two-Party Escrow
+// ===========================================================================
+//
+//  A buyer locks `price` lovelace for a named seller. Exactly three outcomes
+//  are possible, and each is a separate endpoint:
+//
+//    * `accept`  — the seller signs and takes the payment. Available until
+//                  the deadline.
+//    * `refund`  — the buyer signs and reclaims the funds, but only AFTER the
+//                  deadline has certainly passed.
+//    * `settle`  — both parties sign and split the escrow however they agree.
+//                  This is the escape hatch for a disputed order: without it
+//                  the funds would sit until the deadline no matter what the
+//                  two parties want.
+//
+//  The buyer and seller are contract PARAMETERS, not datum fields, so a given
+//  script address serves exactly one pair. That makes the address itself proof
+//  of who the counterparties are, and it keeps the datum down to the deadline.
+//
+//  Time handling mirrors the vesting example but reads the OPPOSITE bound:
+//
+//    * `accept` needs "the deadline has not passed yet", so it reads the UPPER
+//      bound — the tx cannot be on-chain after it.
+//    * `refund` needs "the deadline has certainly passed", so it reads the
+//      LOWER bound.
+//
+//  Reading the convenient bound in either case would let a counterparty pick a
+//  wide interval and satisfy both branches at once.
+
+contract TwoPartyEscrow {
+
+    param buyer: PubKeyHash;
+    param seller: PubKeyHash;
+    param price: int;        // lovelace the seller is owed on acceptance
+
+    state Escrow {
+        deadline: int;       // POSIX milliseconds
+
+        // Seller completes the trade and is paid.
+        spend accept() {
+            const { tx, spendingRef, state: { deadline } } = context;
+
+            const sellerPkh = this.seller;
+            assert tx.requiredSigners.includes( sellerPkh );
+
+            // The tx must be incapable of landing after the deadline.
+            // A missing / infinite upper bound fails the destructure.
+            const Finite{ n: txLatest } = tx.validityInterval.to.boundary;
+            assert txLatest <= deadline;
+
+            // Exactly one escrow input, counted by payment credential, so a
+            // single payment output cannot discharge two escrows at once.
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownPaymentCreds = ownInput.resolved.address.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
+
+            // The seller is paid at least `price`, and the payment is pinned
+            // to THIS escrow by tagging it with the spent UTxO's own ref —
+            // unique by construction, so it can satisfy nothing else.
+            const Some{ value: payOut } = tx.outputs.find( o =>
+                o.address.payment == Credential.PubKey{ hash: sellerPkh }
+            );
+            assert payOut.value.lovelaces() >= this.price;
+
+            const InlineDatum{ datum: tagData } = payOut.datum;
+            const TxOutRef{ id: tagId, index: tagIndex } = tagData as TxOutRef;
+            assert tagId == spendingRef.id;
+            assert tagIndex == spendingRef.index;
+        }
+
+        // Buyer reclaims the funds once the seller has run out of time.
+        spend refund() {
+            const { tx, state: { deadline } } = context;
+
+            assert tx.requiredSigners.includes( this.buyer );
+
+            // The tx cannot be on-chain before `txEarliest`, so if that is
+            // already past the deadline the window has certainly closed.
+            const Finite{ n: txEarliest } = tx.validityInterval.from.boundary;
+            assert txEarliest > deadline;
+        }
+
+        // Both parties agree on an outcome — any split, any time.
+        spend settle() {
+            const { tx } = context;
+            assert tx.requiredSigners.includes( this.buyer );
+            assert tx.requiredSigners.includes( this.seller );
+        }
+    }
+
+    // Value sent here with a malformed or missing datum belongs to nobody the
+    // script can identify; leaving it claimable keeps it from accumulating at
+    // the address forever.
+    spend recover() {}
+}

@@ -1,0 +1,21 @@
+{
+  "name": "pebble-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "npm run compile:vesting && npm run compile:escrow",
+    "e2e:vesting": "tsx linear-vesting/offchain/e2e.ts",
+    "e2e:escrow": "tsx two-party-escrow/offchain/e2e.ts",
+    "e2e": "npm run e2e:vesting && npm run e2e:escrow",
+    "compile:vesting": "cd linear-vesting && node ../../packages/pebble-cli/dist/index.js compile",
+    "compile:escrow": "cd two-party-escrow && node ../../packages/pebble-cli/dist/index.js compile"
+  },
+  "dependencies": {
+    "@harmoniclabs/buildooor": "^0.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0"
+  }
+}

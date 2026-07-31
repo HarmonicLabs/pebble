@@ -1,0 +1,105 @@
+// ===========================================================================
+//  Linear Vesting
+// ===========================================================================
+//
+//  Funds vest CONTINUOUSLY between `start` and `end` rather than unlocking in
+//  one step at a deadline. At time `t` the beneficiary is entitled to
+//
+//      vested(t) = total * (t - start) / (end - start)      clamped to [0, total]
+//
+//  and may withdraw `vested(t) - claimed` at any point. A withdrawal that
+//  leaves anything unvested must return the remainder to the script with
+//  `claimed` increased by exactly the amount taken, so the schedule survives
+//  across partial claims.
+//
+//  Why this shape:
+//
+//  * There is no "now" inside a validator — scripts are deterministic. The
+//    transaction promises a validity interval and the script reads its LOWER
+//    bound: if the tx cannot be on-chain before `txEarliest`, then by the time
+//    this script runs at least `txEarliest` has elapsed. Using the lower bound
+//    is what makes the claim safe; the beneficiary can always understate it,
+//    never overstate it.
+//
+//  * `claimed` lives in the datum, not in the remaining balance. Deriving it
+//    from the balance instead would let anyone top the UTxO up to inflate the
+//    apparent entitlement.
+//
+//  * Integer division truncates, which rounds vesting DOWN — in favour of the
+//    contract. The final claim is exact because after `end` the clamp yields
+//    `total` exactly.
+
+contract LinearVesting {
+
+    state Vesting {
+        beneficiary: PubKeyHash;
+        start: int;          // POSIX milliseconds, vesting begins
+        end: int;            // POSIX milliseconds, fully vested
+        total: int;          // total lovelace subject to the schedule
+        claimed: int;        // lovelace already withdrawn
+
+        // Withdraw `amount` lovelace of the currently vested balance.
+        spend claim( amount: int ) {
+            const { tx, spendingRef, state: { beneficiary, start, end, total, claimed } } = context;
+
+            assert tx.requiredSigners.includes( beneficiary );
+            assert amount > 0;
+
+            // ---- how much time has certainly passed --------------------
+            // Destructuring `Finite` also rejects an open lower bound: a tx
+            // with `-inf` as its lower bound proves nothing about elapsed
+            // time, and must not be able to claim.
+            const Finite{ n: txEarliest } = tx.validityInterval.from.boundary;
+
+            // ---- vested(txEarliest), clamped ---------------------------
+            const duration = end - start;
+            const elapsed = txEarliest - start;
+            const vested = elapsed <= 0 ? 0
+                : ( elapsed >= duration ? total
+                    : ( total * elapsed ) / duration );
+
+            assert amount <= vested - claimed;
+
+            // ---- own input ---------------------------------------------
+            const Some{ value: ownInput } = tx.inputs.find( i => i.ref == spendingRef );
+            const ownAddr = ownInput.resolved.address;
+            const lockedNow = ownInput.resolved.value.lovelaces();
+
+            // Exactly one script input, counted by PAYMENT credential: two
+            // vesting UTxOs spent in one tx must not share a single
+            // continuing output (double satisfaction). Comparing whole
+            // Addresses would miss a UTxO carrying a different stake part.
+            const ownPaymentCreds = ownAddr.payment;
+            assert tx.inputs.filter( i => i.resolved.address.payment == ownPaymentCreds ).length() == 1;
+
+            const remaining = lockedNow - amount;
+
+            // ---- continuation -------------------------------------------
+            // Anything left over goes back under the same schedule with
+            // `claimed` advanced by exactly `amount`. When nothing is left
+            // the UTxO is simply consumed.
+            if( remaining > 0 ) {
+                const Some{ value: cont } = tx.outputs.find( o => o.address == ownAddr );
+                assert cont.value.lovelaces() >= remaining;
+
+                const InlineDatum{ datum: contData } = cont.datum;
+                const Vesting{
+                    beneficiary: b2,
+                    start: s2,
+                    end: e2,
+                    total: t2,
+                    claimed: c2
+                } = contData as LinearVesting;
+
+                assert b2 == beneficiary;
+                assert s2 == start;
+                assert e2 == end;
+                assert t2 == total;
+                assert c2 == claimed + amount;
+
+                // no second output may target this script in the same tx
+                assert tx.outputs.filter( o => o.address == ownAddr ).length() == 1;
+            }
+        }
+    }
+}
