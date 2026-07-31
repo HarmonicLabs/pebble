@@ -106,6 +106,19 @@ export function _compileSopEncodedConcreteType(
                 DiagnosticCode._0_is_not_defined,
                 typeExpr.name.range, typeExpr.name.text
             );
+            // user generic STRUCTS follow the same convention as non-generic
+            // user structs (see the non-generic tail below): the DATA
+            // encoding is preferred in every position, so annotations and
+            // function signatures resolve `Box<int>` to the SAME type.
+            // Native generics (`Optional`) keep the per-position sop key.
+            const genericKey = possibleTirNames.isGenericStruct
+                ? ( possibleTirNames.dataTirName ?? possibleTirNames.sopTirName )
+                : possibleTirNames.sopTirName;
+            const arity = ctx.program.getGenericArity( genericKey );
+            if( typeof arity === "number" && typeExpr.tyArgs.length !== arity ) return ctx.error(
+                DiagnosticCode.Generic_type_0_requires_1_type_argument_s,
+                typeExpr.name.range, typeExpr.name.text, arity.toString()
+            );
             const compiledArgs: import("../../../tir/types/TirType").TirType[] = [];
             for( const aExpr of typeExpr.tyArgs )
             {
@@ -114,18 +127,21 @@ export function _compileSopEncodedConcreteType(
                 compiledArgs.push( a );
             }
             const applied = ctx.program.getAppliedGeneric(
-                possibleTirNames.sopTirName,
+                genericKey,
                 compiledArgs
             );
             return applied;
         }
 
-        if( typeof possibleTirNames.dataTirName !== "string" ) return undefined;
+        // named user types prefer their DATA encoding in every position;
+        // a runtime-only type (`runtime struct`) has no data encoding and
+        // resolves to its SoP type instead (without the fallback a runtime
+        // struct FIELD typed with another runtime struct — including itself,
+        // for recursive declarations — would silently drop).
+        const namedTirName = possibleTirNames.dataTirName ?? possibleTirNames.sopTirName;
+        if( typeof namedTirName !== "string" ) return undefined;
 
-        return ctx.program.types.get( possibleTirNames.dataTirName );
-        // const result = ctx.program.types.get( possibleTirNames.dataTirName );
-        // console.log( "possibleTirNames", possibleTirNames, result );
-        // return result;
+        return ctx.program.types.get( namedTirName );
     }
 
     const tsEnsureExhautstiveCheck: never = typeExpr;

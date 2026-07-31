@@ -113,14 +113,16 @@ export class TirLitObjExpr
         const exprsAsData = namedFields.map(({ expr }) => {
             const exprType = getUnaliased( expr.type ) ?? expr.type;
             if(
-                exprType instanceof TirSoPStructType
-                || exprType instanceof TirSopOptT
+                // a SoP optional HAS a data conversion (`_inlineToData`), so
+                // it is NOT rejected — and note `TirSopOptT` EXTENDS
+                // `TirSoPStructType`, hence the explicit exclusion
+                ( exprType instanceof TirSoPStructType && !( exprType instanceof TirSopOptT ) )
                 || exprType instanceof TirFuncT
                 || exprType instanceof TirPairDataT
                 // we have no way to describe it to typescript if not this way
                 || exprType instanceof TirAliasType
                 || exprType instanceof TirTypeParam
-            ) throw new Error("filed cannot be encoded as data");
+            ) throw new Error("field cannot be encoded as data");
 
             /*
             const returnType = (

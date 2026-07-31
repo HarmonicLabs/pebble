@@ -307,9 +307,18 @@ export class ExpressifyCtx
         structExpr: TirExpr,
         structType: TirDataStructType,
         /** see `IRLettedMeta.siteScoped` */
-        siteScoped: boolean = false
+        siteScoped: boolean = false,
+        /** guards the nested descent against RECURSIVE single-constructor
+         * data structs — a back-edge to a struct already being extracted
+         * stops the eager field extraction (the recursive tail decodes
+         * lazily, one level per access, like any recursive data value) */
+        _visitedStructKeys: Set<string> = new Set()
     ): void
     {
+        const structKey = structType.toTirTypeKey();
+        if( _visitedStructKeys.has( structKey ) ) return;
+        _visitedStructKeys.add( structKey );
+
         const constr = structType.constructors[0];
         if( constr.fields.length === 0 ) return; // no fields to extract
 
@@ -375,7 +384,8 @@ export class ExpressifyCtx
                     fieldVarName,
                     lettedField,
                     fieldType,
-                    siteScoped
+                    siteScoped,
+                    _visitedStructKeys
                 );
             }
         }

@@ -102,6 +102,16 @@ export interface PossibleTirTypes {
     allTirNames: Set<string>;
     methodsNames: Map<AstFuncName, TirFuncName>;
     isGeneric: boolean;
+    /**
+     * `true` for USER-DECLARED generic structs. Named-type resolution for
+     * user structs prefers the DATA encoding in EVERY position (both type
+     * compilers' non-generic tails read `dataTirName`); generic user structs
+     * must follow the same convention or a `Box<int>` var annotation (sop
+     * path) and a `Box<int>` function param (data path) would resolve to
+     * different encodings and fail to unify. Native generics (`Optional`)
+     * intentionally keep the per-position sop/data split.
+     */
+    isGenericStruct?: boolean;
 }
 
 /**

@@ -155,7 +155,6 @@ export function score( o: Outer ): int {
             case i
                 is L{ x } => x * k
                 is R{ y } => 0 - (y * k)
-                ;
         )
         ;
 }

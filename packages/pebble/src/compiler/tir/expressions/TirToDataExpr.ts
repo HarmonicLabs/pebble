@@ -24,6 +24,7 @@ import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
 import { TirListT } from "../types/TirNativeType/native/list";
+import { TirValueT } from "../types/TirNativeType/native/value";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
 import { TirStringT } from "../types/TirNativeType/native/string";
@@ -92,7 +93,13 @@ export class TirToDataExpr
 
 export function _inlineToData(
     origin_t: TirType,
-    exprIR: IRTerm
+    exprIR: IRTerm,
+    /** BACKSTOP against recursive `runtime struct` types: the SoP encoder
+     * expands eagerly, so a recursive SoP type would expand forever. The
+     * AST layer already rejects every data-crossing of a recursive runtime
+     * struct with a located diagnostic; this only guarantees a finite,
+     * typed failure if a path is ever missed. */
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
     const from_t = getUnaliased( origin_t );
@@ -109,6 +116,15 @@ export function _inlineToData(
         exprIR
     );
 
+    // Native Value: Value -> data via `valueData` (mirrors `unValueData`
+    // on the FromData side) — a `Value` field in a `data struct` needs it
+    // (BUG 45)
+    if( from_t instanceof TirValueT )
+    return _ir_apps(
+        IRNative.valueData,
+        exprIR
+    );
+
     if( from_t instanceof TirListT )
     {
         const elems_t = getUnaliased( getListTypeArg( from_t )! );
@@ -122,31 +138,42 @@ export function _inlineToData(
             exprIR
         );
 
+        // non-data elements (e.g. `List<int>` at runtime is `list integer`):
+        // map each element to data — consing onto a nil of `list data`, the
+        // RESULT type (`_mkMapList`'s first arg is the nil of the OUTPUT
+        // list; a nil of the input element type traps at runtime with
+        // "mkCons :: incongruent list types") — then wrap the whole
+        // `list data` in `listData` to produce the final `Data` value.
         return _ir_apps(
-            IRNative._mkMapList,
-            IRConst.listOf( elems_t )([]),
-            _toDataUplcFunc( elems_t ),
-            exprIR
+            IRNative.listData,
+            _ir_apps(
+                IRNative._mkMapList,
+                IRConst.listOf( data_t )([]),
+                _toDataUplcFunc( elems_t ),
+                exprIR
+            )
         );
     }
 
     if( from_t instanceof TirSopOptT )
     {
-        const value_t = getOptTypeArg( from_t );
-        if( !isTirType( value_t ) ) throw new Error("TirToDataExpr: unreachable");
-
+        // SoP optional convention: the `Some` payload is ALREADY raw data
+        // (consumers decode on extraction — see `TirCaseExpr._sopStructToIR`),
+        // so converting the optional itself to data just re-tags the payload,
+        // WITHOUT re-encoding it (re-encoding double-wraps: "iData :: not an
+        // int" at runtime).
         const valueName = Symbol("value");
         return new IRCase(
             exprIR, [
                 // case Just{ value }
                 new IRFunc(
-                    [ valueName ], // value
+                    [ valueName ], // value (already data)
                     _ir_apps(
                         IRNative.constrData,
                         IRConst.int( 0 ),
                         _ir_apps(
                             IRNative.mkCons,
-                            _inlineToData( value_t, new IRVar( valueName ) ), // value to data
+                            new IRVar( valueName ),
                             IRConst.listOf( data_t )([])
                         )
                     )
@@ -159,7 +186,7 @@ export function _inlineToData(
 
     if( from_t instanceof TirSoPStructType )
     {
-        return _inlineMultiSopConstrToData( from_t, exprIR );
+        return _inlineMultiSopConstrToData( from_t, exprIR, _visitedSops );
     }
 
     return _ir_apps(
@@ -181,14 +208,21 @@ export function _toDataUplcFunc( origin_t: TirType ): IRTerm
     if( from_t instanceof TirIntT ) return IRNative.iData;
     if( from_t instanceof TirEnumType ) return IRNative.iData;
     if( from_t instanceof TirBytesT ) return IRNative.bData;
-    if( from_t instanceof TirVoidT ) return _mkUnitData;
-    if( from_t instanceof TirBoolT ) return _boolToData;
-    if( from_t instanceof TirStringT ) return _strToData;
+    // module-level hoisted helpers MUST be cloned: the backend mutates IR
+    // trees in place, so handing out the shared instance lets one compile
+    // poison every later one (the BUG 41/43 failure class). The FromData
+    // twins already clone.
+    if( from_t instanceof TirVoidT ) return _mkUnitData.clone();
+    if( from_t instanceof TirBoolT ) return _boolToData.clone();
+    if( from_t instanceof TirStringT ) return _strToData.clone();
 
     if( from_t instanceof TirLinearMapT )
     // linear maps only have pairs as elements
     // and we only support pairs of data (bc we only have `mkPairData`)
     return IRNative.mapData;
+
+    // Native Value: Value -> data via `valueData` (BUG 45)
+    if( from_t instanceof TirValueT ) return IRNative.valueData;
     
     if( from_t instanceof TirListT )
     {
@@ -208,7 +242,7 @@ export function _toDataUplcFunc( origin_t: TirType ): IRTerm
     ) return mkSopToData( from_t );
 
     throw new Error(
-        `TirFromDataExpr: cannot convert from Data to type ${from_t.toString()}`
+        `TirToDataExpr: cannot convert to Data from type ${from_t.toString()}`
     );
 }
 
@@ -244,11 +278,14 @@ const _strToData = new IRHoisted( new IRFunc(
 
 export function _inlineSingleSopConstrToData(
     sop_t: TirSoPStructType,
-    exprIR: IRTerm
+    exprIR: IRTerm,
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
     if( sop_t.constructors.length !== 1 )
     throw new Error("_inilneSingeSopConstrFromData: multiple constructors");
+
+    _assertNotRecursiveSop( sop_t, _visitedSops );
 
     const constr = sop_t.constructors[0];
 
@@ -269,8 +306,8 @@ export function _inlineSingleSopConstrToData(
                     // get unique field
                     new IRCase(
                         exprIR, [ IRNative._id ]
-                    )
-                    
+                    ),
+                    _visitedSops
                 ),
                 IRConst.listOf( data_t )([])
             )
@@ -287,7 +324,7 @@ export function _inlineSingleSopConstrToData(
 
         lst = _ir_apps(
             IRNative.mkCons,
-            _inlineToData( field_t, filedExpr ),
+            _inlineToData( field_t, filedExpr, _visitedSops ),
             lst
         );
     }
@@ -308,11 +345,14 @@ export function _inlineSingleSopConstrToData(
 
 export function _inlineMultiSopConstrToData(
     sop_t: TirSoPStructType,
-    exprIR: IRTerm
+    exprIR: IRTerm,
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
     if( sop_t.constructors.length <= 1 )
-    return _inlineSingleSopConstrToData( sop_t, exprIR );
+    return _inlineSingleSopConstrToData( sop_t, exprIR, _visitedSops );
+
+    _assertNotRecursiveSop( sop_t, _visitedSops );
 
     const cases: IRTerm[] = sop_t.constructors.map(( constr, constrIdx ) =>
     {
@@ -329,7 +369,7 @@ export function _inlineMultiSopConstrToData(
 
             lst = _ir_apps(
                 IRNative.mkCons,
-                _inlineToData( field_t, filedExpr ),
+                _inlineToData( field_t, filedExpr, _visitedSops ),
                 lst
             );
         }
@@ -350,6 +390,23 @@ export function _inlineMultiSopConstrToData(
     );
 }
 
+/**
+ * BACKSTOP (finite failure, not a hang) for recursive `runtime struct`
+ * types reaching the eager SoP-to-data expansion. The AST layer rejects
+ * every data-crossing of a recursive runtime struct with a located
+ * diagnostic before IR generation; landing here means a path was missed.
+ */
+function _assertNotRecursiveSop( sop_t: TirSoPStructType, visited: Set<string> ): void
+{
+    const key = sop_t.toTirTypeKey();
+    if( visited.has( key ) )
+    throw new Error(
+        `recursive runtime struct '${sop_t.toString()}' cannot be encoded as data; `
+        + "declare it as a `data struct` to cross the data boundary"
+    );
+    visited.add( key );
+}
+
 
 
 const _mapListToDataOfType: Record<string, IRHoisted> = {};
@@ -365,7 +422,8 @@ function mkMapListToData( elems_t: TirType ): IRHoisted
             IRNative.listData,
             _ir_apps(
                 IRNative._mkMapList,
-                IRConst.listOf( elems_t )([]),
+                // nil of the RESULT (`list data`) — see `_inlineToData`
+                IRConst.listOf( data_t )([]),
                 _toDataUplcFunc( elems_t ),
                 new IRVar( hoisted_mapListToData_lst ) // list
             )

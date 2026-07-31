@@ -14,6 +14,7 @@ import { populatePreludeScope, populateStdScope } from "./stdScope/stdScope";
 import { populateStdNamespace } from "./stdScope/populateStdNamespace";
 import { populateBuiltinInterfaces } from "./stdScope/populateBuiltinInterfaces";
 import { getAppliedTirTypeName } from "./getAppliedTirTypeName";
+import { isTirStructType } from "../types/TirStructType";
 import { StdTypes } from "./stdScope/StdTypes";
 
 export interface IGenericType {
@@ -27,6 +28,16 @@ export interface IGenericType {
      * (audit BUG 32). Monomorphization later substitutes the type params.
      */
     mkApplied: ( tyArgs: TirType[] ) => TirType;
+    /**
+     * The TEMPLATE type this generic was registered for (user generic
+     * structs only). While the template is a still-unfilled forward
+     * declaration, applying it would bake stale (empty) constructors into
+     * the result, so `getAppliedGeneric` refuses — EXCEPT for the identity
+     * self-application a recursive template performs while its own fields
+     * compile (`Tree<T>` inside `struct Tree<T>`), which returns the
+     * template itself and is always safe.
+     */
+    template?: TirType;
 }
 
 /**
@@ -242,7 +253,8 @@ export class TypedProgram extends DiagnosticEmitter
     defineGenericType(
         tirKey: string,
         arity: number,
-        mkApplied: ( tyArgs: TirType[] ) => TirType
+        mkApplied: ( tyArgs: TirType[] ) => TirType,
+        template?: TirType
     ): boolean
     {
         if(!(
@@ -254,17 +266,33 @@ export class TypedProgram extends DiagnosticEmitter
 
         this.genericTypes.set(
             tirKey,
-            this._mkGenericInfos( tirKey, arity, mkApplied )
+            this._mkGenericInfos( tirKey, arity, mkApplied, template )
         );
         return true;
     }
+
+    /** retract a generic registered by `defineGenericType` (used when a
+     * forward-declared data struct template turns out not data-encodable) */
+    deleteGenericType( tirKey: string ): boolean
+    {
+        return this.genericTypes.delete( tirKey );
+    }
+    /** arity of a registered generic type, `undefined` if `tirKey` is not a generic */
+    getGenericArity( tirKey: string ): number | undefined
+    {
+        return this.genericTypes.get( tirKey )?.arity;
+    }
+
     getAppliedGeneric( genericTirKey: string, concreteArgsNames: (string | TirType)[] ): TirType | undefined
     {
         const genericInfos = this.genericTypes.get( genericTirKey );
         if( typeof genericInfos !== "object" ) return undefined;
-        const { arity, apply, mkApplied } = genericInfos;
+        const { arity, apply, mkApplied, template } = genericInfos;
         if( concreteArgsNames.length < arity ) return undefined;
         concreteArgsNames = concreteArgsNames.slice( 0, arity );
+
+        const templateUnfilled =
+            isTirStructType( template ) && !template.isFilled();
 
         // If any argument is a still-generic TirType (a `TirTypeParam`, or a
         // container that itself embeds one), we cannot resolve it to a
@@ -277,12 +305,21 @@ export class TypedProgram extends DiagnosticEmitter
         );
         if( someArgIsGeneric )
         {
-            return mkApplied(
+            const applied = mkApplied(
                 concreteArgsNames.map( t =>
                     typeof t === "string" ? this.types.get( t )! : t
                 )
             );
+            // an UNFILLED struct template may only be applied to itself (the
+            // identity self-application of a recursive template compiling
+            // its own fields — `Tree<T>` inside `struct Tree<T>` returns the
+            // template BY REFERENCE, later filled). Any other application
+            // would copy the still-empty constructors: refuse it, the
+            // template must be declared before such a use.
+            if( templateUnfilled && applied !== template ) return undefined;
+            return applied;
         }
+        if( templateUnfilled ) return undefined;
 
         // `apply` also defines the applied concrete type
         const applied = apply( concreteArgsNames.map( t => typeof t === "string" ? t : t.toConcreteTirTypeName() ) );
@@ -293,12 +330,14 @@ export class TypedProgram extends DiagnosticEmitter
     private  _mkGenericInfos(
         tirKey: string,
         arity: number,
-        mkApplied: ( tyArgs: TirType[] ) => TirType
+        mkApplied: ( tyArgs: TirType[] ) => TirType,
+        template?: TirType
     ): IGenericType
     {
         return {
             arity,
             mkApplied,
+            template,
             apply: _genericInfosApply.bind({
                 program: this,
                 tirKey,
@@ -356,6 +395,13 @@ function _genericInfosApply( this: GenericInfosApplyScope, argsTirNames: string[
 
     // !!! DO NOT REMOVE !!!
     program.types.set( appliedConcreteName, applied );
+
+    // ALSO register under the type's OWN concrete name. For user generic
+    // structs the two diverge (`data_Box_<uid><int>` vs `data_Box<int>_<uid>`),
+    // and nested applications (`Box<Box<int>>`) resolve their arguments by the
+    // OWN name (see the `argsTirNames` lookup above) — without this the inner
+    // applied struct is unreachable. No-op for native generics (same name).
+    program.registerType( applied );
 
     return applied;
 }

@@ -10,7 +10,7 @@ export class TirTypeParam
         symbol?: symbol
     ) {
         this.name = name;
-        if( typeof symbol !== "symbol" ) this.symbol = Symbol(name);
+        this.symbol = typeof symbol === "symbol" ? symbol : Symbol(name);
     }
 
     hasDataEncoding(): boolean { return false; }

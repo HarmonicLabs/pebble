@@ -5,7 +5,7 @@ import { isTirStructType, TirStructType } from "../../tir/types/TirStructType";
 import { TirEnumType } from "../../tir/types/TirEnumType";
 import { TirType } from "../../tir/types/TirType";
 import { TirTypeParam } from "../../tir/types/TirTypeParam";
-import { int_t, bytes_t, bool_t, string_t } from "../../tir/program/stdScope/stdScope";
+import { int_t, bytes_t, bool_t, string_t, data_t } from "../../tir/program/stdScope/stdScope";
 import { AstCompilationCtx } from "../AstCompilationCtx";
 import { AstFuncName, TirFuncName } from "../scope/AstScope";
 import { TirBlsG1T, TirBlsG2T, TirMlResultT, TirUnConstrDataResultT, TirPairDataT } from "../../tir/types/TirNativeType";
@@ -66,6 +66,18 @@ export function getPropAccessReturnType(
             || isTirOptType( objType )
         )
         return new TirFuncT([], bytes_t );
+    }
+
+    // Universal `.toData()` — every data-encodable type satisfies the
+    // built-in `ToData` interface with signature `(): data`. Struct types
+    // fall through to `getStructPropAccessReturnType` (user-declared
+    // `type X implements ToData { ... }` impls win there); the lowering is
+    // `TirToDataExpr` (see `expressifyMethodCall`). This is also what a
+    // `<T implements ToData>` bound resolves to once `T` is monomorphized
+    // to a concrete data-encodable type.
+    if( propName === "toData" && !isTirStructType( objType ) && objType.hasDataEncoding() )
+    {
+        return new TirFuncT([], data_t );
     }
 
     if( isTirStructType( objType ) ) return getStructPropAccessReturnType( ctx, objType, propName );
@@ -213,6 +225,12 @@ function getStructPropAccessReturnType(
     // primitive/container types, so without this a plain `data struct`
     // reported "Property 'show' does not exist" despite the lowering existing.
     if( propName === "show" ) return new TirFuncT([], bytes_t );
+
+    // Universal `.toData(): data` fallback for DATA-encodable structs with
+    // no user-declared `toData` impl (user impls are found above): the
+    // lowering is `TirToDataExpr` (identity for data structs).
+    if( propName === "toData" && structType.hasDataEncoding() )
+        return new TirFuncT([], data_t );
 
     return undefined;
 }

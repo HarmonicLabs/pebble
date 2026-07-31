@@ -80,6 +80,10 @@ export class TirFromDataExpr
 export function _inlineFromData(
     target_t: TirType,
     dataExprIR: IRTerm,
+    /** BACKSTOP against recursive `runtime struct` types — see
+     * `_inlineToData`; guarantees a finite, typed failure instead of an
+     * endless eager expansion if an AST-layer check is ever missed. */
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
     const to_t = getUnaliased( target_t );
@@ -154,13 +158,16 @@ export function _inlineFromData(
 
     if( to_t instanceof TirSopOptT )
     {
-        const value_t = getOptTypeArg( to_t );
-        if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
-
+        // SoP optional convention: the `Some` of a SoP optional wraps RAW
+        // DATA and every consumer applies `_inlineFromData` on extraction
+        // (see `TirCaseExpr._sopStructToIR`) — so decoding data into an
+        // optional keeps the payload AS data (decoding it here would make
+        // the extraction decode twice: "unIData :: not data value").
+        //
         // Case(unConstrData(data), [\idxSym fieldsSym ->
         //     Case(idxSym, [
-        //         IRConstr(0, [fromData(headList(fieldsSym))]),  -- Some
-        //         IRConstr(1, [])                                -- None
+        //         IRConstr(0, [headList(fieldsSym)]),  -- Some (payload stays data)
+        //         IRConstr(1, [])                      -- None
         //     ])
         // ])
         const idxSym = Symbol("optIdx");
@@ -176,11 +183,8 @@ export function _inlineFromData(
                             // ctor 0: Some
                             new IRConstr( 0, [
                                 _ir_apps(
-                                    _fromDataUplcFunc( value_t ),
-                                    _ir_apps(
-                                        IRNative.headList,
-                                        new IRVar( fieldsListSym )
-                                    )
+                                    IRNative.headList,
+                                    new IRVar( fieldsListSym )
                                 )
                             ]),
                             // ctor 1: None
@@ -194,7 +198,7 @@ export function _inlineFromData(
 
     if( to_t instanceof TirSoPStructType )
     {
-        return _inlineMultiSopConstrFromData( to_t, dataExprIR );
+        return _inlineMultiSopConstrFromData( to_t, dataExprIR, _visitedSops );
     }
 
     return _ir_apps(
@@ -307,7 +311,8 @@ const _strFromData = new IRHoisted( new IRFunc(
 
 export function _inilneSingeSopConstrFromData(
     sop_t: TirSoPStructType,
-    dataExprIR: IRTerm
+    dataExprIR: IRTerm,
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
     if( sop_t.constructors.length !== 1 )
@@ -345,7 +350,8 @@ export function _inilneSingeSopConstrFromData(
                                         IRConst.int( i ),
                                         new IRVar( fieldsListSym )
                                     )
-                            )
+                            ),
+                            _visitedSops
                         );
                     } )
                 )
@@ -356,11 +362,23 @@ export function _inilneSingeSopConstrFromData(
 
 export function _inlineMultiSopConstrFromData(
     sop_t: TirSoPStructType,
-    dataExprIR: IRTerm
+    dataExprIR: IRTerm,
+    _visitedSops: Set<string> = new Set()
 ): IRTerm
 {
+    {
+        // BACKSTOP: recursive runtime struct in the eager data decoder
+        const key = sop_t.toTirTypeKey();
+        if( _visitedSops.has( key ) )
+        throw new Error(
+            `recursive runtime struct '${sop_t.toString()}' cannot be decoded from data; `
+            + "declare it as a `data struct` to cross the data boundary"
+        );
+        _visitedSops.add( key );
+    }
+
     if( sop_t.constructors.length <= 1 )
-    return _inilneSingeSopConstrFromData( sop_t, dataExprIR );
+    return _inilneSingeSopConstrFromData( sop_t, dataExprIR, _visitedSops );
 
     // Case(unConstrData(data), [\idxSym fieldsListSym ->
     //     Case(idxSym, [
@@ -387,7 +405,8 @@ export function _inlineMultiSopConstrFromData(
                     _ir_apps(
                         IRNative.headList,
                         new IRVar( fieldsListSym )
-                    )
+                    ),
+                    _visitedSops
                 )
             ]);
         }
@@ -409,7 +428,8 @@ export function _inlineMultiSopConstrFromData(
                                 IRConst.int( i ),
                                 new IRVar( fieldsListSym )
                             )
-                    )
+                    ),
+                    _visitedSops
                 );
             } )
         );

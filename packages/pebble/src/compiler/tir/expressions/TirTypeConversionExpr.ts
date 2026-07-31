@@ -8,6 +8,8 @@ import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirStringT } from "../types/TirNativeType/native/string";
+import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
+import { TirLinearMapEntryT } from "../types/TirNativeType/native/linearMapEntry";
 import { TirDataStructType } from "../types/TirStructType";
 import { TirEnumType } from "../types/TirEnumType";
 import { TirType } from "../types/TirType";
@@ -122,6 +124,16 @@ export class TirTypeConversionExpr
             );
             throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
         }
+
+        // every `LinearMap<K,V>` (and entry) is `list (pair data data)` /
+        // `pair data data` at runtime regardless of K/V — re-typing the
+        // keys/values is an identity conversion. This is the documented
+        // idiom for building typed maps:
+        // `std.builtins.unMapData( d ) as LinearMap<bytes, bytes>` (BUG 47).
+        if( to_t instanceof TirLinearMapT && from_t instanceof TirLinearMapT )
+            return exprIR;
+        if( to_t instanceof TirLinearMapEntryT && from_t instanceof TirLinearMapEntryT )
+            return exprIR;
 
         throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
     }

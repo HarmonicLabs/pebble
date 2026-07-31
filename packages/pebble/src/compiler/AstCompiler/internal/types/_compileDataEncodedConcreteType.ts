@@ -10,6 +10,7 @@ import { TirListT } from "../../../tir/types/TirNativeType/native/list";
 import { TirDataOptT } from "../../../tir/types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
 import { TirType } from "../../../tir/types/TirType";
+import { TirSoPStructType } from "../../../tir/types/TirStructType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { getDataFuncSignature } from "./getDataFuncSignature";
 
@@ -113,6 +114,12 @@ export function _compileDataEncodedConcreteType(
                 DiagnosticCode._0_is_not_defined,
                 typeExpr.name.range, typeExpr.name.text
             );
+            const genericKey = possibleTirNames.dataTirName ?? possibleTirNames.sopTirName;
+            const arity = ctx.program.getGenericArity( genericKey );
+            if( typeof arity === "number" && typeExpr.tyArgs.length !== arity ) return ctx.error(
+                DiagnosticCode.Generic_type_0_requires_1_type_argument_s,
+                typeExpr.name.range, typeExpr.name.text, arity.toString()
+            );
             const compiledArgs: import("../../../tir/types/TirType").TirType[] = [];
             for( const aExpr of typeExpr.tyArgs )
             {
@@ -121,13 +128,29 @@ export function _compileDataEncodedConcreteType(
                 compiledArgs.push( a );
             }
             const applied = ctx.program.getAppliedGeneric(
-                possibleTirNames.dataTirName ?? possibleTirNames.sopTirName,
+                genericKey,
                 compiledArgs
             );
+            // a runtime-only (`runtime struct`) generic has no data encoding:
+            // its application must not silently pass in a strictly-data
+            // position (struct fields, datum/redeemer). In a function
+            // SIGNATURE position (`optionalsAsSop`) the runtime encoding is
+            // allowed, matching non-generic runtime structs.
+            if( applied instanceof TirSoPStructType && !optionalsAsSop ) return undefined;
             return applied;
         }
 
-        if( typeof possibleTirNames.dataTirName !== "string" ) return undefined;
+        // named user types resolve to their DATA encoding. A runtime-only
+        // type (`runtime struct`) has none: in a function SIGNATURE position
+        // (`optionalsAsSop`) it resolves to its SoP type — so runtime
+        // structs can be passed to / returned from functions — while in a
+        // strictly-data position (struct fields, datum/redeemer) it stays
+        // unresolvable, which is what marks the container non-data-encodable.
+        if( typeof possibleTirNames.dataTirName !== "string" )
+        {
+            if( !optionalsAsSop ) return undefined;
+            return ctx.program.types.get( possibleTirNames.sopTirName );
+        }
 
         return ctx.program.types.get( possibleTirNames.dataTirName );
     }

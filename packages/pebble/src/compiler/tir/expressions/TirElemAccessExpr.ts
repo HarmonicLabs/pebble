@@ -9,6 +9,7 @@ import { ITirExpr } from "./ITirExpr";
 import { TirExpr } from "./TirExpr";
 import { ToIRTermCtx } from "./ToIRTermCtx";
 import { compileIRToUPLC } from "../../../IR/toUPLC/compileIRToUPLC";
+import { CompilationCtx, withCompilationCtx } from "../../../IR/CompilationCtx";
 import { _ir_apps } from "../../../IR/IRNodes/IRApp";
 
 /**
@@ -63,8 +64,13 @@ export class TirElemAccessExpr
         let irIndex = this.indexExpr.toIR( ctx );
         if( this.indexExpr.isConstant )
         {
+            // nested pipeline run: isolate with a clone + a fresh
+            // CompilationCtx — see `TirLitArrExpr`'s `constantList`
+            const irIndexClone = irIndex.clone();
             const result = Machine.evalSimple(
-                compileIRToUPLC( irIndex )
+                withCompilationCtx( new CompilationCtx(), () =>
+                    compileIRToUPLC( irIndexClone )
+                )
             );
             if(
                 ( result instanceof CEKConst )

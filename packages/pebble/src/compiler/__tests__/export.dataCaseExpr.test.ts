@@ -368,7 +368,6 @@ export function score( o: Outer ): int {
             case i
                 is L{ left }  => left * sign
                 is R{ right } => 0 - (right * sign)
-                ;
         )
         ;
 }

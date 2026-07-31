@@ -196,8 +196,6 @@ describe("BUG 30 — export() surfaces error diagnostics", () => {
 // --------------------------------------------------------------------------
 describe("BUG 31 — generic type declarations produce located diagnostics", () => {
     for( const [label, src] of [
-        ["generic struct", `struct Box<T> { value: T }\nfunction main(n:int):int{return n;}`],
-        ["generic alias", `type Alias<T> = T;\nfunction main(n:int):int{return n;}`],
         ["generic interface", `interface Show<T> { show(self): int }\nfunction main(n:int):int{return n;}`],
     ] as [string,string][] ) {
         test(`${label} reports a diagnostic (no crash)`, async () => {
@@ -207,6 +205,21 @@ describe("BUG 31 — generic type declarations produce located diagnostics", () 
             expect( ds.join("\n").toLowerCase() ).toContain("not supported");
         });
     }
+    // generic STRUCT and generic ALIAS declarations are supported since
+    // 0.4.3 — see `compiler.genericStructs.test.ts` and
+    // `compiler.genericAliases.test.ts` for the full feature coverage.
+    test("generic struct declaration compiles clean (supported since 0.4.3)", async () => {
+        const ds = errorsOnly( await checkOnly(
+            `struct Box<T> { value: T }\nfunction main(n:int):int{return n;}`
+        ) );
+        expect( ds ).toEqual([]);
+    });
+    test("generic alias declaration compiles clean (supported since 0.4.3)", async () => {
+        const ds = errorsOnly( await checkOnly(
+            `type Alias<T> = T;\nfunction main(n:int):int{return n;}`
+        ) );
+        expect( ds ).toEqual([]);
+    });
 });
 
 // --------------------------------------------------------------------------
@@ -278,10 +291,12 @@ describe("BUG 38 — namespace export member + re-export diagnostic", () => {
     test("`export struct` inside a namespace is accepted", async () => {
         expect( errorsOnly( await checkOnly(`namespace M { export struct Inside { I{ b: int } } }\nexport function main( x: M.Inside ): int { return 0; }`) ) ).toEqual([]);
     });
-    test("`export * from` yields a clear 'not supported' diagnostic", async () => {
-        const ds = errorsOnly( await checkOnly(`export * from "./lib.pebble";\nfunction main(n:int):int{return n;}`) );
+    // `export * from` is SUPPORTED since 0.4.3 — see
+    // `compiler.reExports.test.ts` for the full coverage. Referencing a
+    // missing file still errors cleanly.
+    test("`export * from` a missing file yields a clear error (supported since 0.4.3)", async () => {
+        const ds = errorsOnly( await checkOnly(`export * from "./does-not-exist.pebble";\nfunction main(n:int):int{return n;}`) );
         expect( ds.length ).toBeGreaterThan(0);
-        expect( ds.join("\n").toLowerCase() ).toContain("re-export");
     });
 });
 

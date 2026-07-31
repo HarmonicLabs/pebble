@@ -142,10 +142,30 @@ export function _compileLitteralNamedObjExpr(
     const constructorName = expr.name.text;
     let inferredStructType: TirStructType | undefined = undefined;
 
-    // Type.Constructor{ ... } syntax — resolve type directly
+    // Type.Constructor{ ... } syntax — resolve type directly.
+    // With a namespace path (`M.S.C{ ... }`, BUG 48) the type resolves
+    // through the namespaces' PUBLIC scopes, using local (non-walking)
+    // lookups so `M.S` only reaches members of `M` (same rule as qualified
+    // type annotations, audit BUG 37).
     if( expr.typeName )
     {
-        const possibleTypes = ctx.scope.resolveType( expr.typeName.text );
+        let possibleTypes: import("../../scope/AstScope").PossibleTirTypes | undefined = undefined;
+        if( expr.typePath.length > 0 )
+        {
+            let ns = ctx.scope.resolveNamespace( expr.typePath[0].text );
+            for( let i = 1; ns && i < expr.typePath.length; i++ )
+            {
+                ns = ns.publicScope.namespaces.get( expr.typePath[i].text );
+            }
+            if( !ns ) return ctx.error(
+                DiagnosticCode._0_is_not_defined,
+                expr.typePath[0].range,
+                expr.typePath.map( p => p.text ).join(".")
+            );
+            possibleTypes = ns.publicScope.types.get( expr.typeName.text );
+        }
+        else possibleTypes = ctx.scope.resolveType( expr.typeName.text );
+
         if( possibleTypes )
         {
             const dataTirName = possibleTypes.dataTirName;
@@ -155,13 +175,6 @@ export function _compileLitteralNamedObjExpr(
                 ?? ctx.program.types.get( sopTirName )
             );
         }
-        if( !inferredStructType )
-        {
-            return ctx.error(
-                DiagnosticCode._0_is_not_defined,
-                expr.typeName.range, expr.typeName.text
-            );
-        }
     }
     else
     {
@@ -169,11 +182,28 @@ export function _compileLitteralNamedObjExpr(
             ctx.scope.inferStructTypeFromConstructorName( constructorName )?.structType
         );
     }
+
+    // Generic-struct construction: both the constructor registry (populated
+    // by `using`, concrete structs only) and `resolveType(name)` (a generic
+    // TEMPLATE never lives in `program.types`) miss for a generic struct.
+    // When an explicit type hint already supplies the applied concrete
+    // struct (e.g. `const b: Box<int> = Box{ v: 5 }`) and it has a matching
+    // constructor, construct with it directly.
+    if(
+        !inferredStructType
+        && structType
+        && structType.constructors.some( c => c.name === constructorName )
+        && ( !expr.typeName || structType.appliedGeneric?.baseName === expr.typeName.text )
+    ) {
+        inferredStructType = structType;
+    }
+
     if( !inferredStructType )
     {
         return ctx.error(
             DiagnosticCode._0_is_not_defined,
-            expr.name.range, constructorName
+            expr.typeName ? expr.typeName.range : expr.name.range,
+            expr.typeName ? expr.typeName.text : constructorName
         );
     }
     if( typeHint )

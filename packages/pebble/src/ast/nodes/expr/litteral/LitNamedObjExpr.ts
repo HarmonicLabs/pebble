@@ -14,5 +14,12 @@ export class LitNamedObjExpr
         readonly range: SourceRange,
         /** When using `Type.Constructor{ ... }` syntax, this is the type name */
         readonly typeName: Identifier | undefined = undefined,
+        /**
+         * Namespace segments BEFORE `typeName` when the literal is reached
+         * through a qualified path (`M.S.C{ ... }` -> `[ M ]`, type `S`,
+         * constructor `C`). Empty for the plain `Type.Constructor{ ... }`
+         * and bare `Constructor{ ... }` forms.
+         */
+        readonly typePath: Identifier[] = [],
     ) {}
 }

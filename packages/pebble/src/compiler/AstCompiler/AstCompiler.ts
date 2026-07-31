@@ -2,6 +2,7 @@ import { StructDecl, StructDeclAstFlags } from "../../ast/nodes/statements/decla
 import { TypeAliasDecl } from "../../ast/nodes/statements/declarations/TypeAliasDecl";
 import { EnumDecl } from "../../ast/nodes/statements/declarations/EnumDecl";
 import { ExportStarStmt } from "../../ast/nodes/statements/ExportStarStmt";
+import { ExportImportStmt } from "../../ast/nodes/statements/ExportImportStmt";
 import { ImportStarStmt } from "../../ast/nodes/statements/ImportStarStmt";
 import { ImportStmt } from "../../ast/nodes/statements/ImportStmt";
 import { Source, SourceKind } from "../../ast/Source/Source";
@@ -15,7 +16,8 @@ import { CompilerIoApi, createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol } from "./scope/AstScope";
 import { TypedProgram } from "../tir/program/TypedProgram";
 import { TirAliasType } from "../tir/types/TirAliasType";
-import { TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
+import { getAppliedStructTypeName, TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
+import { substituteTypeParams } from "../tir/types/utils/substituteTypeParams";
 import { TirEnumType } from "../tir/types/TirEnumType";
 import { ExportStmt } from "../../ast/nodes/statements/ExportStmt";
 import { ResolveStackNode } from "./utils/deps/ResolveStackNode";
@@ -87,6 +89,18 @@ export interface AstTypeDefCompilationResult {
     sop: TirType | undefined,
     data: TirType | undefined
     methodsNames: Map<AstFuncName, TirFuncName>
+}
+
+/**
+ * Everything `_fillStructDecl` (pass 2) needs to compile the constructors of
+ * a struct forward-declared by `_declareStructPlaceholders` (pass 1).
+ */
+interface PendingStructFill {
+    sop: TirSoPStructType | undefined;
+    data: TirDataStructType | undefined;
+    methodsNames: Map<AstFuncName, TirFuncName>;
+    tirTypeParams: TirTypeParam[];
+    exported: boolean;
 }
 /*
 Handling type expressions that depend on other types 
@@ -418,7 +432,8 @@ export class AstCompiler extends DiagnosticEmitter
             info.stmts,
             src.absoluteProjPath,
             info.importsScope,
-            partial ? info.pendingImports : undefined
+            partial ? info.pendingImports : undefined,
+            info.srcExports
         );
 
         // collect namespace declarations (recursively) so that types/interfaces/signatures
@@ -488,7 +503,8 @@ export class AstCompiler extends DiagnosticEmitter
                 pending,
                 src.absoluteProjPath,
                 info.importsScope,
-                undefined
+                undefined,
+                info.srcExports
             );
         }
 
@@ -705,6 +721,15 @@ export class AstCompiler extends DiagnosticEmitter
             stmt.typeIdentifier.range
         );
 
+        // method BODIES on a generic struct would need per-instantiation
+        // monomorphization (`self: Box<T>`); not supported yet.
+        if( possibleTirTypes.isGeneric )
+        return this.error(
+            DiagnosticCode.Not_implemented_0,
+            stmt.typeIdentifier.range,
+            "methods on generic types are not supported yet"
+        );
+
         const uniqueTypeAstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + typeAstName + "_" + srcUid;
         const typeMethodsMap = possibleTirTypes.methodsNames;
 
@@ -736,7 +761,30 @@ export class AstCompiler extends DiagnosticEmitter
             }
             typeMethodsMap.set( astMethodName, tirMethodName );
 
-            const completeSig = new AstFuncType([
+            // The receiver is EXPLICIT in impl-method syntax
+            // (`show( self ): bytes { … }`), mirroring the interface
+            // declaration (`show(self): bytes`). An unannotated first
+            // parameter named `self`/`this` IS the receiver: type it with
+            // the implementing type in place. Only when the user omitted it
+            // entirely is a typed `this` receiver prepended.
+            const userParams = method.signature.params.slice();
+            const firstParam = userParams[0];
+            const firstIsReceiver =
+                firstParam instanceof SimpleVarDecl
+                && ( firstParam.name.text === "self" || firstParam.name.text === "this" )
+                && !firstParam.type;
+            if( firstIsReceiver )
+            {
+                userParams[0] = new SimpleVarDecl(
+                    (firstParam as SimpleVarDecl).name,
+                    stmt.typeIdentifier,
+                    undefined, // initExpr
+                    CommonFlags.None,
+                    (firstParam as SimpleVarDecl).range
+                );
+            }
+            const completeSig = new AstFuncType(
+                firstIsReceiver ? userParams : [
                     new SimpleVarDecl(
                         new Identifier("this", stmt.typeIdentifier.range),
                         stmt.typeIdentifier,
@@ -1394,6 +1442,16 @@ export class AstCompiler extends DiagnosticEmitter
         deferRedeemerOfAliases: boolean = false
     ): void
     {
+        // PASS 1: forward-declare ALL struct types as unfilled placeholders,
+        // registered on program + scope BY REFERENCE, so struct fields can
+        // reference structs declared later in the file — including the
+        // struct itself (recursive types) and mutually-recursive siblings.
+        const pendingStructFills = this._declareStructPlaceholders(
+            stmts, srcUid, topLevelScope, srcExports
+        );
+
+        // PASS 2: aliases/enums as before, struct constructors FILLED in
+        // declaration order.
         for( let i = 0; i < stmts.length; i++ )
         {
             let stmt = stmts[i];
@@ -1426,11 +1484,35 @@ export class AstCompiler extends DiagnosticEmitter
                 if( !resolvableNow ) continue;
             }
 
+            if( stmt instanceof StructDecl )
+            {
+                // registration/scope/export already happened in pass 1
+                this._fillStructDecl(
+                    stmt,
+                    srcUid,
+                    topLevelScope,
+                    srcExports,
+                    pendingStructFills.get( stmt )
+                );
+                void stmts.splice( i, 1 );
+                i--;
+                continue;
+            }
+
             const isGeneric = stmt instanceof EnumDecl ? false : stmt.typeParams.length > 0;
 
-            const tirTypes = stmt instanceof StructDecl
-                ? this._compileStructDecl( stmt, srcUid, topLevelScope )
-                : stmt instanceof EnumDecl
+            if( isGeneric && stmt instanceof TypeAliasDecl )
+            {
+                // generic type alias (`type Al<T> = List<T>`): registered on
+                // the generic registry like a generic struct; instantiation
+                // goes through `getAppliedGeneric` + `substituteTypeParams`.
+                this._declareGenericTypeAlias( stmt, srcUid, topLevelScope, srcExports, exported );
+                void stmts.splice( i, 1 );
+                i--;
+                continue;
+            }
+
+            const tirTypes = stmt instanceof EnumDecl
                 ? this._compileEnumDecl( stmt, srcUid, topLevelScope )
                 : this._compileTypeAliasDecl( stmt, srcUid, topLevelScope );
 
@@ -1471,6 +1553,7 @@ export class AstCompiler extends DiagnosticEmitter
                     stmt.name.text
                 );
                 else if( isGeneric ) {
+                    // generic type ALIASES are still unsupported
                     this.error(
                         DiagnosticCode.Not_implemented_0,
                         stmt.name.range,
@@ -1492,62 +1575,213 @@ export class AstCompiler extends DiagnosticEmitter
         }
     }
 
-    private _compileStructDecl(
+    /**
+     * Pass 1 of struct collection: for every `StructDecl` in `stmts`, create
+     * UNFILLED placeholder types (empty constructors), register them on the
+     * program (or the generic registry for `struct Box<T>`) and define the
+     * scope/export entries. The returned map holds everything
+     * `_fillStructDecl` needs to compile the constructors in pass 2.
+     */
+    private _declareStructPlaceholders(
+        stmts: TopLevelStmt[],
+        srcUid: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope
+    ): Map<StructDecl, PendingStructFill>
+    {
+        const pending = new Map<StructDecl, PendingStructFill>();
+
+        for( const topStmt of stmts )
+        {
+            let stmt: TopLevelStmt = topStmt;
+            let exported = false;
+            if( stmt instanceof ExportStmt )
+            {
+                exported = true;
+                stmt = stmt.stmt;
+            }
+            if( !( stmt instanceof StructDecl ) ) continue;
+
+            const isGeneric = stmt.typeParams.length > 0;
+
+            // detect duplicate type-param names on the declaration
+            const seenParamNames = new Set<string>();
+            const tirTypeParams: TirTypeParam[] = [];
+            let paramsOk = true;
+            for( const paramName of stmt.typeParams )
+            {
+                if( seenParamNames.has( paramName.text ) )
+                {
+                    this.error(
+                        DiagnosticCode._0_is_already_defined,
+                        paramName.range,
+                        paramName.text
+                    );
+                    paramsOk = false;
+                    break;
+                }
+                seenParamNames.add( paramName.text );
+                tirTypeParams.push( new TirTypeParam( paramName.text ) );
+            }
+            if( !paramsOk ) continue; // declaration ignored (diagnostic emitted)
+
+            const methodsNames: Map<AstFuncName, TirFuncName> = new Map();
+
+            // a generic TEMPLATE records itself as "applied to its own
+            // params": applying the template then IS `substituteTypeParams`
+            // (which renames `Box` -> `Box<int>` and rewrites the fields,
+            // preserving recursive self-references via its `seen` map).
+            const appliedInfo = isGeneric
+                ? { baseName: stmt.name.text, args: tirTypeParams }
+                : undefined;
+
+            const sop = stmt.hasFlag( StructDeclAstFlags.onlyDataEncoding )
+                ? undefined
+                : TirSoPStructType.unfilled( stmt.name.text, srcUid, methodsNames, appliedInfo );
+            const data = stmt.hasFlag( StructDeclAstFlags.onlySopEncoding )
+                ? undefined
+                : TirDataStructType.unfilled( stmt.name.text, srcUid, methodsNames, appliedInfo );
+            if( !sop && !data ) continue;
+
+            // define on program.
+            // Generic templates are NOT registered in `program.types` — they
+            // live in `program.genericTypes`, and only their applied
+            // instances become concrete registered types. Mirrors the native
+            // generics in `stdScope`.
+            if( !isGeneric )
+            {
+                if( sop  ) this.program.registerType( sop  );
+                if( data ) this.program.registerType( data );
+            }
+            else
+            {
+                const mkSubst = ( args: TirType[] ): Map<symbol, TirType> =>
+                    new Map( tirTypeParams.map( ( p, i ) => [ p.symbol, args[i] ] ) );
+                if( sop ) this.program.defineGenericType(
+                    sop.toTirTypeKey(),
+                    tirTypeParams.length,
+                    ( args: TirType[] ): TirType => substituteTypeParams( sop, mkSubst( args ) ),
+                    sop
+                );
+                if( data ) this.program.defineGenericType(
+                    data.toTirTypeKey(),
+                    tirTypeParams.length,
+                    ( args: TirType[] ): TirType => substituteTypeParams( data, mkSubst( args ) ),
+                    data
+                );
+            }
+
+            const sopTirName = sop?.toTirTypeKey() ?? data!.toTirTypeKey();
+            const dataTirName = data?.toTirTypeKey();
+
+            const possibleTirTypes: PossibleTirTypes = Object.freeze({
+                sopTirName,
+                dataTirName,
+                allTirNames: new Set([
+                    sopTirName,
+                    dataTirName,
+                ].filter( str => typeof str === "string" )) as Set<string>,
+                methodsNames,
+                isGeneric,
+                isGenericStruct: isGeneric,
+            } as PossibleTirTypes);
+
+            // define on scope
+            void topLevelScope.defineType(
+                stmt.name.text,
+                possibleTirTypes
+            );
+
+            if( exported )
+            {
+                if( srcExports.types.has( stmt.name.text ) ) this.error(
+                    DiagnosticCode._0_is_already_exported,
+                    stmt.name.range,
+                    stmt.name.text
+                );
+                else void srcExports.types.set(
+                    stmt.name.text,
+                    possibleTirTypes
+                );
+            }
+
+            pending.set( stmt, {
+                sop,
+                data,
+                methodsNames,
+                tirTypeParams,
+                exported,
+            });
+        }
+
+        return pending;
+    }
+
+    /**
+     * Pass 2 of struct collection: compile the constructors of a struct
+     * whose placeholder types were declared by `_declareStructPlaceholders`
+     * and fill them in place — every reference handed out in the meantime
+     * (recursive fields, siblings, aliases) points at the same objects.
+     */
+    private _fillStructDecl(
         stmt: StructDecl,
         srcUid: string,
-        topLevelScope: AstScope
-    ): AstTypeDefCompilationResult | undefined
+        topLevelScope: AstScope,
+        srcExports: AstScope,
+        pending: PendingStructFill | undefined
+    ): void
     {
-        if( stmt.typeParams.length > 0 ) return this.error(
-            DiagnosticCode.Not_implemented_0,
-            ( stmt.typeParams[0] ?? stmt.name ).range,
-            "generic structs are not supported yet"
-        );
+        // declaration was skipped (duplicate type params / no encodings)
+        if( !pending ) return;
         const compiler = this;
+        const { sop, data, methodsNames, tirTypeParams } = pending;
 
-        const methodsNames: Map<AstFuncName, TirFuncName> = new Map();
-
-        let sop: TirSoPStructType | undefined = undefined;
-        let data: TirDataStructType | undefined = undefined;
+        // Generic struct: bind each type param to a fresh `TirTypeParam` in a
+        // child scope, so `v: T` in a field position resolves to the param
+        // (the type compilers check `resolveTypeParam` before `resolveType`).
+        // Mirrors `_registerGenericTemplate` for generic functions.
+        let fieldScope = topLevelScope;
+        if( tirTypeParams.length > 0 )
+        {
+            fieldScope = topLevelScope.newChildScope({ ...topLevelScope.infos });
+            for( let i = 0; i < stmt.typeParams.length; i++ )
+            {
+                fieldScope.defineTypeParam( stmt.typeParams[i].text, tirTypeParams[i] );
+            }
+        }
 
         // sop encoded type
-        if( !stmt.hasFlag( StructDeclAstFlags.onlyDataEncoding ) )
+        if( sop )
         {
-            sop = (
-                new TirSoPStructType(
-                    stmt.name.text,
-                    srcUid,
-                    stmt.constrs.map( ctor =>
-                        new TirStructConstr(
-                            ctor.name.text,
-                            ctor.fields.map( field => {
-                                if( !field.type ) return compiler.error(
-                                    DiagnosticCode.Type_expected,
-                                    field.name.range.atEnd()
-                                );
+            sop.fillConstructors(
+                stmt.constrs.map( ctor =>
+                    new TirStructConstr(
+                        ctor.name.text,
+                        ctor.fields.map( field => {
+                            if( !field.type ) return compiler.error(
+                                DiagnosticCode.Type_expected,
+                                field.name.range.atEnd()
+                            );
 
-                                // TODO: recursive struct definitions
-                                const fieldType  = _compileSopEncodedConcreteType(
-                                    AstCompilationCtx.fromScope( compiler.program, topLevelScope ),
-                                    field.type
-                                );
-                                if( !fieldType ) return undefined
+                            const fieldType  = _compileSopEncodedConcreteType(
+                                AstCompilationCtx.fromScope( compiler.program, fieldScope ),
+                                field.type
+                            );
+                            if( !fieldType ) return undefined
 
-                                return new TirStructField(
-                                    field.name.text,
-                                    fieldType
-                                );
-                            })
-                            .filter( f => f instanceof TirStructField ) as TirStructField[]
-                        )
-                    ),
-                    methodsNames
+                            return new TirStructField(
+                                field.name.text,
+                                fieldType
+                            );
+                        })
+                        .filter( f => f instanceof TirStructField ) as TirStructField[]
+                    )
                 )
             );
         }
 
         // data encoded type
-        if( !stmt.hasFlag( StructDeclAstFlags.onlySopEncoding ) )
+        if( data )
         {
             let canEncodeToData = true;
             // Untagged Data encoding (`listData(...)`) instead of
@@ -1569,57 +1803,188 @@ export class AstCompiler extends DiagnosticEmitter
                     "`untagged` struct must have exactly one constructor"
                 );
             }
-            const dataType = new TirDataStructType(
-                stmt.name.text,
-                srcUid,
-                stmt.constrs.map( ctor =>
-                    new TirStructConstr(
-                        ctor.name.text,
-                        ctor.fields.map( field => {
-                            if( !field.type ) return compiler.error(
-                                DiagnosticCode.Type_expected,
-                                field.name.range.atEnd()
-                            );
-                            if( !canEncodeToData ) return undefined;
+            const dataCtors = stmt.constrs.map( ctor =>
+                new TirStructConstr(
+                    ctor.name.text,
+                    ctor.fields.map( field => {
+                        if( !field.type ) return compiler.error(
+                            DiagnosticCode.Type_expected,
+                            field.name.range.atEnd()
+                        );
+                        if( !canEncodeToData ) return undefined;
 
-                            // TODO: recursive struct definitions
-                            const fieldType  = _compileDataEncodedConcreteType(
-                                AstCompilationCtx.fromScope( compiler.program, topLevelScope ),
-                                field.type
-                            );
-                            if( !fieldType ) {
-                                canEncodeToData = false;
-                                return undefined;
-                            }
+                        const fieldType  = _compileDataEncodedConcreteType(
+                            AstCompilationCtx.fromScope( compiler.program, fieldScope ),
+                            field.type
+                        );
+                        if( !fieldType ) {
+                            canEncodeToData = false;
+                            return undefined;
+                        }
 
-                            return new TirStructField(
-                                field.name.text,
-                                fieldType
-                            );
-                        })
-                        .filter( f => f instanceof TirStructField ) as TirStructField[]
-                    )
-                ),
-                methodsNames,
-                isUntagged
+                        return new TirStructField(
+                            field.name.text,
+                            fieldType
+                        );
+                    })
+                    .filter( f => f instanceof TirStructField ) as TirStructField[]
+                )
             );
 
-            if( canEncodeToData ) data = dataType;
-            else if( stmt.hasFlag( StructDeclAstFlags.onlyDataEncoding ) )
-                this.error(
-                    DiagnosticCode.Type_0_cannot_be_encoded_as_data,
-                    stmt.name.range,
-                    stmt.name.text
-                );
+            if( canEncodeToData ) data.fillConstructors( dataCtors, isUntagged );
             else
-                this.warning(
-                    DiagnosticCode.Type_0_cannot_be_encoded_as_data_but_it_has_a_runtime_encoding_Use_runtime_keyword_modifier_for_the_declaration,
-                    stmt.range,
-                    stmt.name.text
-                );
+            {
+                // the data placeholder turned out NOT to be data-encodable:
+                // retract everything pass 1 declared for it.
+                this._retractDataStructDeclaration( stmt, srcUid, topLevelScope, srcExports, pending );
+                if( stmt.hasFlag( StructDeclAstFlags.onlyDataEncoding ) )
+                    this.error(
+                        DiagnosticCode.Type_0_cannot_be_encoded_as_data,
+                        stmt.name.range,
+                        stmt.name.text
+                    );
+                else
+                    this.warning(
+                        DiagnosticCode.Type_0_cannot_be_encoded_as_data_but_it_has_a_runtime_encoding_Use_runtime_keyword_modifier_for_the_declaration,
+                        stmt.range,
+                        stmt.name.text
+                    );
+            }
+        }
+    }
+
+    /**
+     * Undo the pass-1 declaration of a DATA struct placeholder whose fields
+     * turned out not to be data-encodable: remove it from `program.types`
+     * (or the generic registry) and rewrite the scope/export entries so the
+     * type only advertises its runtime (SoP) encoding — matching what the
+     * old single-pass compilation produced.
+     */
+    private _retractDataStructDeclaration(
+        stmt: StructDecl,
+        srcUid: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope,
+        pending: PendingStructFill
+    ): void
+    {
+        const { sop, data } = pending;
+        if( !data ) return;
+        const dataKey = data.toTirTypeKey();
+
+        if( pending.tirTypeParams.length > 0 ) this.program.deleteGenericType( dataKey );
+        else this.program.types.delete( dataKey );
+
+        if( !sop )
+        {
+            // no encoding left at all: drop the type entirely
+            topLevelScope.types.delete( stmt.name.text );
+            if( pending.exported ) srcExports.types.delete( stmt.name.text );
+            return;
         }
 
-        return (sop || data) ? { sop, data, methodsNames } : undefined;
+        const sopTirName = sop.toTirTypeKey();
+        const fixed: PossibleTirTypes = Object.freeze({
+            sopTirName,
+            dataTirName: undefined,
+            allTirNames: new Set([ sopTirName ]),
+            methodsNames: pending.methodsNames,
+            isGeneric: pending.tirTypeParams.length > 0,
+            isGenericStruct: pending.tirTypeParams.length > 0,
+        } as PossibleTirTypes);
+        topLevelScope.types.set( stmt.name.text, fixed );
+        if( pending.exported && srcExports.types.has( stmt.name.text ) )
+            srcExports.types.set( stmt.name.text, fixed );
+    }
+
+    /**
+     * `type Al<T> = …` — compile the aliased type in a scope binding each
+     * type param, then register a generic (per encoding, since alias TIR
+     * keys don't distinguish encodings the registry keys do) whose
+     * application substitutes the params and wraps the result in a
+     * `TirAliasType` named `Al<int>`.
+     */
+    private _declareGenericTypeAlias(
+        stmt: TypeAliasDecl,
+        srcUid: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope,
+        exported: boolean
+    ): void
+    {
+        // detect duplicate type-param names
+        const seenParamNames = new Set<string>();
+        const tirTypeParams: TirTypeParam[] = [];
+        for( const paramName of stmt.typeParams )
+        {
+            if( seenParamNames.has( paramName.text ) ) return void this.error(
+                DiagnosticCode._0_is_already_defined,
+                paramName.range,
+                paramName.text
+            );
+            seenParamNames.add( paramName.text );
+            tirTypeParams.push( new TirTypeParam( paramName.text ) );
+        }
+
+        const aliasScope = topLevelScope.newChildScope({ ...topLevelScope.infos });
+        for( let i = 0; i < stmt.typeParams.length; i++ )
+        {
+            aliasScope.defineTypeParam( stmt.typeParams[i].text, tirTypeParams[i] );
+        }
+
+        const sopAliasedT = _compileSopEncodedConcreteType(
+            AstCompilationCtx.fromScope( this.program, aliasScope ),
+            stmt.aliasedType
+        );
+        const dataAliasedT = _compileDataEncodedConcreteType(
+            AstCompilationCtx.fromScope( this.program, aliasScope ),
+            stmt.aliasedType
+        );
+        if( !sopAliasedT && !dataAliasedT ) return; // diagnostics already emitted
+
+        const methodsNames: Map<AstFuncName, TirFuncName> = new Map();
+        const baseName = stmt.name.text;
+        const arity = tirTypeParams.length;
+        const mkSubst = ( args: TirType[] ): Map<symbol, TirType> =>
+            new Map( tirTypeParams.map( ( p, i ) => [ p.symbol, args[i] ] ) );
+        const mkApplied = ( template: TirType ) => ( args: TirType[] ): TirType =>
+            new TirAliasType(
+                getAppliedStructTypeName( baseName, args ),
+                srcUid,
+                substituteTypeParams( template, mkSubst( args ) ),
+                methodsNames
+            );
+
+        // per-encoding registry keys (a `TirAliasType` key is `name_uid`
+        // with no encoding prefix, so the two templates would collide)
+        const sopKey = "sop_alias_" + baseName + "_" + srcUid;
+        const dataKey = "data_alias_" + baseName + "_" + srcUid;
+        if( sopAliasedT ) this.program.defineGenericType( sopKey, arity, mkApplied( sopAliasedT ) );
+        if( dataAliasedT ) this.program.defineGenericType( dataKey, arity, mkApplied( dataAliasedT ) );
+
+        const sopTirName = sopAliasedT ? sopKey : dataKey;
+        const dataTirName = dataAliasedT ? dataKey : undefined;
+        const possibleTirTypes: PossibleTirTypes = Object.freeze({
+            sopTirName,
+            dataTirName,
+            allTirNames: new Set(
+                [ sopTirName, dataTirName ].filter( s => typeof s === "string" )
+            ) as Set<string>,
+            methodsNames,
+            isGeneric: true,
+        } as PossibleTirTypes);
+
+        void topLevelScope.defineType( stmt.name.text, possibleTirTypes );
+
+        if( exported )
+        {
+            if( srcExports.types.has( stmt.name.text ) ) this.error(
+                DiagnosticCode._0_is_already_exported,
+                stmt.name.range,
+                stmt.name.text
+            );
+            else void srcExports.types.set( stmt.name.text, possibleTirTypes );
+        }
     }
 
     private _compileTypeAliasDecl(
@@ -1628,11 +1993,6 @@ export class AstCompiler extends DiagnosticEmitter
         topLevelScope: AstScope
     ): AstTypeDefCompilationResult | undefined
     {
-        if( stmt.typeParams.length > 0 ) return this.error(
-            DiagnosticCode.Not_implemented_0,
-            ( stmt.typeParams[0] ?? stmt.name ).range,
-            "generic type aliases are not supported yet"
-        );
         const compiler = this;
         const sopAliasedT = _compileSopEncodedConcreteType(
             AstCompilationCtx.fromScope( compiler.program, topLevelScope ),
@@ -1710,6 +2070,73 @@ export class AstCompiler extends DiagnosticEmitter
         return { sop: enumType, data: enumType, methodsNames };
     }
 
+    /**
+     * `export * from "./lib.pebble"` — merge every symbol `lib` exports into
+     * this file's export scope. Existing entries win (first export of a
+     * name sticks); a LOCAL declaration colliding with a re-exported name
+     * errors loudly at its own declaration site ("already exported").
+     */
+    private _reExportAllSymbols(
+        from: AstScope,
+        into: AstScope,
+        _stmt: ExportStarStmt
+    ): void
+    {
+        const mergeMap = <V>( src: Map<string, V>, dst: Map<string, V> ): void => {
+            for( const [ name, entry ] of src )
+                if( !dst.has( name ) ) dst.set( name, entry );
+        };
+        mergeMap( from.variables,  into.variables  );
+        mergeMap( from.functions,  into.functions  );
+        mergeMap( from.types,      into.types      );
+        mergeMap( from.interfaces, into.interfaces );
+        mergeMap( from.namespaces, into.namespaces );
+        mergeMap( from.contracts,  into.contracts  );
+    }
+
+    /**
+     * `export { x, y as z } from "./lib.pebble"` — copy the named symbols
+     * (under their aliases) from `lib`'s exports into this file's.
+     */
+    private _reExportNamedSymbols(
+        from: AstScope,
+        into: AstScope,
+        stmt: ExportImportStmt
+    ): void
+    {
+        for( const member of stmt.members )
+        {
+            const srcName = member.identifier.text;
+            const dstName = member.asIdentifier?.text ?? srcName;
+            let found = false;
+            let collided = false;
+            const move = <V>( srcMap: Map<string, V>, dstMap: Map<string, V> ): void => {
+                if( !srcMap.has( srcName ) ) return;
+                found = true;
+                if( dstMap.has( dstName ) ) collided = true;
+                else dstMap.set( dstName, srcMap.get( srcName )! );
+            };
+            move( from.variables,  into.variables  );
+            move( from.functions,  into.functions  );
+            move( from.types,      into.types      );
+            move( from.interfaces, into.interfaces );
+            move( from.namespaces, into.namespaces );
+            move( from.contracts,  into.contracts  );
+
+            if( !found ) this.error(
+                DiagnosticCode.Module_0_has_no_exported_member_1,
+                member.identifier.range,
+                stmt.fromPath.string,
+                srcName
+            );
+            else if( collided ) this.error(
+                DiagnosticCode._0_is_already_exported,
+                ( member.asIdentifier ?? member.identifier ).range,
+                dstName
+            );
+        }
+    }
+
     private _consumeImportsAddSymsInScope(
         stmts: TopLevelStmt[],
         srcAbsPath: string,
@@ -1719,12 +2146,48 @@ export class AstCompiler extends DiagnosticEmitter
          * not published anything yet are moved here instead of erroring;
          * the values pass re-consumes them strictly.
          */
-        deferTo: TopLevelStmt[] | undefined = undefined
+        deferTo: TopLevelStmt[] | undefined = undefined,
+        /**
+         * this file's export scope — re-export statements
+         * (`export * from` / `export { x } from`) merge the referenced
+         * file's exported symbols HERE (and, per TS semantics, do NOT bring
+         * the names into the local scope).
+         */
+        srcExports: AstScope | undefined = undefined
     ): void
     {
         for( let i = 0; i < stmts.length; i++ )
         {
             const stmt = stmts[i];
+            if(
+                ( stmt instanceof ExportStarStmt || stmt instanceof ExportImportStmt )
+                && srcExports
+            )
+            {
+                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
+                const importedSymbols = this.program.getExportedSymbols( importAbsPath );
+                if( !importedSymbols )
+                {
+                    if( deferTo ) deferTo.push( stmt );
+                    else this.error(
+                        DiagnosticCode.File_0_not_found,
+                        stmt.fromPath.range,
+                        importAbsPath
+                    );
+                    void stmts.splice( i, 1 );
+                    i--;
+                    continue;
+                }
+
+                if( stmt instanceof ExportStarStmt )
+                    this._reExportAllSymbols( importedSymbols, srcExports, stmt );
+                else
+                    this._reExportNamedSymbols( importedSymbols, srcExports, stmt );
+
+                void stmts.splice( i, 1 );
+                i--;
+                continue;
+            }
             if( stmt instanceof ImportStarStmt )
             {
                 const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
@@ -1834,11 +2297,24 @@ export class AstCompiler extends DiagnosticEmitter
                     // also define as a value so that `resolveValue` can find it
                     // (mirrors what `_collectTopLevelFuncDeclSig` does for local functions)
                     const funcExpr = this.program.functions.get( tirFuncName );
-                    if( funcExpr ) srcImportsScope.defineValue({
-                        isConstant: true,
-                        name: declName,
-                        type: funcExpr.type,
-                    });
+                    if( funcExpr )
+                    {
+                        srcImportsScope.defineValue({
+                            isConstant: true,
+                            name: declName,
+                            type: funcExpr.type,
+                        });
+                        // expressify resolves top-level function accesses by
+                        // the LOCAL name through `program.functions` (local
+                        // declarations register their bare AST name the same
+                        // way). A name that only exists at this import site —
+                        // an `as` alias, or an alias introduced by a
+                        // re-export (`export { double as twice } from`) —
+                        // needs the same aliasing or the call site dies at
+                        // expressify with "variable not found in context".
+                        if( !this.program.functions.has( declName ) )
+                            this.program.functions.set( declName, funcExpr );
+                    }
                 }
                 if( isType ) srcImportsScope.types.set( declName, importedSymbols.types.get( declName )! );
                 if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! );
@@ -2158,7 +2634,7 @@ export class AstCompiler extends DiagnosticEmitter
     }
 }
 
-type ImportStmtLike = ImportStarStmt | ImportStmt | ExportStarStmt;
+type ImportStmtLike = ImportStarStmt | ImportStmt | ExportStarStmt | ExportImportStmt;
 
 function isImportStmtLike( stmt: any ): stmt is ImportStmtLike
 {
@@ -2166,6 +2642,7 @@ function isImportStmtLike( stmt: any ): stmt is ImportStmtLike
         stmt instanceof ImportStmt
         || stmt instanceof ImportStarStmt
         || stmt instanceof ExportStarStmt
+        || stmt instanceof ExportImportStmt
     );
 }
 

@@ -99,6 +99,22 @@ export class TirLitNamedObjExpr
             throw new Error("missing field in object literal");
         }
         
+        if( type instanceof TirSopOptT ) {
+            // SoP optional convention: the `Some` of a SoP optional wraps
+            // RAW DATA, and every consumer (`case` destructure, `!`, `??`)
+            // applies `_inlineFromData` on extraction — see
+            // `TirCaseExpr._sopStructToIR`. A `Some{ value: … }` literal
+            // must therefore encode its payload to data; without this the
+            // extraction dies at runtime with "unIData :: not data value"
+            // (BUG 42).
+            return new IRConstr(
+                ctorIdx, // Some = 0, None = 1; optionals are never narrowed
+                namedFields.map(({ expr }) =>
+                    new TirToDataExpr( expr, expr.range ).toIR( ctx )
+                )
+            );
+        }
+
         if( type instanceof TirSoPStructType ) {
             // the runtime tag is the constructor's index in the ORIGINAL
             // (un-narrowed) type — `case` dispatches by that same index.
@@ -114,15 +130,22 @@ export class TirLitNamedObjExpr
         // else data
         const exprsAsData = namedFields.map(({ expr }) => {
             const exprType = getUnaliased( expr.type ) ?? expr.type;
+            // NOTE: `TirSopOptT` is NOT rejected — a SoP optional HAS a data
+            // conversion (`_inlineToData`'s `TirSopOptT` branch), which is
+            // exactly what a generic data struct instantiated at
+            // `Optional<…>` needs (`G<Optional<int>>`, BUG 44). Non-data SoP
+            // STRUCT values are still rejected (their conversion is the
+            // eager encoder, guarded separately for recursion).
             if(
-                exprType instanceof TirSoPStructType
-                || exprType instanceof TirSopOptT
+                // NB: `TirSopOptT` EXTENDS `TirSoPStructType`, hence the
+                // explicit exclusion — optionals must not be caught here
+                ( exprType instanceof TirSoPStructType && !( exprType instanceof TirSopOptT ) )
                 || exprType instanceof TirFuncT
                 || exprType instanceof TirPairDataT
                 // we have no way to describe it to typescript if not this way
                 || exprType instanceof TirAliasType
                 || exprType instanceof TirTypeParam
-            ) throw new Error("filed cannot be encoded as data");
+            ) throw new Error("field cannot be encoded as data");
 
             /*
             const returnType = (

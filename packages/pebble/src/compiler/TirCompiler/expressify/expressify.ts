@@ -962,7 +962,15 @@ function getNestedDestructsInSingleSopDestructPattern(
         if(!( varDecl instanceof TirSimpleVarDecl ))
         throw new Error("expected simple var decl in single destruct pattern");
 
-        if(!( varDecl.type instanceof TirSoPStructType )) continue;
+        // only SINGLE-constructor SoP structs can be flattened eagerly.
+        // NB: `TirSopOptT` EXTENDS `TirSoPStructType` — a bare instanceof
+        // check dragged two-constructor OPTIONAL fields in here and
+        // destructured them as constructor 0 (BUG 44). `isSingleConstrStruct`
+        // checks the constructor count.
+        if(
+            !( varDecl.type instanceof TirSoPStructType )
+            || !isSingleConstrStruct( varDecl.type )
+        ) continue;
 
         result.push(
             getConstrDestructPattern(

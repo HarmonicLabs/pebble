@@ -3,6 +3,37 @@ import { TirInterfaceImpl } from "./TirInterfaceImpl";
 import { ITirType, TirType } from "./TirType";
 import { AstFuncName, TirFuncName } from "../../AstCompiler/scope/AstScope";
 import { constT, ConstType } from "@harmoniclabs/uplc";
+import { getAppliedTirTypeName } from "../program/getAppliedTirTypeName";
+
+/**
+ * Present on a struct type produced by applying a generic struct template
+ * (e.g. `Box<int>` from `struct Box<T>`). Records the base name and the
+ * (possibly still symbolic) type arguments so `substituteTypeParams` can
+ * re-derive the applied `name` after substituting the arguments — the name
+ * is the struct's identity in `canAssignStruct`, so it MUST track the args.
+ */
+export interface AppliedGenericStructInfo {
+    /** AST-level base name of the generic struct, e.g. `Box` */
+    readonly baseName: string;
+    /** type arguments this struct was applied to (possibly symbolic) */
+    readonly args: readonly TirType[];
+}
+
+/**
+ * Display/identity name of a generic struct applied to `args`, e.g. `Box<int>`.
+ * Symbolic arguments (embedding a `TirTypeParam`) fall back to `toString()`
+ * because `toConcreteTirTypeName()` throws on them.
+ */
+export function getAppliedStructTypeName(
+    baseName: string,
+    args: readonly TirType[]
+): string
+{
+    return getAppliedTirTypeName(
+        baseName,
+        args.map( a => a.isConcrete() ? a.toConcreteTirTypeName() : a.toString() )
+    );
+}
 
 export interface ITirStructType extends ITirType {
     readonly name: string;
@@ -38,14 +69,29 @@ export class TirDataStructType
      */
     readonly narrowedFromParentCtorIdxs: number[] | undefined;
 
+    /** set when this struct is an instantiation of a generic struct template */
+    readonly appliedGeneric: AppliedGenericStructInfo | undefined;
+
+    /** `constructors` is mutable ONLY through `fillConstructors` (recursion
+     * support: the type object is registered BEFORE its fields compile, so
+     * self-references resolve to it by reference). */
+    constructors: TirStructConstr[];
+    untagged: boolean;
+
+    private _filled: boolean = true;
+    /** `false` while this is a forward-declared placeholder whose
+     * constructors have not been compiled yet */
+    isFilled(): boolean { return this._filled; }
+
     constructor(
         readonly name: string,
         readonly fileUid: string,
-        readonly constructors: TirStructConstr[],
+        constructors: TirStructConstr[],
         /** points to an array possibly shared with alternative encoding types */
         readonly methodNamesPtr: Map<AstFuncName, TirFuncName>,
-        readonly untagged: boolean = false,
+        untagged: boolean = false,
         narrowedFromParentCtorIdxs: number[] | undefined = undefined,
+        appliedGeneric: AppliedGenericStructInfo | undefined = undefined,
     ) {
         // `untagged === true` requires a single constructor — its runtime
         // form is `listData(fields)` instead of `constrData(idx, fields)`.
@@ -55,7 +101,42 @@ export class TirDataStructType
                 + constructors.length
             );
         }
+        this.constructors = constructors;
+        this.untagged = untagged;
         this.narrowedFromParentCtorIdxs = narrowedFromParentCtorIdxs;
+        this.appliedGeneric = appliedGeneric;
+    }
+
+    /**
+     * Forward-declared placeholder: registered (by reference) before its
+     * field types compile, so recursive/sibling references resolve to it.
+     * MUST be completed with `fillConstructors`.
+     */
+    static unfilled(
+        name: string,
+        fileUid: string,
+        methodNamesPtr: Map<AstFuncName, TirFuncName>,
+        appliedGeneric: AppliedGenericStructInfo | undefined = undefined,
+        narrowedFromParentCtorIdxs: number[] | undefined = undefined,
+    ): TirDataStructType
+    {
+        const t = new TirDataStructType( name, fileUid, [], methodNamesPtr, false, narrowedFromParentCtorIdxs, appliedGeneric );
+        t._filled = false;
+        return t;
+    }
+
+    fillConstructors( constructors: TirStructConstr[], untagged: boolean = false ): void
+    {
+        if( untagged && constructors.length !== 1 ) {
+            throw new Error(
+                "untagged data struct must have exactly one constructor; got "
+                + constructors.length
+            );
+        }
+        this.constructors = constructors;
+        this.untagged = untagged;
+        this._filled = true;
+        this._isConcrete = undefined; // reset memo computed while unfilled
     }
 
     hasDataEncoding(): boolean { return true; }
@@ -107,7 +188,8 @@ export class TirDataStructType
             filteredCtors,
             this.methodNamesPtr,
             this.untagged,
-            filtered
+            filtered,
+            this.appliedGeneric
         );
     }
 
@@ -119,26 +201,31 @@ export class TirDataStructType
     }
 
     protected _isConcrete: boolean | undefined = undefined;
+    private _computingIsConcrete: boolean = false;
     isConcrete(): boolean {
-        if( typeof this._isConcrete !== "boolean" )
+        if( typeof this._isConcrete === "boolean" ) return this._isConcrete;
+        // recursive struct: a back-edge to a type still being walked is not
+        // what makes it non-concrete (recursion never introduces a type
+        // param); answer `true` for the back-edge and only memoize the
+        // result of a COMPLETE walk.
+        if( this._computingIsConcrete ) return true;
+        this._computingIsConcrete = true;
+        try {
             this._isConcrete = this.constructors.every(
                 c => c.isConcrete()
             );
+        } finally {
+            this._computingIsConcrete = false;
+        }
         return this._isConcrete;
     }
 
     clone(): TirDataStructType
     {
-        const result = new TirDataStructType(
-            this.name,
-            this.fileUid,
-            this.constructors.map( c => c.clone() ),
-            this.methodNamesPtr,
-            this.untagged,
-            this.narrowedFromParentCtorIdxs ? [ ...this.narrowedFromParentCtorIdxs ] : undefined
-        );
-        result._isConcrete = this._isConcrete;
-        return result;
+        // interning: struct types are never mutated after creation (filling
+        // a forward-declared placeholder is completion, not mutation), and a
+        // deep clone of a RECURSIVE struct would never terminate.
+        return this;
     }
 
     toUplcConstType(): ConstType {
@@ -158,15 +245,50 @@ export class TirSoPStructType
      */
     readonly narrowedFromParentCtorIdxs: number[] | undefined;
 
+    /** set when this struct is an instantiation of a generic struct template */
+    readonly appliedGeneric: AppliedGenericStructInfo | undefined;
+
+    /** see `TirDataStructType.constructors` — mutable only via `fillConstructors` */
+    constructors: TirStructConstr[];
+
+    private _filled: boolean = true;
+    /** `false` while this is a forward-declared placeholder whose
+     * constructors have not been compiled yet */
+    isFilled(): boolean { return this._filled; }
+
     constructor(
         readonly name: string,
         readonly fileUid: string,
-        readonly constructors: TirStructConstr[],
+        constructors: TirStructConstr[],
         /** points to an array possibly shared with alternative encoding types */
         readonly methodNamesPtr: Map<AstFuncName, TirFuncName>,
         narrowedFromParentCtorIdxs: number[] | undefined = undefined,
+        appliedGeneric: AppliedGenericStructInfo | undefined = undefined,
     ) {
+        this.constructors = constructors;
         this.narrowedFromParentCtorIdxs = narrowedFromParentCtorIdxs;
+        this.appliedGeneric = appliedGeneric;
+    }
+
+    /** see `TirDataStructType.unfilled` */
+    static unfilled(
+        name: string,
+        fileUid: string,
+        methodNamesPtr: Map<AstFuncName, TirFuncName>,
+        appliedGeneric: AppliedGenericStructInfo | undefined = undefined,
+        narrowedFromParentCtorIdxs: number[] | undefined = undefined,
+    ): TirSoPStructType
+    {
+        const t = new TirSoPStructType( name, fileUid, [], methodNamesPtr, narrowedFromParentCtorIdxs, appliedGeneric );
+        t._filled = false;
+        return t;
+    }
+
+    fillConstructors( constructors: TirStructConstr[] ): void
+    {
+        this.constructors = constructors;
+        this._filled = true;
+        this._isConcrete = undefined; // reset memo computed while unfilled
     }
 
     hasDataEncoding(): boolean { return false; }
@@ -209,7 +331,8 @@ export class TirSoPStructType
             this.fileUid,
             filteredCtors,
             this.methodNamesPtr,
-            filtered
+            filtered,
+            this.appliedGeneric
         );
     }
 
@@ -221,25 +344,26 @@ export class TirSoPStructType
     }
 
     protected _isConcrete: boolean | undefined = undefined;
+    private _computingIsConcrete: boolean = false;
     isConcrete(): boolean {
-        if( typeof this._isConcrete !== "boolean" )
+        if( typeof this._isConcrete === "boolean" ) return this._isConcrete;
+        // see `TirDataStructType.isConcrete` — back-edges answer `true`
+        if( this._computingIsConcrete ) return true;
+        this._computingIsConcrete = true;
+        try {
             this._isConcrete = this.constructors.every(
                 c => c.isConcrete()
             );
+        } finally {
+            this._computingIsConcrete = false;
+        }
         return this._isConcrete;
     }
 
     clone(): TirSoPStructType
     {
-        const result = new TirSoPStructType(
-            this.name,
-            this.fileUid,
-            this.constructors.map( c => c.clone() ),
-            this.methodNamesPtr,
-            this.narrowedFromParentCtorIdxs ? [ ...this.narrowedFromParentCtorIdxs ] : undefined
-        );
-        result._isConcrete = this._isConcrete;
-        return result;
+        // interning — see `TirDataStructType.clone`
+        return this;
     }
 
     toUplcConstType(): ConstType {

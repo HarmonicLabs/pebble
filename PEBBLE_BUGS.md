@@ -222,7 +222,22 @@ Found later, during the 0.4.2 re-verification (not part of the original 12):
 | # | Severity | One-liner | Status |
 |---|---|---|---|
 | 39 | HIGH | `List.map` unusable with any lambda — type not assignable to itself | FIXED 2026-07-29 |
-| 40 | MEDIUM | No function-type syntax for a parameter annotation → higher-order functions cannot be declared | **OPEN** |
+| 40 | MEDIUM | No function-type syntax for a parameter annotation → higher-order functions cannot be declared | FIXED 2026-07-29 |
+| 41 | CRITICAL | `data struct` with a `List<…>` field type-checks clean and miscompiles | FIXED 2026-07-31 |
+| 42 | CRITICAL | multi-ctor `runtime struct` with an `Optional<…>` field type-checks clean and miscompiles | FIXED 2026-07-31 |
+| 43 | HIGH | `bool` field in a multi-constructor `data struct` crashes the backend | FIXED 2026-07-31 |
+| 44 | MEDIUM | `Optional<…>` as a `runtime struct` field, or as a generic instantiation, crashes the backend (the "deconstruct + `case`" expressify crash first noted under this number is the same defect) | FIXED 2026-07-31 |
+
+Found by the second-axis sweep (contract/state/redeemer shapes, prelude types as
+fields — `bug-repros/audit-axis2-contracts.mjs`). All three are **pre-existing,
+reproduce identically on published 0.4.1**, and none is silent:
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 45 | HIGH | `Value` as a `data struct` field: checks clean, then the backend cannot decode it | **OPEN** |
+| 46 | LOW | `case` as a `const`/`let` initializer is newline-sensitive — same code parses multi-line, fails on one line | **OPEN** |
+| 47 | LOW | a generic prelude type (`LinearMap<…>`) is not usable directly in cast position; only via an alias | FIXED 2026-07-31 |
+| 48 | LOW | a struct constructor is not reachable through a qualified namespace path (`M.S.C{…}`); `using` works | **OPEN** |
 
 ---
 
@@ -703,6 +718,416 @@ structs, or state the limitation explicitly.
 
 ---
 
+## BUG 41 — CRITICAL: `data struct` with a `List<…>` field type-checks clean and miscompiles — FIXED (2026-07-31)
+
+**Fix (two independent defects):**
+
+1. **Encoder nil type + missing wrap** (`TirToDataExpr.ts`): converting a
+   list with non-data elements (`List<int>`) to `Data` consed the
+   data-mapped elements onto a nil of the ELEMENT list type
+   (`_mkMapList`'s first argument is the nil of the OUTPUT list) — the
+   runtime `mkCons :: incongruent list types` trap — and the inline branch
+   also never wrapped the mapped `list data` in `listData`. Same wrong nil
+   in the cached `mkMapListToData` helper.
+2. **Nested compilation leaking state** (`TirLitArrExpr.ts`,
+   `TirElemAccessExpr.ts`): constant-folding a list literal runs a full
+   nested `compileIRToUPLC` INSIDE the outer compile's `CompilationCtx`;
+   the ctx's `hoistedCache` then pointed the outer pipeline at live nodes
+   of the discarded nested tree (the `invalid constant` /
+   "trying to increment use of variable not in context" backend crashes).
+   Nested eager compiles now run on a CLONE of their term under a FRESH
+   `CompilationCtx`.
+
+Regression coverage: `compiler.structFieldRoundTrip.test.ts` — the field
+type × encoding matrix below, all asserted by evaluation.
+
+Found 2026-07-31 while auditing the 0.4.3 generic-struct work. **Not caused by
+it** — reproduces identically on published **0.4.1**, so it is a long-standing
+silent miscompile that the original audit missed. It is also **not
+generics-related**: a plain non-generic struct fails the same way.
+
+```pebble
+data struct Bx { B{ items: List<int> } }
+
+export function main( n: int ): int {
+    const b: Bx = Bx.B{ items: [ n, n + 1 ] };
+    return case b is B{ items } => items.head() ;
+}
+```
+
+**Observed:** zero diagnostics; at runtime
+`CEKError: mkCons :: incongruent list types; listT: list integer`.
+**Expected:** `5`.
+
+On 0.4.1 the same source fails with a differently-worded CEK error
+(`case: expected constr or constant value`), i.e. broken in both, same class.
+
+The `bytes` instantiation is worse — it dies at **compile** time with an
+uncaught `invalid constant` from the backend:
+
+```pebble
+data struct Box<T> { B{ items: List<T> } }
+export function main( n: int ): int {
+    const b: Box<bytes> = Box.B{ items: [ #ff ] };
+    return case b is B{ items } => ( items.head() == #ff ? 1 : 0 ) ;
+}
+```
+
+**Scope — what does and does not fail** (all verified on 0.4.3):
+
+| shape | result |
+|---|---|
+| `data struct` + `List<int>` field | **miscompiles** (`mkCons` CEK error) |
+| `data struct Box<T>` + `List<T>` field @ `int` | **miscompiles** (same) |
+| `data struct Box<T>` + `List<T>` field @ `bytes` | **compile crash** (`invalid constant`) |
+| `runtime struct Box<T>` + `List<T>` field | works (`5`) |
+| `data struct Box<T>` + plain `T` field | works (`5`) |
+| `data struct Box<T>` + `Optional<T>` field | works (`5`) |
+| bare `List<int>` local, no struct | works |
+
+So it is specific to the **data (constr) encoding of a struct field whose type
+is a list** — the list is not being converted to/from `Data` at the field
+boundary, so a raw `list integer` meets a `list data` at runtime.
+
+**Why this outranks the remaining feature gaps:** a validator datum holding a
+list is one of the most common shapes in real Cardano contracts, and this fails
+*silently* at compile time — exactly the BUG 27 failure mode, which is the class
+that can put broken validators on chain. None of the deployed
+`the-cardano-masterpiece` contracts hit it (they all still compile
+byte-identically), but that is luck of their datum shapes, not coverage.
+
+**Suggested test:** an evaluated round-trip for every field type crossed with
+both encodings — `int`/`bytes`/`bool`/struct/`List<…>`/`Optional<…>` as a field
+of a `data struct` and of a `runtime struct`. The gap that let this through is
+that no test constructs a data-encoded struct with a list field and *runs* it.
+
+---
+
+## BUGs 42–44 — found by the first systematic field-type × encoding sweep (2026-07-31)
+
+After BUG 41 was fixed I ran the round-trip matrix that the BUG 41 entry
+recommends — every field type × every encoding, **constructed and read back and
+asserted by evaluation** (`bug-repros/audit-field-matrix.mjs`, 52 cases). Most
+combinations are fine. Four shapes are not, and one of them is silent.
+
+This is the third time this exact class has produced a bug (27, 41, now 42).
+The matrix is cheap and should become a real test — see "Suggested test" at the
+end of this section.
+
+> **STATUS: BUGs 42/43/44 FIXED (2026-07-31).** Root causes and fixes:
+>
+> - **42** — the named `Some{ value: … }` literal stored its payload RAW,
+>   while the SoP-optional convention (see `TirCaseExpr._sopStructToIR`)
+>   is that `Some` wraps DATA and consumers decode on extraction. The
+>   literal now encodes the payload (`TirLitNamedObjExpr`), and the
+>   `_inlineToData` / `_inlineFromData` optional branches were aligned to
+>   the same convention (they re-encoded / pre-decoded the payload,
+>   producing the mirror-image "iData :: not an int" / double-decode
+>   failures). Standalone `Some{…}` + `case` was broken the same way.
+> - **43** — `IRCase.clone()` cloned the continuations but passed the
+>   SCRUTINEE by reference; the clone's constructor re-parented it, so the
+>   backend's in-place pipeline mutations leaked into every tree still
+>   sharing that node — poisoning the module-level `_boolFromData` helper
+>   after its first use ("only closed terms can be hoisted"). The scrutinee
+>   is now cloned; the ToData twins also got defensive `.clone()`s on
+>   handout (`_boolToData` / `_mkUnitData` / `_strToData`).
+> - **44** — two defects: `getNestedDestructsInSingleSopDestructPattern`
+>   flattened ANY `TirSoPStructType` field as a single-constructor struct,
+>   and `TirSopOptT` EXTENDS `TirSoPStructType`, so a two-constructor
+>   optional field got destructured as constructor 0 (the "simple var decl
+>   without init expr" crash — now guarded with `isSingleConstrStruct`);
+>   and the literal compilers rejected `TirSopOptT` field values as
+>   non-data-encodable through the same inheritance (optionals HAVE a data
+>   conversion — now excluded from the rejection; the "filed" typo is also
+>   fixed).
+>
+> Regression coverage: `compiler.structFieldRoundTrip.test.ts` now IS the
+> suggested matrix — field type × encoding × (single-ctor, multi-ctor
+> dispatch, generic instantiation), 64 cases, all asserted by evaluation.
+
+### BUG 42 — CRITICAL: multi-ctor `runtime struct` with an `Optional<…>` field miscompiles — FIXED (2026-07-31)
+
+```pebble
+runtime struct S { A{ a: int } B{ f: Optional<int> } }
+
+export function main( n: int ): int {
+    const s: S = S.B{ f: Some{ value: n } };
+    return case s is A{ a } => 999 is B{ f } => ( case f is Some{ value } => value is None{} => 0 ) ;
+}
+```
+
+**Observed:** zero diagnostics; at runtime `CEKError: unIData :: not data value`.
+**Expected:** `5`.
+
+With `Optional<List<int>>` in the same position it is
+`CEKError: unListData :: not data`. Silent at compile time — the BUG 27 / BUG 41
+failure mode, i.e. the one that can put a broken validator on chain.
+
+Not comparable against 0.4.1 (top-level `Some` was not resolvable there:
+`ERROR 256 "'Some' is not defined"`), so this is newly-reachable territory rather
+than a confirmed regression.
+
+**Scope:** single-constructor `runtime struct` with an `Optional` field crashes
+instead (BUG 44); the `data` encoding of both shapes is **correct**; `Optional`
+nested in a `data` multi-ctor is correct.
+
+### BUG 43 — HIGH: `bool` field in a multi-constructor `data struct` crashes the backend — FIXED (2026-07-31)
+
+```pebble
+data struct S { A{ a: int } B{ f: bool } }
+
+export function main( n: int ): int {
+    const s: S = S.B{ f: true };
+    return case s is A{ a } => 999 is B{ f } => ( f ? 5 : 0 ) ;
+}
+```
+
+**Observed:** `EXPORT THREW: only closed terms can be hoisted` — an internal
+backend message with no source location.
+**Expected:** `5`.
+
+**Pre-existing: reproduces identically on published 0.4.1**, so it is not caused
+by any recent work.
+
+**Scope:** it is specifically *data encoding + 2 or more constructors + a `bool`
+field*. A single-constructor `data struct` with a `bool` field is fine (`5`), and
+the `runtime` encoding of the multi-ctor version is fine (`5`). Constructor
+position does not matter — `bool` in the first or the second constructor both
+crash. A generic `data struct G<T>` instantiated at `bool` crashes the same way.
+
+A boolean flag beside other constructors (`Active{ enabled: bool }`) is an
+entirely ordinary datum shape, and the message gives a user no idea what to
+change.
+
+### BUG 44 — MEDIUM: `Optional<…>` as a `runtime struct` field, or as a generic instantiation, crashes — FIXED (2026-07-31)
+
+Two related backend crashes, both loud:
+
+```pebble
+runtime struct S { C{ f: Optional<int> } }
+// EXPORT THREW: simple var decl without init expr
+```
+
+```pebble
+data struct G<T> { C{ f: T } }
+const s: G<Optional<int>> = G.C{ f: Some{ value: n } };
+// EXPORT THREW: filed cannot be encoded as data
+```
+
+The second message also has a typo — "filed" should be "field".
+
+`data struct S { C{ f: Optional<int> } }` (non-generic, data-encoded) is correct
+and returns `5`, so this is the `runtime` encoding and the generic-instantiation
+paths specifically.
+
+### What the sweep found to be correct
+
+Worth recording so the next audit does not redo it. All of these round-trip
+correctly by evaluation, in both `data` and `runtime` encodings unless noted:
+`int`, `bytes`, `bool` (single-ctor), `List<int>`, `List<bytes>`,
+`List<List<int>>`, `Optional<int>` (data), `Optional<List<int>>` (data), a nested
+struct field, and `List<struct>` — plus the generic `G<T>` instantiation of each
+of those except `bool` and `Optional<…>`, and the multi-constructor dispatch form
+of each except the two noted above.
+
+### Suggested test
+
+Port `bug-repros/audit-field-matrix.mjs` into the suite as a generated
+`describe.each` over (field type × encoding × arity), asserting the **evaluated**
+value rather than an empty diagnostics array. That single matrix would have
+caught BUGs 27, 41, 42, 43 and 44. The reason this class keeps surviving is that
+no existing test constructs a struct with a non-trivial field type and *runs* it.
+
+---
+
+## BUGs 45–47 — second-axis sweep: contract shapes and prelude types as fields (2026-07-31)
+
+After BUGs 42–44 were fixed, the field-type matrix came back **50/52** (the two
+non-passes are a bad `LinearMap` *literal* in the harness, not a compiler
+defect — Pebble has no map-literal syntax; maps are built by casting
+`std.builtins.unMapData(…)`). So I ran a different axis: the shapes a real
+validator uses — contracts, states, redeemers, and prelude types as struct
+fields (`bug-repros/audit-axis2-contracts.mjs`).
+
+**All the contract-shape cases pass**: typed struct redeemers, a two-state
+stateful contract with a struct datum, `mint` + `spend` in one contract,
+`param x: T;` with `this.x`, a generic struct as a redeemer type, and a recursive
+struct as a datum type. Also correct by evaluation: `Value` in a *runtime*
+struct, `Optional<struct>`, `List<Optional<int>>`, mixed `bool`+`bytes`+`List`
+payloads, and 3-constructor dispatch with the payload in the third constructor
+(both encodings).
+
+Three defects fell out. **All three reproduce identically on published 0.4.1**,
+so none is caused by the recent work, and — unlike 27/41/42 — **none is silent**:
+each fails loudly at compile time.
+
+> **STATUS: BUGs 45/46/47 FIXED (2026-07-31).**
+>
+> - **45** — the ToData side had no `Value` branch (`_inlineToData` /
+>   `_toDataUplcFunc` fell through to a throw with a misleading
+>   "TirFromDataExpr" prefix); `IRNative.valueData` (the `unValueData`
+>   mirror) is now emitted. The `Value` row is part of the
+>   `compiler.structFieldRoundTrip.test.ts` matrix (single/multi-ctor and
+>   generic, both encodings; runtime encoding was already fine).
+> - **46** — `parseCaseExpr` consumed the trailing `;`, which belongs to
+>   the ENCLOSING statement; on one line the statement parser then choked
+>   on whatever followed, while multi-line was saved by automatic line
+>   termination. The case parser no longer eats it. (Two suite tests used
+>   the accidental `( case … ; )` form — a `;` INSIDE parentheses that was
+>   only ever valid because of the swallow — and were updated.)
+> - **47** — the cast path resolved the target by name against
+>   `program.types`, where generic templates never live; generic
+>   applications (`as LinearMap<bytes,bytes>`, `as Box<int>`) now route
+>   through the type compilers like qualified names. Additionally
+>   `LinearMap<K,V> -> LinearMap<K',V'>` re-typing lowers as the identity
+>   (the runtime rep is `list (pair data data)` for every K/V) — so the
+>   documented `unMapData(…) as LinearMap<…>` idiom now reaches codegen;
+>   previously BOTH the direct form and the aliased workaround threw at
+>   export ("Cannot convert from list_pair_data<data,data> …" — the alias
+>   form was only clean at `check`).
+>
+> Coverage: `compiler.auditBugs.0_4_3.test.ts` + the matrix `Value` rows.
+
+### BUG 45 — HIGH: `Value` as a `data struct` field cannot be decoded — FIXED (2026-07-31)
+
+```pebble
+data struct S { C{ v: Value, n: int } }
+
+export function main( n: int ): int {
+    const s: S = S.C{ v: std.value.zero, n: n };
+    return case s is C{ v, n: m } => m ;
+}
+```
+
+**Observed:** `check()` is **CLEAN**, then
+`EXPORT THREW: TirFromDataExpr: cannot convert from Data to type Value`.
+**Expected:** `5`.
+
+The clean-check-then-backend-throw split is the notable part: the type system
+accepts a struct it cannot actually encode, so the error surfaces with no source
+location and an internal-sounding message.
+
+**Scope:** the `runtime` encoding of the same struct works (`5`), and a `Value`
+as a plain local works (`5`). It is specifically `Value` as a field of a
+data-encoded struct — including the multi-constructor form.
+
+`Value` is a prelude type and a plausible datum field (an escrowed amount, a
+price). Either implement the `Data` round-trip for it or reject it at
+declaration with a located diagnostic, rather than at export.
+
+### BUG 46 — LOW: `case` as a `const`/`let` initializer is newline-sensitive — FIXED (2026-07-31)
+
+Identical code, differing only in line breaks:
+
+```pebble
+// PARSES
+const sh: Sh = Sh.C{ r: n };
+const x = case sh is C{ r } => r is S{ s } => s ;
+return n;
+```
+
+```pebble
+// ERROR 1012: "Unexpected token."
+const sh: Sh = Sh.C{ r: n }; const x = case sh is C{ r } => r is S{ s } => s ; return n;
+```
+
+Wrapping the `case` in parentheses fixes the one-line form, and `case` in
+**return** position is unaffected either way. So the arm-list parser is
+terminating on a newline rather than on the `;`, which makes formatting
+semantically significant where it should not be — and "Unexpected token" gives no
+hint that parentheses are the fix.
+
+### BUG 47 — LOW: a generic prelude type is not usable in cast position — FIXED (2026-07-31)
+
+```pebble
+const m = std.builtins.unMapData( redeemer ) as LinearMap<bytes,bytes>;
+// ERROR 256: "'LinearMap' is not defined"
+
+type M2 = LinearMap<bytes,bytes>;
+const m = std.builtins.unMapData( redeemer ) as M2;   // CLEAN
+```
+
+`LinearMap<…>` is fine as a **struct field** declaration and fine behind an
+alias; only the direct cast fails, and it fails with "is not defined", which
+points at the wrong thing. This is the same family as the old BUG 21 (prelude
+types not usable in cast position), which was fixed for `TxOutRef` — the generic
+prelude types appear to have been missed.
+
+---
+
+## Third-axis sweep: feature INTERACTIONS (2026-07-31) — 16/19, no new defects
+
+BUGs 45–47 verified fixed on the local build. Both earlier sweeps are clean:
+the field-type matrix is **50/50** (the `LinearMap` row was removed — Pebble has
+no map-literal syntax, so it was a harness artefact, and `LinearMap` as a field /
+alias / cast is covered by the axis-2 sweep instead), and the contract-shape
+sweep is **16/16** (its three earlier "failures" were also harness syntax errors:
+contract params are `param x: T;` inside the body, and `assert` needs the `case`
+bound to a `const` first — both corrected in the script).
+
+So I ran a third axis: **combinations of the features that landed independently
+this week** — generic structs, recursive structs, function types/HOFs, interfaces
+with `self`, constraint dispatch, namespaces, imports
+(`bug-repros/audit-axis3-interactions.mjs`). Their interactions are what no test
+covers, since each landed on its own.
+
+**Result: 16/19, and no new defects.** Verified working by evaluation:
+
+- **generics × recursion** — generic recursive lists and trees with recursive
+  generic functions, both encodings, instantiated at a struct and at `List<int>`.
+- **generics × HOFs** — a user-written `foldL<A,B>` over a *generic recursive*
+  structure, a HOF returning a generic struct, a generic HOF taking a HOF.
+- **interfaces × generics** — a generic function bounded by a *user* interface
+  dispatching the real method, and two impls where dispatch picks correctly.
+- **cross-module** — imported generic struct, imported recursive struct,
+  imported generic HOF, imported interface + impl. All correct.
+
+The three non-passes are **not** interaction bugs:
+
+1. **`type Box<int> implements Sh` → `ERROR 100: "Not implemented: generic types
+   interface implementations"`.** A declared gap with a clean, located
+   diagnostic — loud and honest, not a defect. Worth listing as a known
+   limitation if interfaces are mentioned in the M1.A writeup.
+2 & 3. **Constructing a struct through a fully-qualified namespace path**
+   (`M.S.C{ v: n }`) → `ERROR 1012 "Unexpected token."` — see BUG 48. This is
+   *not* generics- or recursion-related: it fails identically for a plain
+   non-generic struct, and identically on published 0.4.1.
+
+### BUG 48 — LOW: a struct constructor is not reachable through a qualified namespace path — FIXED (2026-07-31)
+
+> **FIXED.** The literal parser only knew the two-segment
+> `Type.Constructor{ … }` form; a longer path fell through to the
+> property-access chain and died on the `{`. The parser now consumes a full
+> dotted path (last segment = constructor, previous = type, rest =
+> namespace path, so `A.B.S.C{ … }` works too), and the literal compiler
+> resolves the type through the namespaces' public scopes with local
+> (non-walking) lookups — the same visibility rule as qualified type
+> annotations (audit BUG 37). An unknown namespace head errors with
+> "'X' is not defined" instead of "Unexpected token". Tests in
+> `compiler.auditBugs.0_4_3.test.ts`.
+
+```pebble
+namespace M { data struct S { C{ v: int } } }
+export function main( n: int ): int {
+    const s: M.S = M.S.C{ v: n };          // ERROR 1012 "Unexpected token."
+    return case s is C{ v } => v ;
+}
+```
+
+`M.S` as a **type annotation** is fine, and the `using` form works for plain,
+generic and recursive structs alike:
+
+```pebble
+using { S } = M;
+const s: S = S.C{ v: n };                   // CLEAN → 5
+```
+
+Pre-existing (identical on 0.4.1), loud, and with a one-line workaround, so this
+is a usability wart rather than a risk — but the message names neither the cause
+nor the `using` workaround.
+
+---
+
 ## Docs: 4 of 5 on-chain examples do not compile with 0.4.1
 
 Not compiler bugs, but they fail in the same place a new user starts. Extracted
@@ -748,34 +1173,97 @@ docs.
    monomorphization.
 6. Docs CI, then BUGs 33/35/36/37/38 as surface polish.
 
-### Remaining, as of 2026-07-29
+### Done as of 2026-07-31 (local 0.4.3)
 
-BUGs 27–38 are fixed or correctly scoped as deferred, and BUG 39 is fixed and
-verified end to end. What is left:
+Superseded — kept for history. Generic structs, recursive structs and BUG 40 all
+landed and were verified *by evaluation*, not just a clean `check()`
+(`bug-repros/audit-0.4.3-m1a.mjs`):
 
-1. **Generic struct declarations** — the M1.A milestone item, and still just a
-   "not supported yet" diagnostic (BUG 31 removed the *crash*, not the gap).
-   Worth knowing before starting: generic multi-constructor structs hit the same
-   code path, so `Result<T,E>` comes free; and generic *enums* are a non-issue,
-   since Pebble enums are payload-less C-style int enums with nothing to be
-   generic over (`enum E<T>` does not parse, and `AstCompiler.ts:1428` hardcodes
-   `isGeneric = false` for `EnumDecl`). Fold **generic type aliases** into the
-   same change — separate throw site, presumably cheap once structs work.
-2. **BUG 40** — no function-type syntax. Decide explicitly whether it ships with
-   generic structs; without it there is still no user-written `map`.
-3. **Recursive struct definitions** — `data struct L { Nil{} Cons{ h: int, t: L } }`
-   fails with `'L' is not defined` / `ERROR 280 "cannot be encoded as data"`, so
-   no user-defined lists or trees. Reads as part of "sum types" to a reviewer.
-4. **`self` parameter inference in interface impls** — `ERROR 285` on every
-   `type X implements I { m( self ) … }`, so no user interface impl compiles.
-   Currently a documented `test.failing`.
-5. **Constraint-based dispatch at monomorphization** (the deferred "Stage 4b") —
-   `<T implements ToData>` grants nothing at instantiation.
-6. Housekeeping: delete the duplicate `PBound` imports breaking two
-   `packages/onchain` suites at load time (CI is red from the repo root), and fix
-   the 4 broken doc examples plus the CI step that would have caught them.
+- **generic structs** — `data` and `runtime`, construct/read round-trip,
+  `Result<T,E>` on both branches, two instantiations coexisting, nested
+  `Box<Box<int>>`, generic struct as a function parameter.
+- **recursive structs** — lists, trees, mutually recursive pairs, reads past the
+  first element, *and recursive functions over them* (`sum` → 18, `depth` → 3,
+  generic `len<T>` → 2).
+- **BUG 40** — HOF parameters, a user-written `map<A,B>` (→ 15), a generic HOF
+  over a generic struct (→ 12), HOF-returning-HOF (→ 20).
+- no regressions: BUGs 27/28/34/39 still behave, and all four
+  `the-cardano-masterpiece` contracts recompile byte-identically.
 
-Not compiler work, but the other half of M1.A and not tracked anywhere: the
-Pebble repo still contains **one** `.pebble` file, a 67-line skeleton. The
-acceptance criterion asks for ≥3 meaningful example contracts committed to this
-repo with compile + on-chain execution evidence.
+Generic *enums* were investigated and are a non-issue: Pebble enums are
+payload-less C-style int enums with nothing to be generic over (`enum E<T>` does
+not parse; `AstCompiler.ts:1428` hardcodes `isGeneric = false` for `EnumDecl`).
+
+---
+
+## M1.A TODO — resolution log (2026-07-31)
+
+All compiler items from the outstanding list are done; the two judgment calls
+are recorded below so the milestone writeup can quote them.
+
+### 1. BUG 41 — DONE
+Fixed (see the BUG 41 section above): list-field data encoder nil/wrap fix +
+nested-compilation `CompilationCtx` isolation. Regression matrix in
+`compiler.structFieldRoundTrip.test.ts` (field type × encoding, asserted by
+evaluation). Found and filed BUG 42 along the way (pre-existing, OPEN).
+
+### 2. Generic type aliases — DONE
+`type Al<T> = …` registers on the generic registry per encoding; `Al<int>`
+instantiates through `substituteTypeParams` wrapped in a `TirAliasType`.
+Covers identity/container/struct aliases, multi-param, signatures, exports,
+wrong-arity and duplicate-param diagnostics. Tests:
+`compiler.genericAliases.test.ts`.
+
+### 3. `self` parameter inference in interface impls — DONE
+An unannotated first parameter named `self`/`this` in a
+`type X implements I { m( self ) … }` block IS the receiver and is typed with
+the implementing type in place (`_collectInterfaceImplSigs`). The two
+formerly-`test.failing` cases in `compiler.show.test.ts` /
+`compiler.interfaceConstraints.test.ts` now pass, so user interface impls
+compile and constrained generics resolve the user's dictionary entry.
+
+### 4. Constraint-based dispatch at monomorphization — DONE
+`.toData()` is a universal method on every data-encodable type
+(`getPropAccessReturnType` + a `TirToDataExpr` lowering in
+`expressifyMethodCall`, mirroring `.show()`); user
+`type X implements ToData` impls dispatch through the method table and WIN
+over the builtin. A `<T implements ToData>` body can therefore use
+`x.toData()` and every instantiation resolves it — including rejection of a
+recursive `runtime struct` at the data boundary. Tests in
+`compiler.interfaceConstraints.test.ts` ("constraint-based dispatch…").
+
+### 5. The "full inference" claim — DECISION (scoped wording)
+Parameter-type inference is NOT implemented and is not planned for M1.A:
+`function f( x ): int` requires an annotation on `x`. What Pebble 0.4.3
+actually provides — and what the writeup should claim — is:
+
+> **Type inference in Pebble 0.4.3**: bidirectional checking with local
+> inference — `const`/`let` types are inferred from initializers, function
+> RETURN types are inferred from bodies (including nested `if`/`match`/loop
+> returns), lambda parameter types are inferred from the expected callback
+> signature, and generic type arguments are inferred at call sites by
+> structural unification of the argument types (containers, functions and
+> generic structs/aliases, e.g. `unbox( b )` on `Box<int>` binds `T = int`).
+> Function PARAMETER annotations are always required; there is no global
+> Hindley–Milner-style inference.
+
+### 6. Publish / CLI unpin — dropped from this list by the maintainer.
+
+### 7. Housekeeping — DONE
+- The orphaned `packages/onchain` / `packages/offchain` trees (tests for a
+  deleted plu-ts API, could never load) are REMOVED from the repo; the root
+  test run is green.
+- The doc examples in `pebble-docs` are fixed (`signatories` →
+  `requiredSigners`, `match`-statement `when` syntax, `state`-in-fallback
+  moved into the state block, `purpose` → `policy` in mint context, contract
+  params read via `this.`, `Address.payment`, exact-mint via
+  `std.value.zero`), and `scripts/compile-onchain-snippets.mjs` now compiles
+  EVERY documented on-chain contract snippet as part of `npm run build`
+  (12 snippets checked; `<!-- no-compile -->` marks intentional fragments,
+  `// name.pebble` first-lines enable multi-file example pages).
+- **`export * from` decision**: stays unimplemented for M1.A. Named exports
+  and named re-imports cover the library API surface; `export * from` keeps
+  its clear "not supported" diagnostic (loud, not silent). Revisit only if a
+  real library hits it.
+
+### 8. Example contracts — dropped from this list by the maintainer.

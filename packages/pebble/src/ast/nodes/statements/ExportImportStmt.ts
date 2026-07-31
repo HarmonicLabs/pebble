@@ -13,7 +13,7 @@ export class ExportImportStmt
 {
     constructor(
         readonly members: ImportDecl[],
-        readonly path: LitStrExpr,
+        readonly fromPath: LitStrExpr,
         readonly range: SourceRange,
     ) {}
 }

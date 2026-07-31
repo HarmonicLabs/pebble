@@ -12,6 +12,7 @@ import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import { IRConst, type IRConstValue } from "../../../../IR/IRNodes/IRConst";
 import { compileIRToUPLC } from "../../../../IR/toUPLC/compileIRToUPLC";
+import { CompilationCtx, withCompilationCtx } from "../../../../IR/CompilationCtx";
 
 export class TirLitArrExpr
     implements ITirExpr
@@ -88,8 +89,23 @@ function constantList( elems: TirExpr[], elemsT: TirType, ctx: ToIRTermCtx ): IR
     return IRConst.listOf( elemsT )(
         elems.map(
             el => {
+                // This eager sub-compilation is a COMPLETE nested pipeline
+                // run. Two isolations are load-bearing:
+                // - compile a CLONE: the pipeline mutates its tree in place,
+                //   and `toIR` output can share nodes with the surrounding
+                //   program's IR;
+                // - run under a FRESH CompilationCtx: the ctx caches
+                //   (`hoistedCache` in particular) reference live nodes of
+                //   the tree being compiled, so letting a nested run share
+                //   the outer compile's ctx makes the outer pipeline reuse
+                //   nodes from the DISCARDED nested tree — surfacing as
+                //   dangling `IRVar`s ("trying to increment use of variable
+                //   not in context") or an `invalid constant` here.
+                const ir = el.toIR( ctx ).clone();
                 let res = Machine.evalSimple(
-                    compileIRToUPLC( el.toIR( ctx ) )
+                    withCompilationCtx( new CompilationCtx(), () =>
+                        compileIRToUPLC( ir )
+                    )
                 );
 
                 if(!(

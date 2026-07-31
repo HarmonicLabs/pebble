@@ -113,13 +113,10 @@ function main( n: int ): int {
 
     // ----- user-defined `type Foo implements ToData` impl is honored -----
 
-    // KNOWN GAP (same root cause as the show user-impl test): the `self`
-    // parameter of a user `type Foo implements I { method( self ) ... }`
-    // block is not inferred ("ERROR 285: parameter type is missing"), so no
-    // user interface impl compiles. Unmasked by the BUG 30 fix; separate from
-    // audit BUGs 27-38. `test.failing` until impl-method `self` inference is
-    // wired.
-    test.failing("std.linearMap.prepend uses a user-defined `type Foo implements ToData` impl", async () => {
+    // Since 0.4.3 the `self` receiver of a user impl block is typed with
+    // the implementing type in place, so user interface impls compile and
+    // constrained generics resolve the user's dictionary entry.
+    test("std.linearMap.prepend uses a user-defined `type Foo implements ToData` impl", async () => {
         // We declare a struct `MyKey` that explicitly implements `ToData`
         // with a custom body. When we then call `std.linearMap.prepend`
         // with a `LinearMap<MyKey, int>`, the dictionary the constrained
@@ -142,5 +139,69 @@ function main( m: LinearMap<MyKey, int>, k: MyKey, v: int ): LinearMap<MyKey, in
 }`;
         const { compiler } = await compileSrc( src );
         expect( compiler.diagnostics ).toEqual( [] );
+    });
+});
+
+// ----- constraint-based dispatch at monomorphization ("Stage 4b") -----
+//
+// Since 0.4.3 a bounded type parameter can USE its bound: `x.toData()` on
+// `<T implements ToData>` resolves after monomorphization — natively
+// data-encodable types lower through `TirToDataExpr`, user `type X
+// implements ToData { ... }` impls dispatch through the method table.
+describe("constraint-based dispatch in generic bodies", () => {
+
+    test("`x.toData()` on `<T implements ToData>` works for int", async () => {
+        const src = `
+function conv<T implements ToData>( x: T ): data { return x.toData(); }
+
+function main( n: int ): int {
+    const d: data = conv<int>( n );
+    return n;
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("`x.toData()` dispatches a USER impl through the constraint", async () => {
+        const src = `
+data struct MyKey { k: int }
+
+type MyKey implements ToData {
+    toData( self ): data { return self.k.toData(); }
+}
+
+function conv<T implements ToData>( x: T ): data { return x.toData(); }
+
+function main( n: int ): int {
+    const mk: MyKey = MyKey{ k: n };
+    const d: data = conv<MyKey>( mk );
+    return n;
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("direct `.toData()` on a concrete value (no generics) works", async () => {
+        const src = `
+function main( n: int ): int {
+    const d: data = n.toData();
+    return n;
+}`;
+        const { compiler } = await compileSrc( src );
+        expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("`.toData()` on a runtime-only recursive struct is still rejected", async () => {
+        const src = `
+runtime struct RList { Nil {} Cons { value: int, next: RList } }
+
+function main( n: int ): int {
+    const l: RList = RList.Cons{ value: n, next: RList.Nil{} };
+    const d: data = l.toData();
+    return n;
+}`;
+        const { compiler, ioApi } = await compileSrc( src );
+        const hasDiag = compiler.diagnostics.length > 0 || ioHasDiagnostic( ioApi );
+        expect( hasDiag ).toBe( true );
     });
 });

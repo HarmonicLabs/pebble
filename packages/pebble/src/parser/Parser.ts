@@ -201,19 +201,13 @@ export class Parser extends DiagnosticEmitter
         if( tn.skip( Token.Export ) ) {
             const exportEnd = tn.pos;
             // Re-export forms `export * from "..."` / `export { x } from "..."`
-            // are not implemented. Emit ONE clear diagnostic instead of the
-            // misleading "Statement expected" the generic path produced
-            // (audit BUG 38). Direct `import { x } from "..."` works.
+            // parse through `parseExport` (supported since 0.4.3): the
+            // referenced file becomes a dependency edge and its exported
+            // symbols are merged into this file's exports.
             const afterExport = tn.peek();
             if( afterExport === Token.Asterisk || afterExport === Token.OpenBrace )
             {
-                this.skipStatement();
-                return this.error(
-                    DiagnosticCode.Not_implemented_0,
-                    tn.range( startPos, exportEnd ),
-                    "re-export (`export ... from`) is not supported yet; "
-                    + "import the symbol and re-declare/re-export it directly"
-                );
+                return this.parseExport( startPos );
             }
             const stmt = this.parseTopLevelStatement();
             if( !stmt ) return undefined;
@@ -1065,12 +1059,15 @@ export class Parser extends DiagnosticEmitter
                 DiagnosticCode.String_literal_expected,
                 tn.range()
             );
-    
+
+            // read BEFORE skipping the semicolon (same as the import parsers)
+            const exportImportPath = new LitStrExpr( tn.readString(), tn.range() );
+
             tn.skip( Token.Semicolon ); // if any
 
             return new ExportImportStmt(
                 members,
-                new LitStrExpr( tn.readString(), tn.range() ),
+                exportImportPath,
                 tn.range( startPos, tn.pos )
             );
         }
@@ -1094,10 +1091,13 @@ export class Parser extends DiagnosticEmitter
             tn.range()
         );
 
+        // read BEFORE skipping the semicolon (same as the import parsers)
+        const exportStarPath = new LitStrExpr( tn.readString(), tn.range() );
+
         tn.skip( Token.Semicolon ); // if any
 
         return new ExportStarStmt(
-            new LitStrExpr( tn.readString(), tn.range() ),
+            exportStarPath,
             tn.range( startPos, tn.pos )
         );
     }
@@ -3020,25 +3020,40 @@ export class Parser extends DiagnosticEmitter
 
                 // LitNamedObjExpr with type qualifier
                 // eg: `Type.Constructor{ a: 1, b: 2 }`
+                // or through a namespace path (BUG 48):
+                // `Ns.Type.Constructor{ ... }`, `Ns.Inner.Type.Constructor{ ... }`
                 if( !noStructLiteral && tn.peek() === Token.Dot ) {
                     const savedState = tn.mark();
-                    tn.next(); // consume '.'
-                    if( tn.skipIdentifier( IdentifierHandling.Always ) ) {
-                        const ctorIdentifier = new Identifier(
+                    const segments: Identifier[] = [];
+                    while( tn.peek() === Token.Dot ) {
+                        tn.next(); // consume '.'
+                        if( !tn.skipIdentifier( IdentifierHandling.Always ) ) break;
+                        segments.push( new Identifier(
                             tn.readIdentifier(),
                             tn.range()
-                        );
-                        if( tn.peek() === Token.OpenBrace ) {
-                            const litObjExpr = this.parseExprStart();
-                            if( litObjExpr instanceof LitObjExpr ) {
-                                return new LitNamedObjExpr(
-                                    ctorIdentifier,
-                                    litObjExpr.fieldNames,
-                                    litObjExpr.values,
-                                    SourceRange.join( identifier.range, litObjExpr.range ),
-                                    identifier // typeName
-                                );
-                            }
+                        ) );
+                    }
+                    if( segments.length > 0 && tn.peek() === Token.OpenBrace ) {
+                        // last segment is the CONSTRUCTOR; the one before it
+                        // (or the leading identifier) is the TYPE; anything
+                        // before that is a namespace path
+                        const ctorIdentifier = segments[ segments.length - 1 ];
+                        const typeName = segments.length >= 2
+                            ? segments[ segments.length - 2 ]
+                            : identifier;
+                        const typePath = segments.length >= 2
+                            ? [ identifier, ...segments.slice( 0, segments.length - 2 ) ]
+                            : [];
+                        const litObjExpr = this.parseExprStart();
+                        if( litObjExpr instanceof LitObjExpr ) {
+                            return new LitNamedObjExpr(
+                                ctorIdentifier,
+                                litObjExpr.fieldNames,
+                                litObjExpr.values,
+                                SourceRange.join( identifier.range, litObjExpr.range ),
+                                typeName,
+                                typePath
+                            );
                         }
                     }
                     tn.reset(savedState);
@@ -3235,7 +3250,13 @@ export class Parser extends DiagnosticEmitter
             )
         }
 
-        tn.skip( Token.Semicolon ); // if any
+        // do NOT consume a trailing `;` here: it terminates the ENCLOSING
+        // statement, not the case expression. Eating it made the surrounding
+        // statement parser fail on whatever came next when the declaration
+        // and the case shared a line (`const x = case … ; return x;` →
+        // "Unexpected token" at `return`), while the multi-line form was
+        // saved by automatic line termination — i.e. formatting changed
+        // semantics (BUG 46).
 
         const finalRange = tn.range( startPos, tn.pos );
 

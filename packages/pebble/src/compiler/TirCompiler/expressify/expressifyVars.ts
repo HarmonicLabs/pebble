@@ -980,6 +980,20 @@ function expressifyMethodCall(
         ) as any; // TirShowExpr is in TirExpr union, cast for return-type compat
     }
 
+    // Generic `.toData()` fallback: any data-encodable value converts via
+    // `TirToDataExpr` (identity for already-data-encoded types). User types
+    // override by declaring `type X implements ToData { toData(self): data
+    // { ... } }` — dispatched earlier via the alias/struct method tables.
+    // This is also the concrete lowering a `<T implements ToData>` bound
+    // resolves to after monomorphization.
+    if( methodName === "toData" && methodCall.args.length === 0 )
+    {
+        return new TirToDataExpr(
+            objectExpr,
+            SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() ),
+        ) as any; // TirToDataExpr is in TirExpr union, cast for return-type compat
+    }
+
     throw new Error(`not implemented::expressifyMethodCall for type '${objectType.toString()}' (method name: '${methodName}')`);
 
     // const tsEnsureExhautstiveCheck: never = objectType;

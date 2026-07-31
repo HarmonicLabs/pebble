@@ -19,14 +19,17 @@ export function _compileTypeConversionExpr(
 {
     const data_t = ctx.program.stdTypes.data;
 
-    // qualified target type (`Ns.Type`, `Struct.Constructor`, `Contract.State`)
-    // or a `redeemerof ...` operator: the plain by-name lookup below can't
-    // see them — go through the type compilers, which resolve both.
+    // qualified target type (`Ns.Type`, `Struct.Constructor`, `Contract.State`),
+    // a `redeemerof ...` operator, or a GENERIC application
+    // (`as LinearMap<bytes, bytes>`, `as Box<int>`): the plain by-name
+    // lookup below can't see them (generic templates are never registered
+    // in `program.types` — BUG 47) — go through the type compilers, which
+    // resolve all of these.
     if(
         ast.asType instanceof AstRedeemerOfTypeExpr
         || (
             ast.asType instanceof AstNamedTypeExpr
-            && ast.asType.path.length > 0
+            && ( ast.asType.path.length > 0 || ast.asType.tyArgs.length > 0 )
         )
     )
     {

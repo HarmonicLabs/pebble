@@ -8,6 +8,7 @@ import { TirSopOptT } from "../TirNativeType/native/Optional/sop";
 import { TirTypeParam } from "../TirTypeParam";
 import { TirType } from "../TirType";
 import { getUnaliased } from "./getUnaliased";
+import { isTirStructType, TirDataStructType } from "../TirStructType";
 
 /**
  * Attempt to bind free `TirTypeParam`s in `formal` so that the result matches
@@ -81,6 +82,29 @@ export function inferTypeArgs(
     if( formal instanceof TirSopOptT && actual instanceof TirSopOptT )
     {
         return inferTypeArgs( formal.typeArg, actual.typeArg, env );
+    }
+
+    // applied generic STRUCTS (`Box<T>` in the formal vs `Box<int>` in the
+    // actual): unify on the recorded type ARGUMENTS, never on the fields —
+    // arguments are finite while the fields of a recursive struct
+    // (`Tree<T>`) cycle back into the struct itself.
+    if(
+        isTirStructType( formal ) && isTirStructType( actual )
+        && formal.appliedGeneric && actual.appliedGeneric
+        // same template: same base name, declaring file and encoding
+        && formal.appliedGeneric.baseName === actual.appliedGeneric.baseName
+        && formal.fileUid === actual.fileUid
+        && ( formal instanceof TirDataStructType ) === ( actual instanceof TirDataStructType )
+        && formal.appliedGeneric.args.length === actual.appliedGeneric.args.length
+    )
+    {
+        const fArgs = formal.appliedGeneric.args;
+        const aArgs = actual.appliedGeneric.args;
+        for( let i = 0; i < fArgs.length; i++ )
+        {
+            if( !inferTypeArgs( fArgs[i], aArgs[i], env ) ) return false;
+        }
+        return true;
     }
 
     // base case: both concrete with no type-vars — must be the same type

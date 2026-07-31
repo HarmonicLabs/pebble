@@ -136,7 +136,13 @@ export class IRCase
     clone(): IRCase
     {
         return new IRCase(
-            this.constrTerm,
+            // MUST be cloned like the continuations: passing the original
+            // node re-parents it onto the clone, so pipeline mutations on
+            // the clone (native hoisting etc.) leak into every other tree
+            // still referencing it — this is how the shared module-level
+            // FromData/ToData helpers got poisoned after their first use
+            // (BUG 43, "only closed terms can be hoisted").
+            this.constrTerm.clone(),
             mapArrayLike( this.continuations, f => f.clone() ),
             { ...this.meta },
             this._hash

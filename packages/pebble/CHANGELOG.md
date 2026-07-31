@@ -2,6 +2,128 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.3
+
+Generic and recursive struct declarations, for both the data and the runtime
+(SoP) encodings; regression coverage in `compiler.genericStructs.test.ts`
+and `compiler.recursiveStructs.test.ts`.
+
+- **Generic structs.** `struct Box<T> { v: T }` declares a generic struct
+  template; `Box<int>` in any type position instantiates it through the same
+  machinery as the native `List`/`Optional`/`LinearMap` generics. Works for
+  plain, `data` and `runtime` declarations, with any number of type
+  parameters, nested applications (`Box<Box<int>>`, `Box<List<int>>`), and
+  generic-struct fields referencing other generic structs. Instantiations
+  are distinct types: `Pair<int, bytes>` is not assignable to
+  `Pair<bytes, int>`. Generic structs can be exported and imported across
+  files, and appear in generic function signatures
+  (`function unbox<T>( b: Box<T> ): T`) — with the type arguments INFERRED
+  at the call site (`unbox( b )` with `b: Box<int>` binds `T = int`; the
+  unifier matches applied generic structs argument-wise, so it also
+  terminates on recursive ones like `Tree<T>` and rejects inconsistent
+  bindings). Wrong-arity applications
+  (`Box<int, bytes>`) and duplicate type-parameter names are compile errors;
+  methods on generic structs are rejected with a clear "not supported yet"
+  diagnostic.
+- **Recursive structs.** A struct's fields can now reference the struct
+  itself, a struct declared later in the file, or form mutually-recursive
+  groups — `struct IntList { Nil{} Cons{ value: int, next: IntList } }`
+  previously failed with "`IntList` is not defined". Struct names are
+  forward-declared before any field compiles, and every compile-time type
+  walk (concreteness, cloning, decode-once field extraction, the show/data
+  encoders) now terminates on self-referential types.
+- **Generic + recursive combined.** `struct Tree<T> { Leaf{ value: T }
+  Branch{ value: T, left: Tree<T>, right: Tree<T> } }` works for both
+  encodings; instantiation preserves the recursive structure
+  (`Tree<int>`'s branches are `Tree<int>` by reference).
+- **Recursion across the data boundary.** Data-encoded recursion is fully
+  supported — values decode lazily, one level per `case`, so building,
+  matching and recursive traversal all evaluate on-chain. A recursive
+  `runtime struct` is runtime-only: building, matching and field access
+  work, but converting one to/from `data` (datum/redeemer boundary,
+  `as data`) is a clear compile error steering to `data struct`, never a
+  compiler hang.
+- **Runtime structs as function parameters.** A runtime-only struct can now
+  be passed to and returned from functions; previously the parameter type
+  silently failed to resolve (only its data encoding was consulted). A
+  runtime struct field typed with another runtime struct no longer silently
+  drops the field.
+- **Type-parameter fidelity.** Cloning a `TirTypeParam` no longer loses its
+  identity symbol, which substitution relies on.
+- **⚠ CORRECTNESS: `data struct` with a `List<…>` field no longer
+  miscompiles.** Converting a list with non-data elements to `data` consed
+  the mapped elements onto a nil of the wrong list type (a runtime
+  `mkCons :: incongruent list types` trap in every data struct holding a
+  `List<int>`-style field) and never wrapped the inline result in
+  `listData`; additionally, constant list literals in struct fields ran a
+  nested compilation inside the outer compile's context, corrupting the
+  outer pipeline (backend crashes). Nested eager compiles now run isolated
+  on a clone; regression matrix (field type × encoding, asserted by
+  evaluation) in `compiler.structFieldRoundTrip.test.ts`.
+- **Generic type aliases.** `type Al<T> = List<T>` (and aliases of generic
+  structs, multi-param aliases, aliases in signatures, exported aliases)
+  instantiate through the same machinery as generic structs, with arity and
+  duplicate-param diagnostics.
+- **User interface impls compile.** The `self` receiver of a
+  `type X implements I { m( self ) … }` block is now typed with the
+  implementing type, so user-defined impls (e.g. a custom `show` or
+  `toData`) compile and override the built-in derivation — including when
+  resolved as the dictionary of a constrained generic.
+- **`.toData()` is a universal method.** Every data-encodable value
+  converts with `x.toData()` (identity for already-data-encoded types), and
+  a `<T implements ToData>` generic body can call it on `T`-typed values —
+  each instantiation dispatches to the built-in conversion or the user's
+  impl. Recursive `runtime struct`s remain rejected at the data boundary.
+- **Re-exports.** `export * from "./lib.pebble"` and
+  `export { x, y as z } from "./lib.pebble"` merge the referenced file's
+  exported symbols into the re-exporting file's exports (chains work; per
+  TS semantics the names are NOT brought into the local scope; missing
+  members and collisions are clear errors). Tests in
+  `compiler.reExports.test.ts`.
+- **⚠ CORRECTNESS: `Optional` values follow one payload convention
+  everywhere.** The named `Some{ value: … }` literal stored its payload
+  raw while every consumer expected data — so a `Some` built in Pebble and
+  matched with `case` trapped at runtime ("unIData :: not data value"),
+  standalone or as a struct field. The literal now encodes the payload,
+  and the optional data-conversion branches were aligned to the same
+  convention. An optional field in a `runtime struct` also no longer
+  crashes the compiler (a two-constructor optional was being flattened as
+  a single-constructor struct), and generic data structs instantiated at
+  `Optional<…>` construct correctly.
+- **⚠ CORRECTNESS: cloning a `case` IR node no longer shares its
+  scrutinee.** The shared node let one compilation's in-place pipeline
+  mutations poison every other tree using the same (module-level) helper —
+  the "only closed terms can be hoisted" backend crash on a `bool` field
+  in a multi-constructor `data struct`, and a source of order-dependent
+  miscompiles. Emitted bytecode can shift slightly as a result (the
+  redeemer wire format is unchanged — verified by the executing parity
+  tests before re-recording the pinned snapshot).
+- **Struct-field round-trip matrix.** `compiler.structFieldRoundTrip.test.ts`
+  now evaluates every common field type × both encodings × single-ctor /
+  multi-ctor / generic instantiation — the class of silent field-encoding
+  bugs (27, 41, 42, 43, 44, 45) is under permanent guard.
+- **`Value` fields in data structs.** A native `Value` in a data-encoded
+  struct round-trips (`valueData`/`unValueData`); previously the encoder
+  had no Value branch and export died with an internal message after a
+  clean `check`.
+- **`case` expressions are no longer newline-sensitive.** The case parser
+  consumed the semicolon that terminates the ENCLOSING statement, so
+  `const x = case … ; return x;` on one line failed with "Unexpected
+  token" while the multi-line form parsed — formatting changed semantics.
+  (A stray `;` immediately before `)` inside a parenthesized case — only
+  ever accepted because of that quirk — no longer parses.)
+- **Namespace-qualified struct constructors.** `M.S.C{ v: n }` (and deeper
+  paths like `A.B.S.C{ … }`) construct through the namespace, with the same
+  local-visibility rule as qualified type annotations; previously only the
+  two-segment `Type.Constructor{ … }` form parsed and the qualified form
+  died with "Unexpected token".
+- **Generic types in cast position.** `as LinearMap<bytes, bytes>` (and
+  `as Box<int>` for user generics) resolves instead of "'LinearMap' is not
+  defined", and re-typing a `LinearMap`'s keys/values lowers as the
+  identity — making the documented
+  `std.builtins.unMapData( d ) as LinearMap<…>` idiom work end to end (the
+  aliased workaround previously threw at export too).
+
 ## v0.4.2
 
 Type-system audit fixes, from an independent audit; regression coverage in
