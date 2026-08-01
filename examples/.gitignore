@@ -2,3 +2,12 @@ node_modules/
 out/
 .devnet/
 .work/
+
+# keys for testnet and mainnet
+keys/
+*.skey
+
+# env and local config files
+.env
+*.local
+.env.local.scratch/

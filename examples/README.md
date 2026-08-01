@@ -7,10 +7,13 @@ end-to-end to on-chain UPLC and each exercised against a local devnet.
 |---|---|---|
 | [`linear-vesting`](./linear-vesting) | ~100 | a datum that carries state across partial spends; reading the validity interval's **lower** bound |
 | [`two-party-escrow`](./two-party-escrow) | ~95 | contract `param`s; three redeemer endpoints; reading **both** interval bounds; payment tagging against double satisfaction |
-| [`the-cardano-masterpiece`](./the-cardano-masterpiece) → symlink | ~1200 | **multiple contracts that compose** — mainnet-deployed |
+| [`the-cardano-masterpiece`](./the-cardano-masterpiece) (submodule) | ~1080 | **multiple contracts that compose** — live on mainnet at [thecardanomasterpiece.com](https://thecardanomasterpiece.com) |
 
 The first two are self-contained and are the ones to read first. The third is a
-symlink to a real, mainnet-deployed project; see [Advanced](#advanced-the-cardano-masterpiece).
+git submodule tracking
+[HarmonicLabs/the-cardano-masterpiece](https://github.com/HarmonicLabs/the-cardano-masterpiece),
+a real, mainnet-deployed project; see
+[Advanced](#advanced-the-cardano-masterpiece).
 
 ---
 
@@ -20,6 +23,9 @@ Both self-contained examples compile with the published compiler and run
 against a local devnet.
 
 ```bash
+# the third example is a submodule — fetch it too
+git submodule update --init
+
 npm install
 
 # compile both contracts to out/out.flat
@@ -111,9 +117,14 @@ and **refund before it is rejected**; after the deadline refund succeeds and
 
 ## Advanced: the-cardano-masterpiece
 
-A symlink to a separate repository — a live, **mainnet-deployed** project of
-three interacting validators. It is not a tutorial; read it for the one thing a
-single validator cannot demonstrate: **how contracts compose.**
+A git submodule tracking
+[HarmonicLabs/the-cardano-masterpiece](https://github.com/HarmonicLabs/the-cardano-masterpiece)
+— a live, **mainnet-deployed** project of three interacting validators, backing
+the public site **<https://thecardanomasterpiece.com>**. Fetch it with
+`git submodule update --init` if you cloned without `--recurse-submodules`.
+
+It is not a tutorial; read it for the one thing a single validator cannot
+demonstrate: **how contracts compose.**
 
 - **Parameterisation by another script's hash** — `masterpiece.pebble` takes
   `param stewardshipContractHash: bytes`, binding the two validators at deploy
@@ -144,7 +155,7 @@ examples/
 │       ├── vesting.ts       datum/redeemer encoders + tx builders
 │       └── e2e.ts           the runnable devnet flow
 ├── two-party-escrow/        same shape
-└── the-cardano-masterpiece  → symlink
+└── the-cardano-masterpiece  → git submodule (HarmonicLabs/the-cardano-masterpiece)
 ```
 
 ### Datum and redeemer encodings

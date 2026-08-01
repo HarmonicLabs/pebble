@@ -1,0 +1,53 @@
+{
+  "network": "preprod",
+  "contract": "two-party-escrow",
+  "compiler": "@harmoniclabs/pebble@0.4.3",
+  "scriptHash": "941f4646a5d7bb55c500c8b9212b5414a49c1043c846c561e79ce8d1",
+  "scriptAddress": "addr_test1wz2p73jx5htmk4w9qrytjgft2s22f8qsg0yyd3tpu7ww35gpw3eq0",
+  "params": {
+    "buyerPkh": "eec87a16719960496c370f1a918eb45edc1763d52ce89c84faf2f25f",
+    "sellerPkh": "7f31214835929c443a23ade928e7319a50e58dd8d189e4b4b10425aa",
+    "priceLovelace": 75000000
+  },
+  "negativeTestsRejected": [
+    "refund attempted BEFORE the deadline",
+    "accept attempted AFTER the deadline"
+  ],
+  "transactions": [
+    {
+      "label": "seller-funding",
+      "hash": "c66f26dc621eb0ea6529e4ccd9a2d19a0133d01dc995878b945488632a6989e6",
+      "explorer": "https://preprod.cardanoscan.io/transaction/c66f26dc621eb0ea6529e4ccd9a2d19a0133d01dc995878b945488632a6989e6"
+    },
+    {
+      "label": "escrow-A-deposit",
+      "hash": "ea45bdd7fda59da2e8621f1abf7fb7dd5811474a01cfdb976d7dc7feaaf4fd00",
+      "explorer": "https://preprod.cardanoscan.io/transaction/ea45bdd7fda59da2e8621f1abf7fb7dd5811474a01cfdb976d7dc7feaaf4fd00"
+    },
+    {
+      "label": "escrow-A-accept",
+      "hash": "cc7ebe90b4df4dd18110729ce83cda2fc1eafc5a66f88777f3ab4c3953108b11",
+      "explorer": "https://preprod.cardanoscan.io/transaction/cc7ebe90b4df4dd18110729ce83cda2fc1eafc5a66f88777f3ab4c3953108b11"
+    },
+    {
+      "label": "escrow-B-deposit",
+      "hash": "c6b92caf00d0f617f315e6accf5d2dfcdedd97c6064d53598cb34edf55dcef54",
+      "explorer": "https://preprod.cardanoscan.io/transaction/c6b92caf00d0f617f315e6accf5d2dfcdedd97c6064d53598cb34edf55dcef54"
+    },
+    {
+      "label": "escrow-B-refund",
+      "hash": "4c7ab60fbad22ed3c5c7dd00a74b3402ae0bfe58cbe9d9f9362a884f59ddb7b8",
+      "explorer": "https://preprod.cardanoscan.io/transaction/4c7ab60fbad22ed3c5c7dd00a74b3402ae0bfe58cbe9d9f9362a884f59ddb7b8"
+    },
+    {
+      "label": "escrow-C-deposit",
+      "hash": "76f40e7e7bea41df6cbf7cc373fc7c45b50ee00e825301db5a28ad384fe80c85",
+      "explorer": "https://preprod.cardanoscan.io/transaction/76f40e7e7bea41df6cbf7cc373fc7c45b50ee00e825301db5a28ad384fe80c85"
+    },
+    {
+      "label": "escrow-C-settle",
+      "hash": "a185b03f8b74460a29c7c7c0cd445917e921c77c69d7e240b98edac0d28495c6",
+      "explorer": "https://preprod.cardanoscan.io/transaction/a185b03f8b74460a29c7c7c0cd445917e921c77c69d7e240b98edac0d28495c6"
+    }
+  ]
+}

@@ -8,9 +8,13 @@
     "e2e:escrow": "tsx two-party-escrow/offchain/e2e.ts",
     "e2e": "npm run e2e:vesting && npm run e2e:escrow",
     "compile:vesting": "cd linear-vesting && node ../../packages/pebble-cli/dist/index.js compile",
-    "compile:escrow": "cd two-party-escrow && node ../../packages/pebble-cli/dist/index.js compile"
+    "compile:escrow": "cd two-party-escrow && node ../../packages/pebble-cli/dist/index.js compile",
+    "preprod:vesting": "tsx linear-vesting/offchain/preprod.ts",
+    "preprod:escrow": "tsx two-party-escrow/offchain/preprod.ts",
+    "preprod": "npm run preprod:vesting && npm run preprod:escrow"
   },
   "dependencies": {
+    "@harmoniclabs/blockfrost-pluts": "^0.5.1",
     "@harmoniclabs/buildooor": "^0.2.9"
   },
   "devDependencies": {

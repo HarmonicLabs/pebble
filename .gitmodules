@@ -1,0 +1,3 @@
+[submodule "examples/the-cardano-masterpiece"]
+	path = examples/the-cardano-masterpiece
+	url = https://github.com/HarmonicLabs/the-cardano-masterpiece

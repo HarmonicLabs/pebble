@@ -1,0 +1,33 @@
+{
+  "network": "preprod",
+  "contract": "linear-vesting",
+  "compiler": "@harmoniclabs/pebble@0.4.3",
+  "scriptHash": "ded0247df48b9e9086cdab2a6d96b922556ad4c7e2d7300e8029f356",
+  "scriptAddress": "addr_test1wr0dqfra7j9eayyxek4j5mvkhy3926k5cl3dwvqwsq5lx4spr75rj",
+  "beneficiary": "eec87a16719960496c370f1a918eb45edc1763d52ce89c84faf2f25f",
+  "schedule": {
+    "startPosixMs": 1785515963000,
+    "endPosixMs": 1785516443000,
+    "totalLovelace": 100000000
+  },
+  "negativeTestsRejected": [
+    "over-claim beyond vested amount"
+  ],
+  "transactions": [
+    {
+      "label": "vesting-lock",
+      "hash": "38bc75ea88395c3d7f3ffaacd209a94bc3342baea647b3af4e7a7396744dec20",
+      "explorer": "https://preprod.cardanoscan.io/transaction/38bc75ea88395c3d7f3ffaacd209a94bc3342baea647b3af4e7a7396744dec20"
+    },
+    {
+      "label": "vesting-claim-partial",
+      "hash": "145536208765f639db6c1b5dec90c2e63397f16db0eb79f03a8f8e7b196b676d",
+      "explorer": "https://preprod.cardanoscan.io/transaction/145536208765f639db6c1b5dec90c2e63397f16db0eb79f03a8f8e7b196b676d"
+    },
+    {
+      "label": "vesting-claim-final",
+      "hash": "3b5a0aa49fb6d550f2729c6efaa52c0ab6ba5eac5f9fbe23fb3d5d94782c320e",
+      "explorer": "https://preprod.cardanoscan.io/transaction/3b5a0aa49fb6d550f2729c6efaa52c0ab6ba5eac5f9fbe23fb3d5d94782c320e"
+    }
+  ]
+}
