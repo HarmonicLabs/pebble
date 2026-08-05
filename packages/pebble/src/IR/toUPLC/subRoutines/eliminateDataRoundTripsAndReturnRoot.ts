@@ -57,12 +57,17 @@ type Env = Map<symbol, IRTerm>;
 interface Spine { head: IRTerm; args: IRTerm[]; }
 
 function spineOf( term: IRTerm ): Spine {
+    // built with `push` + a single `reverse` rather than `unshift` per
+    // argument: `unshift` moves the whole array each time, making spine
+    // collection quadratic in the spine length (and spines grow with the
+    // program, so this showed up as super-linear compile work).
     const args: IRTerm[] = [];
     let head: IRTerm = term;
     while( head instanceof IRApp ) {
-        args.unshift( head.arg );
+        args.push( head.arg );
         head = head.fn;
     }
+    args.reverse();
     return { head, args };
 }
 

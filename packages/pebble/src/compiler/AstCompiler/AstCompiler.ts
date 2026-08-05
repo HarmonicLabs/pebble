@@ -2,6 +2,7 @@ import { StructDecl, StructDeclAstFlags } from "../../ast/nodes/statements/decla
 import { TypeAliasDecl } from "../../ast/nodes/statements/declarations/TypeAliasDecl";
 import { EnumDecl } from "../../ast/nodes/statements/declarations/EnumDecl";
 import { ExportStarStmt } from "../../ast/nodes/statements/ExportStarStmt";
+import { getStructType } from "../tir/types/utils/canAssignTo";
 import { ExportImportStmt } from "../../ast/nodes/statements/ExportImportStmt";
 import { ImportStarStmt } from "../../ast/nodes/statements/ImportStarStmt";
 import { ImportStmt } from "../../ast/nodes/statements/ImportStmt";
@@ -1851,6 +1852,28 @@ export class AstCompiler extends DiagnosticEmitter
                     );
             }
         }
+
+        // Register the struct's constructors for BARE literal construction
+        // (`SW{ a: 1 }` / `P2{ a: 3, b: 9 }` with no type annotation) —
+        // previously only a `using` statement populated the constructor
+        // registry, so unannotated literals failed with the misleading
+        // "'X' is not defined" anywhere in the file (GravityDex BUGs 4/10).
+        // First registration of a name wins (like `using`); the annotated
+        // and `Type.Constructor{…}` forms are unaffected.
+        if( tirTypeParams.length === 0 )
+        {
+            const dataStillRegistered =
+                data && this.program.types.get( data.toTirTypeKey() ) === data;
+            const regType = dataStillRegistered ? data : sop;
+            if( regType ) for( const ctor of regType.constructors )
+            {
+                topLevelScope.defineAviableConstructorIfValid(
+                    ctor.name,
+                    ctor.name,
+                    regType
+                );
+            }
+        }
     }
 
     /**
@@ -2316,7 +2339,25 @@ export class AstCompiler extends DiagnosticEmitter
                             this.program.functions.set( declName, funcExpr );
                     }
                 }
-                if( isType ) srcImportsScope.types.set( declName, importedSymbols.types.get( declName )! );
+                if( isType )
+                {
+                    const possible = importedSymbols.types.get( declName )!;
+                    srcImportsScope.types.set( declName, possible );
+                    // imported structs get their constructors registered for
+                    // bare literal construction, like local declarations
+                    const importedT =
+                        ( possible.dataTirName ? this.program.types.get( possible.dataTirName ) : undefined )
+                        ?? this.program.types.get( possible.sopTirName );
+                    const importedStructT = importedT ? getStructType( importedT ) : undefined;
+                    if( importedStructT ) for( const ctor of importedStructT.constructors )
+                    {
+                        srcImportsScope.defineAviableConstructorIfValid(
+                            ctor.name,
+                            ctor.name,
+                            importedT!
+                        );
+                    }
+                }
                 if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! );
                 if( isNamespace ) srcImportsScope.defineNamespace( importedSymbols.namespaces.get( declName )! );
                 if( isContract ) srcImportsScope.defineContract( importedSymbols.contracts.get( declName )! );

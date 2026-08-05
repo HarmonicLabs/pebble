@@ -44,6 +44,7 @@ import { IRNativeTag } from "../../IRNodes/IRNative/IRNativeTag";
 import { IRFunc } from "../../IRNodes/IRFunc";
 import { IRTerm } from "../../IRTerm";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
+import { compileWork } from "../_internal/compileWorkCounters";
 import { getApplicationTerms } from "../utils/getApplicationTerms";
 
 /**
@@ -61,7 +62,15 @@ function unwrapToNative( t: IRTerm ): IRTerm
 
 export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
 {
-    const stack: IRTerm[] = [ term ];
+    // same FIFO-queue-with-O(n)-insert problem as
+    // `rewriteNativesAppliedToConstantsAndReturnRoot` — see the comment
+    // there; identical visit order, O(1) per operation
+    const queue: IRTerm[] = [ term ];
+    let head = 0;
+    function enqueueChildren( cs: IRTerm[] ): void {
+        compileWork.worklistPushes += cs.length;
+        for( let i = cs.length - 1; i >= 0; i-- ) queue.push( cs[i] );
+    }
 
     function modifyTermAndPushToReprocess( current: IRTerm, newTerm: IRTerm ): void
     {
@@ -72,12 +81,14 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
             term = newTerm;
             term.parent = undefined;
         }
-        stack.unshift( newTerm );
+        compileWork.worklistPushes++;
+        queue.push( newTerm );
     }
 
-    while( stack.length > 0 )
+    while( head < queue.length )
     {
-        const current = stack.pop()!;
+        compileWork.nodeVisits++;
+        const current = queue[ head++ ];
 
         // LAZY pattern emitted by `_ir_lazyIfThenElse`:
         //   force( strictIfThenElse cond (delay t) (delay e) )
@@ -148,7 +159,7 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                 }
             }
 
-            stack.unshift( ...current.children() );
+            enqueueChildren( current.children() );
             continue;
         }
 
@@ -180,7 +191,7 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
             // pruning on the original case, so don't `continue` yet.
             if( !( current instanceof IRCase ) )
             {
-                stack.unshift( ...current.children() );
+                enqueueChildren( current.children() );
                 continue;
             }
         }
@@ -205,11 +216,11 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                 modifyTermAndPushToReprocess( current, pruned );
                 continue;
             }
-            stack.unshift( ...current.children() );
+            enqueueChildren( current.children() );
             continue;
         }
 
-        stack.unshift( ...current.children() );
+        enqueueChildren( current.children() );
     }
 
     return term;

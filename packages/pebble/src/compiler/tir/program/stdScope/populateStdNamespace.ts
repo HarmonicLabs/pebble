@@ -1,5 +1,7 @@
 import { SourceRange } from "../../../../ast/Source/SourceRange";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
+import { IRDelayed } from "../../../../IR/IRNodes/IRDelayed";
+import { IRConst } from "../../../../IR/IRNodes/IRConst";
 import { IRCase } from "../../../../IR/IRNodes/IRCase";
 import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
@@ -115,7 +117,9 @@ export function populateStdNamespace( program: TypedProgram ): void
         astName: string,
         tag: IRNativeTag,
         funcType: TirFuncT,
-        namespacePath: string
+        namespacePath: string,
+        /** custom IR (e.g. nullary builtins needing a unit application) */
+        mkIR: () => IRTerm = () => new IRNative( tag )
     ): void
     {
         const uniqueTirName = `__pebble__std__${namespacePath}__${astName}`;
@@ -123,7 +127,7 @@ export function populateStdNamespace( program: TypedProgram ): void
             uniqueTirName,
             new TirInlineClosedIR(
                 funcType,
-                () => new IRNative( tag ),
+                mkIR,
                 SourceRange.unknown
             )
         );
@@ -344,7 +348,21 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineBuiltin( builtinsNsScope, "listData",   IRNativeTag.listData,   new TirFuncT([ new TirListT( data_t ) ], data_t), blt );
     defineBuiltin( builtinsNsScope, "iData",      IRNativeTag.iData,      new TirFuncT([ int_t ], data_t), blt );
     defineBuiltin( builtinsNsScope, "bData",      IRNativeTag.bData,      new TirFuncT([ bytes_t ], data_t), blt );
-    defineBuiltin( builtinsNsScope, "mkNilData",  IRNativeTag.mkNilData,  new TirFuncT([], new TirListT( data_t ) ), blt );
+    // `mkNilData()` is NULLARY in Pebble but the UPLC builtin takes a UNIT
+    // argument. Zero-arg Pebble calls lower to `force(<fn>)` (the nullary
+    // calling convention), so the definition must be a DELAYED builtin
+    // already applied to unit — handing out the bare builtin produced
+    // `force (builtin mkNilData …)` at runtime: "cannot force builtin
+    // mkNilData that has already received all its arguments"
+    // (GravityDex BUG 9).
+    defineBuiltin(
+        builtinsNsScope, "mkNilData", IRNativeTag.mkNilData,
+        new TirFuncT([], new TirListT( data_t ) ), blt,
+        () => new IRDelayed( _ir_apps(
+            new IRNative( IRNativeTag.mkNilData ),
+            IRConst.unit
+        ) )
+    );
 
     // data destructors
     defineBuiltin( builtinsNsScope, "unConstrData", IRNativeTag.unConstrData, new TirFuncT([ data_t ], rawConstr_t), blt );

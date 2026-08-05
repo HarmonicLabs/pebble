@@ -19,6 +19,7 @@ import { replaceHoistedWithLetted } from "./subRoutines/replaceHoistedWithLetted
 import { IRApp, IRCase, IRConstr, IRFunc, IRNative, IRVar } from "../IRNodes";
 import { replaceForcedNativesWithHoisted } from "./subRoutines/replaceForcedNativesWithHoisted";
 import { performUplcOptimizationsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/performUplcOptimizationsAndReturnRoot";
+import { etaReduceLambdasAndReturnRoot } from "./subRoutines/etaReduceLambdasAndReturnRoot";
 import { rewriteNativesAppliedToConstantsAndReturnRoot } from "./subRoutines/rewriteNativesAppliedToConstantsAndReturnRoot";
 import { eliminateDataRoundTripsAndReturnRoot } from "./subRoutines/eliminateDataRoundTripsAndReturnRoot";
 import { rewriteToCaseOverConstAndReturnRoot } from "./subRoutines/rewriteToCaseOverConstAndReturnRoot";
@@ -33,11 +34,67 @@ import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/perform
 
 
 
+
+const __dbgClosed = !!process.env.PEBBLE_DBG_CLOSED;
+/** PEBBLE_DBG_STAGES=1 -> per-pass wall time + resulting tree size */
+const __dbgStages = !!process.env.PEBBLE_DBG_STAGES;
+let __stageT0 = 0;
+const __stageTotals = new Map<string, { ms: number, calls: number }>();
+function __treeSize( t: IRTerm ): number
+{
+    let n = 0;
+    const stack: IRTerm[] = [ t ];
+    while( stack.length )
+    {
+        const x = stack.pop()!;
+        n++;
+        const cs = ( x as any ).children;
+        if( Array.isArray( cs ) ) for( const c of cs ) if( c ) stack.push( c );
+    }
+    return n;
+}
+/** cumulative across every `compileIRToUPLC` call in the process; the LAST
+ *  report printed is the authoritative one */
+let __lastReportedMs = 0;
+export function __dbgStageReport(): void
+{
+    if( !__dbgStages ) return;
+    const rows = [ ...__stageTotals ].sort( ( a, b ) => b[1].ms - a[1].ms );
+    const tot = rows.reduce( ( acc, r ) => acc + r[1].ms, 0 );
+    // only report once the numbers are meaningful, and only when they moved
+    if( tot < 5_000 || tot < __lastReportedMs * 1.25 ) return;
+    __lastReportedMs = tot;
+    console.error( `\n[stages] cumulative ${(tot/1000).toFixed(1)}s` );
+    for( const [ name, v ] of rows )
+        console.error( `[stages] ${(v.ms/1000).toFixed(1).padStart(8)}s ${(v.ms/tot*100).toFixed(1).padStart(5)}%  x${String(v.calls).padStart(4)}  ${name}` );
+}
+function dbgClosed( term: IRTerm, stage: string ): void
+{
+    if( __dbgStages )
+    {
+        const now = Date.now();
+        const prev = __stageTotals.get( stage ) ?? { ms: 0, calls: 0 };
+        prev.ms += now - __stageT0;
+        prev.calls++;
+        __stageTotals.set( stage, prev );
+        if( process.env.PEBBLE_DBG_STAGES === "2" )
+            console.error( `[stage] ${String(now - __stageT0).padStart(7)}ms  size=${__treeSize(term)}  ${stage}` );
+        __stageT0 = Date.now();
+    }
+    if( !__dbgClosed ) return;
+    try { _debug_assertClosedIR( term ); }
+    catch (e) {
+        console.error( "[dbgClosed] tree not closed AFTER stage:", stage );
+        throw e;
+    }
+}
+
 export function compileIRToUPLC(
     term: IRTerm,
     paritalOptions: Partial<CompilerOptions> = defaultOptions
 ): UPLCTerm
 {
+    __stageT0 = Date.now();
     // most of the time we are just compiling small
     // pre-execuded terms (hence constants)
     if( term instanceof IRConst ) return term.toUPLC();
@@ -73,22 +130,32 @@ export function compileIRToUPLC(
 
     // term = preEvaluateDefinedTermsAndReturnRoot( term );
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
+    dbgClosed( term, "rewriteNativesAppliedToConstantsAndReturnRoot" );
+    // predicate closures like `(e: int) => e == captured` become partial
+    // builtin applications (`equalsInteger captured`) — fewer closures for
+    // the letted machinery to place, cheaper call sites
+    term = etaReduceLambdasAndReturnRoot( term );
+    dbgClosed( term, "etaReduceLambdasAndReturnRoot" );
     // struct-literal construction consumed in place produces
     // decode-after-encode chains; eliminate them before anything else
     // duplicates or shares them (see eliminateDataRoundTrips docs)
     term = eliminateDataRoundTripsAndReturnRoot( term );
+    dbgClosed( term, "eliminateDataRoundTripsAndReturnRoot" );
     // debugAsserts && _debug_assertions( term );
 
     // removing unused variables BEFORE going into the rest of the compilation
     // helps letted terms to find a better spot (and possibly be inlined instead of hoisted)
     term = removeUnusedVarsAndReturnRoot( term );
+    dbgClosed( term, "removeUnusedVarsAndReturnRoot" );
     // debugAsserts && _debug_assertions( term );
 
     _makeAllNegativeNativesHoisted( term );
 
     term = replaceNativesAndReturnRoot( term );
+    dbgClosed( term, "replaceNativesAndReturnRoot" );
     // re-call rewrite to optimize introduced hoisted
     term = rewriteNativesAppliedToConstantsAndReturnRoot( term );
+    dbgClosed( term, "rewriteNativesAppliedToConstantsAndReturnRoot" );
     // the rewrite above can itself introduce custom (negative-tag) natives
     // (eg. `equalsInteger(x, 0)` -> `_isZero(x)`, `addInteger(x, 1)` ->
     // `_increment(x)`); lower those too, otherwise they survive as bare
@@ -96,6 +163,7 @@ export function compileIRToUPLC(
     // "getNRequiredForces ... input was: -<tag>". This only surfaced in
     // contracts complex enough for the rewrite to fire on shared/hoisted bodies.
     term = replaceNativesAndReturnRoot( term );
+    dbgClosed( term, "replaceNativesAndReturnRoot" );
 
     // Lower `strictIfThenElse` triple-apps to `IRCase` BEFORE
     // `replaceForcedNativesWithHoisted` would otherwise hoist
@@ -104,12 +172,15 @@ export function compileIRToUPLC(
     // lowered to `IRCase` unconditionally by the earlier
     // `rewriteNativesAppliedToConstantsAndReturnRoot` pass.)
     term = rewriteToCaseOverConstAndReturnRoot( term );
+    dbgClosed( term, "rewriteToCaseOverConstAndReturnRoot" );
 
     // Inside `case L of cons h t -> body`, replace any `headList(L)` /
     // `tailList(L)` calls within `body` with `h` / `t`. Drop the now-dead
     // `h`/`t` bindings via a fresh unused-vars sweep.
     term = rewriteHeadTailInCaseConsAndReturnRoot( term );
+    dbgClosed( term, "rewriteHeadTailInCaseConsAndReturnRoot" );
     term = removeUnusedVarsAndReturnRoot( term );
+    dbgClosed( term, "removeUnusedVarsAndReturnRoot" );
 
     // For every IRFunc body where the same list L is accessed via BOTH
     // `headList(L)` and `tailList(L)`, wrap the body in
@@ -120,8 +191,11 @@ export function compileIRToUPLC(
     // can then make a second sweep to substitute any further internal
     // references the new case introduced.
     term = introduceCaseForDualHeadTailAndReturnRoot( term );
+    dbgClosed( term, "introduceCaseForDualHeadTailAndReturnRoot" );
     term = rewriteHeadTailInCaseConsAndReturnRoot( term );
+    dbgClosed( term, "rewriteHeadTailInCaseConsAndReturnRoot" );
     term = removeUnusedVarsAndReturnRoot( term );
+    dbgClosed( term, "removeUnusedVarsAndReturnRoot" );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -169,10 +243,12 @@ export function compileIRToUPLC(
     // handle letted before hoisted because the tree is smaller
     // and we also have less letted dependecies to handle
     term = handleLettedAndReturnRoot( term );
+    dbgClosed( term, "handleLettedAndReturnRoot" );
 
     // debugAsserts && _debug_assertions( term );
 
     term = handleHoistedAndReturnRoot( term );
+    dbgClosed( term, "handleHoistedAndReturnRoot" );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -196,14 +272,18 @@ export function compileIRToUPLC(
         )
     ) {
         term = replaceNativesAndReturnRoot( term );
+        dbgClosed( term, "replaceNativesAndReturnRoot" );
         term = handleLettedAndReturnRoot( term );
+        dbgClosed( term, "handleLettedAndReturnRoot" );
         term = handleHoistedAndReturnRoot( term );
+        dbgClosed( term, "handleHoistedAndReturnRoot" );
     }
 
     // second round-trip sweep: the letted/hoisted drain exposes
     // encoder/decoder adjacencies that were wrapped in letted/hoisted
     // nodes at the early sweep (constructions bound as letted values)
     term = eliminateDataRoundTripsAndReturnRoot( term );
+    dbgClosed( term, "eliminateDataRoundTripsAndReturnRoot" );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -218,10 +298,12 @@ export function compileIRToUPLC(
     // because in order to hanlde letted at the best
     // we need to know where the `IRRecursive` nodes are
     term = handleRootRecursiveTerm( term );
+    dbgClosed( term, "handleRootRecursiveTerm" );
     // if( options.delayHoists ) replaceHoistedWithLetted( term );
 
     // handle new hoisted terms
     term = handleHoistedAndReturnRoot( term )
+    dbgClosed( term, "handleHoistedAndReturnRoot" );
 
     // debugAsserts && _debug_assertions( term );
 
@@ -254,6 +336,7 @@ export function compileIRToUPLC(
     // }
 
     term = removeUnusedVarsAndReturnRoot( term );
+    dbgClosed( term, "removeUnusedVarsAndReturnRoot" );
 
     // After `handleLettedAndReturnRoot` lowers `IRLetted` into the
     // `IRApp(IRFunc([p], body), value)` shape, this is the first point
@@ -262,21 +345,28 @@ export function compileIRToUPLC(
     // nodes the inliner doesn't recognize). Single-use uses trapped
     // inside nested closures are skipped — see the pass for details.
     term = inlineSingleUseLetBindingsAndReturnRoot( term );
+    dbgClosed( term, "inlineSingleUseLetBindingsAndReturnRoot" );
     // inlining brings encoders adjacent to their decoders: final sweep
     term = eliminateDataRoundTripsAndReturnRoot( term );
+    dbgClosed( term, "eliminateDataRoundTripsAndReturnRoot" );
     term = removeUnusedVarsAndReturnRoot( term );
+    dbgClosed( term, "removeUnusedVarsAndReturnRoot" );
 
     term = performUplcOptimizationsAndReturnRoot( term, options );
+    dbgClosed( term, "performUplcOptimizationsAndReturnRoot" );
 
     // the optimization passes can create fresh single-use bindings
     // (case-of-known-constr rewrites etc.) — inline them too
     term = inlineSingleUseLetBindingsAndReturnRoot( term );
+    dbgClosed( term, "inlineSingleUseLetBindingsAndReturnRoot" );
 
     // Rewrite strictIfThenElse into IRCase-over-Const, and prune
     // trailing IRError continuations from any IRCase.
     term = rewriteToCaseOverConstAndReturnRoot( term );
+    dbgClosed( term, "rewriteToCaseOverConstAndReturnRoot" );
 
     term = ensureProperlyForcedBuiltinsAndReturnRoot( term );
+    dbgClosed( term, "ensureProperlyForcedBuiltinsAndReturnRoot" );
 
 
     if(
@@ -324,6 +414,8 @@ export function compileIRToUPLC(
     }
 
     // console.log( "srcmap", srcmap );
+
+    __dbgStageReport();
 
     return uplc;
 }

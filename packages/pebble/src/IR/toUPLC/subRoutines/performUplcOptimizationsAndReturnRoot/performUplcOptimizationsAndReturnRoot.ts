@@ -167,6 +167,26 @@ function groupIndependentApplications( root: IRTerm ): { newRoot: IRTerm | undef
     }
 
     const globalUnbound = getUnboundedVars( root );
+
+    // BAIL on ambiguous binder-symbol reuse: cloned IR reuses binder
+    // symbols, so a collapsed chain can contain the SAME param symbol
+    // twice (corrupting the symbol-keyed `paramToArg` map — one arg
+    // silently lost) or a param symbol that ALSO occurs free at `root`
+    // (masking real dependencies in the grouping analysis, since free
+    // occurrences are subtracted). Either way regrouping would move
+    // bindings across their references — surfacing at the final lowering
+    // as "Variable not found in scope chain" on large validators
+    // (GravityDex BUG 13 family). Keeping the original chain is always
+    // sound.
+    {
+        const paramSet = new Set<symbol>( params );
+        for( const p of finalParams ) paramSet.add( p );
+        if(
+            paramSet.size !== params.length + finalParams.length
+            || params.some( p => globalUnbound.has( p ) )
+            || finalParams.some( p => globalUnbound.has( p ) )
+        ) return undefined;
+    }
     const groups: symbol[][] = [[]];
 
     for( let i = 0; i < len; i++ )

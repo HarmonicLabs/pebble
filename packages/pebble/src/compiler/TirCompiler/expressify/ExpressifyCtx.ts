@@ -55,6 +55,16 @@ export class ExpressifyCtx
 {
     readonly hoisted: Map<string, TirHoistedExpr | TirNativeFunc>;
 
+    /**
+     * The USER function's declared return type — STABLE across the whole
+     * `expressify` call tree, unlike `returnType`, which branch machinery
+     * (`expressifyIfBranch`) retargets to synthetic state sops. The
+     * `EarlyReturn` payload of any state layer must carry THIS type.
+     * Inherited through `newChild`; `expressify()` re-anchors it when a
+     * nested user function starts.
+     */
+    public functionReturnType: TirType;
+
     constructor(
         readonly parent: ExpressifyCtx | undefined,
         public returnType: TirType,
@@ -69,6 +79,7 @@ export class ExpressifyCtx
         /** var name -> prop name -> constant name (letted field extraction expr or var access for SoP)*/
         readonly properties: Map<string, Map<string, string>> = new Map(),
     ) {
+        this.functionReturnType = parent ? parent.functionReturnType : returnType;
         this.hoisted = (
             hoisted
             ?? this.parent?.hoisted
@@ -104,9 +115,19 @@ export class ExpressifyCtx
         return (this.parent?.allVariables() ?? []).concat( ...thisVars )
     }
 
-    newChild(): ExpressifyCtx
+    /**
+     * `true` once this ctx (or an ancestor) belongs to a CONDITIONALLY
+     * evaluated region of the current function: an `if`/`match` arm or a
+     * loop body. Letted constants introduced while `false` are function-
+     * scope-eager (see `IRLettedMeta.eagerFnScope`).
+     */
+    underConditional: boolean = false;
+
+    newChild( conditional: boolean = true ): ExpressifyCtx
     {
-        return new ExpressifyCtx( this, this.returnType, this.program );
+        const child = new ExpressifyCtx( this, this.returnType, this.program );
+        child.underConditional = conditional ? true : this.underConditional;
+        return child;
     }
 
     setNewVariableName(
@@ -251,7 +272,8 @@ export class ExpressifyCtx
             declRange,
             undefined, // _unsafeVarSym
             undefined, // _creationStack
-            siteScoped
+            siteScoped,
+            !siteScoped && !this.underConditional // eagerFnScope
         );
         this.lettedConstants.set(
             name,

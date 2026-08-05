@@ -9,7 +9,20 @@ import { ImportStarStmt } from "../ast/nodes/statements/ImportStarStmt";
 import { ImportStmt } from "../ast/nodes/statements/ImportStmt";
 import { TypeImplementsStmt } from "../ast/nodes/statements/TypeImplementsStmt";
 import { isVarStmt } from "../ast/nodes/statements/VarStmt";
+import { ExportStmt } from "../ast/nodes/statements/ExportStmt";
 import { TopLevelStmt } from "../ast/nodes/statements/PebbleStmt";
+
+/**
+ * classification must look THROUGH `export` wrappers: an
+ * `export function`/`export struct`/… must hoist with its group, or every
+ * exported declaration sinks below all hoisted plain ones — making an
+ * exported function invisible to non-exported functions of the same module
+ * declared after it (GravityDex BUG 8).
+ */
+function unwrapExport( stmt: TopLevelStmt ): TopLevelStmt
+{
+    return stmt instanceof ExportStmt ? stmt.stmt as TopLevelStmt : stmt;
+}
 
 function moveStmt( stmts: TopLevelStmt[], fromIdx: number, toIdx: number )
 {
@@ -48,7 +61,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     // hoist imports
     for( let i = 0; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof ImportStmt
             || stmt instanceof ImportStarStmt
@@ -65,7 +78,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasExports )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof ExportImportStmt
             || stmt instanceof ExportStarStmt
@@ -75,7 +88,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasEnums )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof EnumDecl
         ) moveStmt( stmts, i, lastSortedIdx++ );
@@ -84,7 +97,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasStructs )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof StructDecl
             || stmt instanceof TypeAliasDecl
@@ -94,7 +107,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasInterfaces )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof InterfaceDecl
         ) moveStmt( stmts, i, lastSortedIdx++ );
@@ -103,7 +116,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasImplements )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof TypeImplementsStmt
         ) moveStmt( stmts, i, lastSortedIdx++ );
@@ -112,7 +125,7 @@ export function hoistStatementsInplace( stmts: TopLevelStmt[] ): void
     if( hasFunctions )
     for( let i = lastSortedIdx; i < nStmts; ++i )
     {
-        const stmt = stmts[i];
+        const stmt = unwrapExport( stmts[i] );
         if(
             stmt instanceof FuncDecl
             || isVarStmt( stmt )

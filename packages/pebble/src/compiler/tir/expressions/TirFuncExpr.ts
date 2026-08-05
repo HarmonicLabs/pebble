@@ -43,6 +43,9 @@ export class TirFuncExpr
         private readonly _isLoop: boolean = false,
     ) {}
 
+    /** `true` for the synthetic recursive functions loops lower into */
+    get isLoop(): boolean { return this._isLoop; }
+
     toString(): string
     {
         return (

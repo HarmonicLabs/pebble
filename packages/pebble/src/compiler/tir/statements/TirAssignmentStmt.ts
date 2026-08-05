@@ -25,6 +25,15 @@ export class TirAssignmentStmt
 
     definitelyTerminates(): boolean { return false; }
 
+    clone(): TirAssignmentStmt
+    {
+        return new TirAssignmentStmt(
+            this.varIdentifier.clone() as TirVariableAccessExpr,
+            this.assignedExpr.clone(),
+            this.range
+        );
+    }
+
     deps(): string[]
     {
         return this.varIdentifier.deps();

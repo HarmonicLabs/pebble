@@ -18,6 +18,7 @@ import { markRecursiveHoistsAsForced } from "../markRecursiveHoistsAsForced";
 import { IRConst } from "../../../IRNodes/IRConst";
 import { equalIrHash, irHashToHex } from "../../../IRHash";
 import { sanifyTree } from "../sanifyTree";
+import { compileWork } from "../../_internal/compileWorkCounters";
 import { IRRecursive } from "../../../IRNodes/IRRecursive";
 import { IRSelfCall } from "../../../IRNodes/IRSelfCall";
 import { findHighestRecursiveParent } from "./findHighestRecursiveParent";
@@ -81,7 +82,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
         // console.log(` ------------------ letted loop ------------------ `);
 
         const allDirectLetted = getLettedTerms( term, { all: false, includeHoisted: false });
-        if( allDirectLetted.length === 0 ) return term;
+        if( allDirectLetted.length === 0 ) return removeShadowedLettedRebindings( term );
 
         // // console.log("allDirectLetted", allDirectLetted.map( expandedJsonLettedSetEntry ) );
         
@@ -173,12 +174,43 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             wasSingleReferenceButRecursive
             && refUnderBinderOf( letted, letted.name )
         ) {
+            process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> reuse-existing-binder" );
             _modifyChildFromTo(
                 letted.parent,
                 letted,
                 new IRVar( letted.name )
             );
             continue;
+        }
+
+        // COMPUTE-ONCE rescue for the single-use PARTIAL value whose use
+        // site sits inside a LAMBDA (or loop) the value does not depend on
+        // — the dominant real-world shape is a captured `const` referenced
+        // from a predicate lambda handed to a higher-order fold: the
+        // recursion lives in the CALLEE, so `someParentIsRecursive` is
+        // false and the inline below would put the value inside the
+        // closure, re-running it on every invocation (GravityDex BUG 15 /
+        // UPLC_PATTERNS Pattern 1 — measured a full isqrt per fold element
+        // on the real swap path). Bind it ONCE just above the outermost
+        // eligible lambda instead. Site-scoped extractors keep their
+        // per-site semantics.
+        if(
+            wasSingleReferenceButRecursive
+            && !siteScopedPartial
+            && !canFloatOutOfLambda // totals already float through placement
+        ) {
+            const floatTarget = outermostFloatTargetBetween(
+                term,
+                [ letted ],
+                getUnboundedVars( letted.value ),
+                letted.meta.eagerFnScope === true
+            );
+            if( floatTarget !== undefined && "above" in floatTarget
+                && bindAboveNode( letted, floatTarget.above, [ letted ] ) )
+            {
+                if( process.env.PEBBLE_DBG_ALL ) console.error( "[pop]   -> single-ref float-above-lambda" );
+                continue;
+            }
         }
 
         if(
@@ -245,6 +277,10 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
 
         const minScope = findHighestRecursiveParent( letted, maxScope );
         
+        // two FULL-TREE walks per placed binding (`sanifyTree` + the
+        // same-hash search below); counted so tests can assert the pass
+        // does not regain per-binding rescans it had eliminated
+        compileWork.placementScans += 2;
         sanifyTree( maxScope );
         const lettedHash = letted.hash;
 
@@ -259,8 +295,16 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
         // fall back to per-reference inlining unless a spine witness
         // proves evaluation-order neutrality.
         const sameLettedRefs = ( findAllNoHoisted(
-            term,
-            node => 
+            // search from the ANCHOR, not the whole program: an identical
+            // hash implies identical free-var SYMBOLS, and those are bound
+            // by the same binder chain — every same-hash reference lives
+            // under `maxScope` (for closed values `maxScope === term`
+            // anyway). A per-letted whole-program walk made handleLetted
+            // sharply quadratic on large validators (measured 26% of a
+            // near-hour export); if a reference ever escaped the anchor it
+            // would simply be processed in a later round on its own.
+            maxScope,
+            node =>
                 node instanceof IRLetted &&
                 equalIrHash( node.hash, lettedHash )
         ) as IRLetted[] )
@@ -295,6 +339,14 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             continue;
         }
 
+
+        if( sameLettedRefs.every( r => refUnderBinderOf( r as IRTerm, letted.name ) ) )
+        {
+            if( process.env.PEBBLE_DBG_ALL ) console.error( "[pop]   -> multi-ref reuse-existing-binder" );
+            for( const ref of sameLettedRefs )
+                _modifyChildFromTo( ref.parent, ref, new IRVar( ref.name ) );
+            continue;
+        }
 
         // always inline letted vars
         if(
@@ -356,6 +408,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                     ),
                     letted.value,
                 ) 
+                process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> closed-single-ref-hoist" );
                 continue;
             }
             // else find highest common ancestor where all unbounded vars are defined
@@ -518,11 +571,25 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                     // defer) — else keep per-site semantics.
                     if( isPartialValue && !hasSpineWitness( root, refs ) )
                     {
-                        inlinePerRef( refs );
-                        continue;
+                        // COMPUTE-ONCE rescue (GravityDex BUG 15) — see the
+                        // sibling sites: bind above a common recursion
+                        // instead of re-evaluating per iteration; when no
+                        // single binder covers every ref but all paths are
+                        // dispatch-debt-free, bind AT the root below.
+                        const dec = outermostFloatTargetBetween( root, refs, getUnboundedVars( letted.value ), letted.meta.eagerFnScope === true );
+                        if( dec !== undefined && "above" in dec && bindAboveNode( letted, dec.above, refs ) )
+                        { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup float-above" ); continue; }
+                        if( !( dec !== undefined && "atPlacement" in dec && letted.meta.siteScoped !== true ) )
+                        {
+                            process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup inlinePerRef" );
+                            inlinePerRef( refs );
+                            continue;
+                        }
+                        process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup atPlacement" );
                     }
                     const rootParent = root.parent;
-                    if( !rootParent ) { inlinePerRef( refs ); continue; }
+                    if( !rootParent ) { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup rootless inline" ); inlinePerRef( refs ); continue; }
+                    process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup normal-bind" );
                     const newNode = new IRApp(
                         new IRFunc(
                             [ letted.name ],
@@ -608,9 +675,27 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             const branchTerm = lca;
             if( !isSafeToEagerlyEvaluate( letted.value ) && !hasSpineWitness( branchTerm, sameLettedRefs ) )
             {
-                inlinePerRef( sameLettedRefs );
-                continue;
+                // COMPUTE-ONCE rescue (GravityDex BUG 15): if every use
+                // site sits under one recursion between here and the refs,
+                // inlining puts the value INSIDE the loop and re-evaluates
+                // it per iteration (measured 71x cpu on real fold-heavy
+                // validators). A user `const` is eager-at-declaration in
+                // source semantics, so binding it ONCE just above the loop
+                // is faithful — bind above the recursion instead. When no
+                // single binder covers every ref but all paths are
+                // dispatch-debt-free, bind AT the branch root below.
+                const dec = outermostFloatTargetBetween( branchTerm, sameLettedRefs, getUnboundedVars( letted.value ), letted.meta.eagerFnScope === true );
+                if( dec !== undefined && "above" in dec && bindAboveNode( letted, dec.above, sameLettedRefs ) )
+                { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-root float-above" ); continue; }
+                if( !( dec !== undefined && "atPlacement" in dec && letted.meta.siteScoped !== true ) )
+                {
+                    process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-root inlinePerRef" );
+                    inlinePerRef( sameLettedRefs );
+                    continue;
+                }
+                process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-root atPlacement" );
             }
+            process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-root normal-bind" );
             const lettedValue = letted.value.clone();
             const newNode = new IRApp(
                 new IRFunc(
@@ -645,6 +730,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             );
 
             lca = realLca;
+            process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> handle-as-hoisted" );
             const tmpRoot = handleLettedAsHoistedAndReturnRoot(
                 letted,
                 realLca, // lca
@@ -657,6 +743,21 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             continue;
         }
 
+        if( !isSafeToEagerlyEvaluate( letted.value ) && letted.meta.siteScoped !== true )
+        {
+            // COMPUTE-ONCE rescue (GravityDex BUG 15, multi-ref shape): the
+            // climbed lca may sit INSIDE a lambda handed to a fold (invoked
+            // per element) — search the whole anchor span for the outermost
+            // binder eligible under the dispatch-debt automaton and bind
+            // there instead.
+            const floatDec = outermostFloatTargetBetween( maxScope, sameLettedRefs, getUnboundedVars( letted.value ), letted.meta.eagerFnScope === true );
+            if( floatDec !== undefined && "above" in floatDec && bindAboveNode( letted, floatDec.above, sameLettedRefs ) )
+            {
+                if( process.env.PEBBLE_DBG_ALL ) console.error( "[pop]   -> pre-bind float-above" );
+                continue;
+            }
+        }
+
         // the climb above only exits normally on an IRFunc / IRDelayed
         // (the case-branch break path `continue`d already)
         const parentNode = lca as IRFunc | IRRecursive | IRDelayed;
@@ -667,14 +768,37 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
 
         if( !isSafeToEagerlyEvaluate( letted.value ) && !hasSpineWitness( parentNodeDirectChild, sameLettedRefs ) )
         {
-            // binding here would evaluate the value whenever this scope
-            // runs, but every use site is behind a conditional/deferred
-            // edge: keep per-site semantics
-            inlinePerRef( sameLettedRefs );
-            continue;
+            // COMPUTE-ONCE rescue (GravityDex BUG 15): same as the
+            // branch-root site above — when the placement scope IS a
+            // recursion (or one sits between it and every ref), bind ONCE
+            // above the recursive node instead of inlining the value into
+            // the loop body. NB placing at `IRRecursive.body` would ALSO
+            // re-evaluate per recursive call (the body re-derives under
+            // the fixpoint), hence above the NODE.
+            if( parentNode instanceof IRRecursive
+                && bindAboveNode( letted, parentNode, sameLettedRefs ) )
+            { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> lca above-recursive" ); continue; }
+            const dec = parentNode instanceof IRRecursive
+                ? undefined
+                : outermostFloatTargetBetween( parentNodeDirectChild, sameLettedRefs, getUnboundedVars( letted.value ), letted.meta.eagerFnScope === true );
+            if( dec !== undefined && "above" in dec && bindAboveNode( letted, dec.above, sameLettedRefs ) )
+            { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> lca float-above" ); continue; }
+            if( !( dec !== undefined && "atPlacement" in dec && letted.meta.siteScoped !== true ) )
+            {
+                // every use site is behind a conditional/deferred edge and
+                // no loop is involved: keep per-site semantics
+                process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> lca inlinePerRef" );
+                inlinePerRef( sameLettedRefs );
+                continue;
+            }
+            process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> lca atPlacement" );
+            // atPlacement: fall through to the normal binding below —
+            // `parentNodeDirectChild` dominates every ref and all paths
+            // are dispatch-debt-free (source `const` is eager anyway)
         }
 
         // now we replace
+        process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> lca normal-bind" );
         const lettedValue = letted.value.clone();
 
         const newNode = new IRApp(
@@ -780,6 +904,14 @@ function hasSpineWitness( from: IRTerm, refs: IRLetted[] ): boolean
  *  semantics: exactly what the source expressed before sharing) */
 function inlinePerRef( refs: IRLetted[] ): void
 {
+    if( process.env.PEBBLE_DBG_INLINE && refs.length > 0 )
+    {
+        const err = new Error();
+        console.error(
+            "[inlinePerRef]", refs[0].name.description, "nRefs:", refs.length,
+            "site:", String( err.stack ).split("\n")[2]?.trim()
+        );
+    }
     for( const ref of refs )
     {
         _modifyChildFromTo(
@@ -873,4 +1005,288 @@ function someParentIsRecursive( term: IRTerm ): boolean
         term = parent;
     }
     return false;
+}
+/**
+ * The OUTERMOST binder (`IRFunc` / `IRRecursive`) lying strictly between
+ * `placement` and EVERY reference — i.e. the lambda or loop whose body
+ * would re-run the value on every call/iteration. The same node must serve
+ * all references.
+ *
+ * Anything bound INSIDE a lambda is recomputed per invocation, and a
+ * predicate lambda handed to a fold is invoked once per element — this is
+ * why the loop-only version of this rescue missed the dominant real-world
+ * shape (a captured `const` referenced inside a lambda ARGUMENT of a
+ * higher-order function, the recursion living in the callee).
+ *
+ * Guards:
+ * - a `Case` BRANCH edge aborts the search: binding above a dispatch would
+ *   evaluate the value in every arm (that is a real miscompilation for
+ *   arm-specific values, e.g. redeemer field extractors);
+ * - a binder of one of the value's own free variables stops the climb —
+ *   the value cannot leave that binder's scope.
+ *
+ * Floating out of a lambda is semantics-preserving for Pebble because a
+ * source `const` is EAGER at its declaration: the lazy in-closure placement
+ * is a compiler artifact, not the source's meaning.
+ */
+function outermostFloatTargetBetween(
+    placement: IRTerm,
+    refs: IRLetted[],
+    valueFreeVars: Set<symbol>,
+    /**
+     * `true` for fn-scope-eager user declarations (`meta.eagerFnScope`):
+     * source evaluates them once per function run REGARDLESS of in-function
+     * dispatch, so branch edges carry no debt — only free-var barriers
+     * bound the float. This is what lets a value referenced across the
+     * arms of a lowered `&&` cascade (sequential SIBLING branches — each
+     * conjunct is a new case on the PREVIOUS case's result, so per-branch
+     * bindings never nest and were re-evaluated per conjunct: measured 44
+     * re-bindings of one oracle fold = a 20x cpu blowup on real swaps)
+     * settle in ONE binding below its anchor.
+     */
+    ignoreDispatch: boolean = false
+): { above: IRFunc | IRRecursive } | { atPlacement: true } | undefined
+{
+    let common: IRFunc | IRRecursive | undefined = undefined;
+    let conflict = false;
+    let missing = false;
+    // `{ atPlacement }` eligibility: every ref must be reachable from
+    // `placement` with NO dispatch debt and NO free-var barrier — then
+    // binding AT the placement (which dominates all refs) evaluates the
+    // value exactly once, matching source `const` eagerness. This is the
+    // MIXED multi-ref shape: one ref captured inside a lambda handed to a
+    // fold, siblings referenced directly — no single binder covers both,
+    // so `above` is unresolvable, yet per-ref inlining re-runs the value
+    // per fold element (measured 355M cpu/element on the swap-path
+    // microcosm).
+    let allReachPlacementDebtFree = true;
+    for( const ref of refs )
+    {
+        let cur: IRTerm = ref as IRTerm;
+        let outermost: IRFunc | IRRecursive | undefined = undefined;
+        let barrier = false;
+        // Evaluation-frequency automaton. Binding above a target T makes
+        // the value run whenever T's position is reached, so every
+        // MULTI-continuation `Case` branch edge (a real dispatch — only
+        // the selected arm runs) crossed on the way to T needs a
+        // justification. Exiting an enclosing RECURSION provides one: a
+        // source `const` declared outside the loop evaluates before the
+        // loop regardless of any in-loop dispatch (eager-at-declaration
+        // semantics). Nothing justifies evaluating on a FOREIGN dispatch
+        // arm (masterpiece BUG 23: a redeemer extractor lifted past method
+        // dispatch crashed the other methods) — so a dispatch edge makes
+        // further lambdas ineligible until an `IRRecursive` above it
+        // clears the debt. Single-continuation `Case`s are mere
+        // destructuring (the loop machinery is made of them): free.
+        let pendingDispatch = false;
+        while( cur !== placement )
+        {
+            const p = cur.parent as IRTerm | undefined;
+            if( !p ) break; // ran past the (possibly re-rooted) placement
+            if(
+                p instanceof IRCase
+                && cur !== ( p as IRCase ).constrTerm
+                && ( p as IRCase ).continuations.length > 1
+            ) pendingDispatch = !ignoreDispatch;
+            else if( p instanceof IRFunc )
+            {
+                // cannot leave the scope of a binder the value depends on
+                if( p.params.some( s => valueFreeVars.has( s ) ) ) { barrier = true; break; }
+                if( !pendingDispatch ) outermost = p;
+            }
+            else if( p instanceof IRRecursive )
+            {
+                if( p.params.some( s => valueFreeVars.has( s ) ) ) { barrier = true; break; }
+                pendingDispatch = false;
+                outermost = p;
+            }
+            cur = p;
+        }
+        if( cur !== placement || pendingDispatch || barrier )
+            allReachPlacementDebtFree = false;
+        if( outermost === undefined ) missing = true;
+        else if( common === undefined ) common = outermost;
+        else if( common !== outermost ) conflict = true;
+    }
+    if( !missing && !conflict && common !== undefined ) return { above: common };
+    if( allReachPlacementDebtFree ) return { atPlacement: true };
+    return undefined;
+}
+
+/**
+ * Bind `letted`'s value ONCE just above `recNode`
+ * (`recNode` becomes `[(λ name . recNode) value]`) and replace every
+ * reference with the bound variable. Returns `false` (caller falls back)
+ * when the node has no parent to attach the binding to.
+ */
+function bindAboveNode( letted: IRLetted, recNode: IRFunc | IRRecursive, refs: IRLetted[] ): boolean
+{
+    const recParent = recNode.parent;
+    if( recParent === undefined ) return false;
+
+    const lettedValue = letted.value.clone();
+    const newNode = new IRApp(
+        new IRFunc(
+            [ letted.name ],
+            recNode
+        ),
+        lettedValue,
+        { __src__ : letted.meta.__src__ }
+    );
+    _modifyChildFromTo( recParent, recNode, newNode );
+
+    for( const ref of refs )
+    {
+        _modifyChildFromTo(
+            ref.parent,
+            ref,
+            new IRVar( ref.name )
+        );
+    }
+    return true;
+}
+
+/**
+ * Letted instances surface in WAVES (clones nested inside other letteds'
+ * values are excluded from earlier groups and re-appear once their container
+ * is placed), and each wave that could not reuse an existing binder created
+ * its OWN binding of the SAME value. Bindings nested inside the scope of
+ * another binder of the same symbol are pure waste: every one on the taken
+ * path re-evaluates the identical value (measured 43 nested re-bindings of
+ * one oracle fold on the GravityDex swap accept path — a 20x cpu blowup)
+ * and duplicates its code. Since an `IRVar` resolves to the INNERMOST
+ * binder, dropping the inner binding re-points its body's references at the
+ * ancestor binder of the same symbol, which binds a hash-identical value —
+ * semantics preserved, one evaluation and one copy saved.
+ *
+ * The innermost-binder rule is honored by comparing against the TOP of a
+ * per-symbol stack, and any FOREIGN binder of a tracked symbol (multi-param
+ * lambda, recursion, differently-valued let) pushes an unmatchable sentinel
+ * so duplicates are never merged across it.
+ */
+let __shadowedRemoved = 0;
+function removeShadowedLettedRebindings( root: IRTerm ): IRTerm
+{
+    /** binder frames entered so far on this path; every binder gets a
+     *  monotonically increasing id, so "was this bound after that let?"
+     *  is a single integer comparison */
+    let nextBinderId = 0;
+    /** innermost binding id per bound symbol (stack per symbol) */
+    const boundAt = new Map<symbol, number[]>();
+    /** id of the innermost enclosing LET of each letted symbol */
+    const letAt = new Map<symbol, number[]>();
+
+    const push = ( m: Map<symbol, number[]>, sym: symbol, id: number ): void => {
+        const arr = m.get( sym );
+        if( arr ) arr.push( id );
+        else m.set( sym, [ id ] );
+    };
+    const pop = ( m: Map<symbol, number[]>, sym: symbol ): void => {
+        const arr = m.get( sym );
+        if( !arr ) return;
+        arr.pop();
+        if( arr.length === 0 ) m.delete( sym );
+    };
+    const topOf = ( m: Map<symbol, number[]>, sym: symbol ): number | undefined => {
+        const arr = m.get( sym );
+        return arr && arr.length > 0 ? arr[ arr.length - 1 ] : undefined;
+    };
+
+    const isLetShape = ( t: IRTerm ): t is IRApp & { fn: IRFunc } =>
+        t instanceof IRApp
+        && t.fn instanceof IRFunc
+        && t.fn.params.length === 1;
+
+    type Frame =
+        | { node: IRTerm }
+        | { enter: symbol, isLet: boolean, id: number }
+        | { exit: symbol, isLet: boolean };
+    const stack: Frame[] = [ { node: root } ];
+    while( stack.length > 0 )
+    {
+        const fr = stack.pop()!;
+        if( "enter" in fr ) {
+            push( boundAt, fr.enter, fr.id );
+            if( fr.isLet ) push( letAt, fr.enter, fr.id );
+            continue;
+        }
+        if( "exit" in fr ) {
+            pop( boundAt, fr.exit );
+            if( fr.isLet ) pop( letAt, fr.exit );
+            continue;
+        }
+        let node = fr.node;
+
+        // Collapse shadowed re-bindings sitting at this position.
+        //
+        // Match on SYMBOL identity, not on the value's hash: a letted
+        // symbol belongs to exactly ONE letted family (one source
+        // declaration), so every binding of it binds the semantically
+        // identical value. The two args' HASHES routinely differ only in
+        // REPRESENTATION — one clone still has its nested dependencies
+        // inline where the other's were already replaced by variables —
+        // which is why comparing hashes finds nothing to merge.
+        //
+        // Dropping the inner binding re-points its body's references at
+        // the ancestor binding of the same symbol (an `IRVar` resolves to
+        // the innermost binder), saving one evaluation and one copy.
+        //
+        // Guard: only if the inner value cannot depend on anything bound
+        // AFTER the outer binding. Otherwise the two bindings are the same
+        // declaration seen under different instantiations of an enclosing
+        // binder (e.g. once per loop iteration) and are NOT interchangeable.
+        while( isLetShape( node ) )
+        {
+            const sym = ( node.fn as IRFunc ).params[0];
+            const outerLetId = topOf( letAt, sym );
+            if( outerLetId === undefined ) break; // no ancestor LET of sym
+            let dependsOnNewerBinder = false;
+            for( const free of getUnboundedVars( node.arg ) )
+            {
+                const at = topOf( boundAt, free );
+                if( at !== undefined && at > outerLetId ) { dependsOnNewerBinder = true; break; }
+            }
+            if( dependsOnNewerBinder ) break;
+            const body = ( node.fn as IRFunc ).body;
+            const parent = node.parent;
+            if( parent ) _modifyChildFromTo( parent, node, body );
+            else { root = body; body.parent = undefined; }
+            node = body;
+            __shadowedRemoved++;
+        }
+
+        if( isLetShape( node ) )
+        {
+            const sym = ( node.fn as IRFunc ).params[0];
+            const id = nextBinderId++;
+            // pops in order: arg (outer scope), enter, body (extended scope), exit
+            stack.push( { exit: sym, isLet: true } );
+            stack.push( { node: ( node.fn as IRFunc ).body } );
+            stack.push( { enter: sym, isLet: true, id } );
+            stack.push( { node: node.arg } );
+            continue;
+        }
+        if( node instanceof IRFunc || node instanceof IRRecursive )
+        {
+            const id = nextBinderId++;
+            for( const p of node.params ) stack.push( { exit: p, isLet: false } );
+            stack.push( { node: node.body } );
+            for( const p of node.params ) stack.push( { enter: p, isLet: false, id } );
+            continue;
+        }
+        if( node instanceof IRApp ) { stack.push( { node: node.fn }, { node: node.arg } ); continue; }
+        if( node instanceof IRDelayed ) { stack.push( { node: node.delayed } ); continue; }
+        if( node instanceof IRForced_ ) { stack.push( { node: node.forced } ); continue; }
+        if( node instanceof IRCase )
+        {
+            stack.push( { node: node.constrTerm } );
+            for( const c of node.continuations ) stack.push( { node: c } );
+            continue;
+        }
+        if( node instanceof IRHoisted ) { stack.push( { node: node.hoisted } ); continue; }
+        if( node instanceof IRLetted ) { stack.push( { node: node.value } ); continue; }
+    }
+    if( process.env.PEBBLE_DBG_ALL || process.env.PEBBLE_DBG_SHADOW )
+        console.error( "[shadowed-rebindings-removed]", __shadowedRemoved );
+    return root;
 }

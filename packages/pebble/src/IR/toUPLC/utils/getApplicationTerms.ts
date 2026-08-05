@@ -10,7 +10,14 @@ export interface ApplicationTerms {
 
 export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefined
 {
-    const args: IRTerm[] = [];
+    // `unshift` always targets the absolute front and `push` the absolute
+    // back, so accumulating the two separately and joining once at the end
+    // is exactly equivalent to interleaving them on a single array — but
+    // linear instead of quadratic in the spine length. Spines grow with the
+    // program, and this helper runs at nearly every node of every rewrite
+    // pass, so the quadratic showed up as super-linear compile work.
+    const front: IRTerm[] = []; // prepended args, in reverse order
+    const back: IRTerm[] = [];  // appended args, in order
     while(
         term instanceof IRApp
         || (
@@ -24,7 +31,7 @@ export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefine
         // || term instanceof IRHoisted
     ) {
         if( term instanceof IRApp ) {
-            args.unshift( term.arg );
+            front.push( term.arg );
             term = term.fn;
             continue;
         }
@@ -34,14 +41,16 @@ export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefine
             && term.constrTerm instanceof IRConstr
             && Number( term.constrTerm.index ) === 0
         ) {
-            args.push( ...term.constrTerm.fields );
+            for( const f of term.constrTerm.fields ) back.push( f );
             term = term.continuations[0];
             continue;
         }
         // if( term instanceof IRLetted ) term = term.value;
         // else if( term instanceof IRHoisted ) term = term.hoisted;
     }
-    if( args.length === 0 ) return undefined;
+    if( front.length === 0 && back.length === 0 ) return undefined;
+    front.reverse();
+    const args: IRTerm[] = back.length === 0 ? front : front.concat( back );
     return {
         func: term,
         args,

@@ -39,7 +39,9 @@ import { toNamedDeconstructVarDecl } from "./toNamedDeconstructVarDecl";
 import { flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct } from "./flattenSopNamedDeconstructInplace_addTopDestructToCtx_getNestedDeconstruct";
 import { TirAssertAndContinueExpr } from "../../tir/expressions/TirAssertAndContinueExpr";
 import { expressifyTerminatingIfStmt } from "./expressifyTerminatingIfStmt";
-import { determineReassignedVariablesAndFlowInfos, determineReassignedVariablesAndReturn, getBodyStateType, getBranchStmtReturnType, ReassignedVariablesAndReturn } from "./determineReassignedVariablesAndReturn";
+import { determineReassignedVariablesAndFlowInfos, determineReassignedVariablesAndReturn, getBodyStateType, getBranchStmtReturnType, ReassignedVariablesAndReturn, isBranchStateSop, EARLY_RETURN_CONSTR_NAME, LOOP_ESCAPE_CONSTR_NAME } from "./determineReassignedVariablesAndReturn";
+import { Identifier } from "../../../ast/nodes/common/Identifier";
+import { TirLitNamedObjExpr } from "../../tir/expressions/litteral/TirLitNamedObjExpr";
 import { TirTernaryExpr } from "../../tir/expressions/TirTernaryExpr";
 import { expressifyIfBranch } from "./expressifyIfBranch";
 import { expressifyForStmt, loopToForStmt } from "./expressifyForStmt";
@@ -50,6 +52,7 @@ import { TirVarDecl } from "../../tir/statements/TirVarDecl/TirVarDecl";
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirNativeFunc } from "../../tir/expressions/TirNativeFunc";
 import { TypedProgram } from "../../tir/program/TypedProgram";
+import { TirType } from "../../tir/types/TirType";
 
 export function expressify(
     func: TirFuncExpr,
@@ -59,6 +62,11 @@ export function expressify(
 ): void
 {
     const ctx = new ExpressifyCtx( parentCtx, func.returnType, program );
+    // a NEW user function re-anchors the stable return type (nested
+    // functions inherit the parent's through the ctx chain otherwise) —
+    // EXCEPT synthetic loop functions, whose bodies still belong to the
+    // enclosing user function (their `return` statements are the USER's).
+    if( !func.isLoop ) ctx.functionReturnType = func.returnType;
 
     // define in case of recursion
     ctx.setFuncParam( func.name, func.type  );
@@ -73,9 +81,50 @@ export function expressify(
 }
 
 export interface LoopReplacements {
-    readonly replaceReturnValue   : ( ctx: ExpressifyCtx, stmt: TirReturnStmt ) => TirExpr;
     readonly compileBreak    : ( ctx: ExpressifyCtx, stmt: TirBreakStmt      ) => TirExpr;
     readonly compileContinue : ( ctx: ExpressifyCtx, stmt: TirContinueStmt   ) => TirExpr;
+    /**
+     * The enclosing loop's RESULT type (its state sop, or the bare variable
+     * type in bare-lowering mode). Branch layers inside the loop body use
+     * it to type their `LoopEscape` constructor.
+     */
+    readonly loopResultType  : TirType;
+    /**
+     * The loop's own state sop (undefined in bare mode). A user `return`
+     * in the loop-body TAIL wraps into ITS `EarlyReturn`.
+     */
+    readonly loopStateSop    : TirSoPStructType | undefined;
+}
+
+/**
+ * Synthetic tail returns appended by the branch machinery
+ * (`expressifyIfBranch`): their value is ALREADY the layer's state sop and
+ * must never be re-wrapped by the return handling below.
+ */
+export const syntheticStateReturns = new WeakSet<TirReturnStmt>();
+
+/**
+ * Wrap `value` in the named single-field constructor of `stateType`, when
+ * `stateType` is a synthetic branch-state sop that has that constructor.
+ * Returns `undefined` (leave the value untouched) otherwise.
+ */
+function wrapInStateCtor(
+    stateType: TirType | undefined,
+    ctorName: string,
+    value: TirExpr,
+    range: SourceRange
+): TirLitNamedObjExpr | undefined
+{
+    if( !isBranchStateSop( stateType ) ) return undefined;
+    const ctor = stateType.constructors.find( c => c.name === ctorName );
+    if( !ctor ) return undefined;
+    return new TirLitNamedObjExpr(
+        new Identifier( ctor.name, range ),
+        [ new Identifier( ctor.fields[0].name, range ) ],
+        [ value ],
+        stateType,
+        range
+    );
 }
 
 export function expressifyFuncBody(
@@ -96,39 +145,55 @@ export function expressifyFuncBody(
 
         if( stmt instanceof TirBreakStmt ) {
             if( typeof loopReplacements?.compileBreak !== "function" ) throw new Error("break statement in function body.");
-            
+
+            // The break value has the LOOP's result type. Inside a nested
+            // branch layer (`ctx.returnType` is a state sop) it must ride
+            // the layer's `LoopEscape` constructor so the enclosing
+            // continuations are skipped (GravityDex BUG 6); at loop-body
+            // level it IS the loop function's result and stays bare.
+            let breakExpr = loopReplacements.compileBreak( ctx, stmt );
+            breakExpr = wrapInStateCtor( ctx.returnType, LOOP_ESCAPE_CONSTR_NAME, breakExpr, stmt.range ) ?? breakExpr;
             return TirAssertAndContinueExpr.fromStmtsAndContinuation(
                 assertions,
-                loopReplacements.compileBreak( ctx, stmt )
+                breakExpr
             );
         }
         else if( stmt instanceof TirContinueStmt ) {
             if( typeof loopReplacements?.compileContinue !== "function" ) throw new Error("continue statement in function body.");
-            
+
+            // same escape-channel treatment as `break` above
+            let continueExpr = loopReplacements.compileContinue( ctx, stmt );
+            continueExpr = wrapInStateCtor( ctx.returnType, LOOP_ESCAPE_CONSTR_NAME, continueExpr, stmt.range ) ?? continueExpr;
             return TirAssertAndContinueExpr.fromStmtsAndContinuation(
                 assertions,
-                loopReplacements.compileContinue( ctx, stmt )
+                continueExpr
             );
         }
         else if( stmt instanceof TirReturnStmt ) {
-            if( stmt.value ) {
-                let modifiedExpr = expressifyVars( ctx, stmt.value );
-                if( typeof loopReplacements?.replaceReturnValue === "function" ) {
-                    modifiedExpr = loopReplacements.replaceReturnValue( ctx, stmt );
-                }
-                stmt.value = modifiedExpr;
-                
-                return TirAssertAndContinueExpr.fromStmtsAndContinuation(
-                    assertions,
-                    modifiedExpr
-                );
+            // Ownership of `return` wrapping (single owner per statement):
+            // - synthetic state-tail returns (branch machinery) are already
+            //   the layer's sop value — untouched;
+            // - inside a branch layer, the USER value wraps into THAT
+            //   layer's `EarlyReturn` (bubbled one level at a time by the
+            //   exit-case arms in `wrapNonTerminatingFinalStmtAsCaseExpr`);
+            // - at loop-body level, into the LOOP state's `EarlyReturn`;
+            // - in a plain function body, returned bare.
+            const isSynthetic = syntheticStateReturns.has( stmt );
+            let modifiedExpr: TirExpr = stmt.value
+                ? expressifyVars( ctx, stmt.value )
+                : new TirLitVoidExpr( stmt.range );
+            if( !isSynthetic ) {
+                modifiedExpr =
+                    wrapInStateCtor( ctx.returnType, EARLY_RETURN_CONSTR_NAME, modifiedExpr, stmt.range )
+                    ?? wrapInStateCtor( loopReplacements?.loopStateSop, EARLY_RETURN_CONSTR_NAME, modifiedExpr, stmt.range )
+                    ?? modifiedExpr;
             }
-            else {
-                return TirAssertAndContinueExpr.fromStmtsAndContinuation(
-                    assertions,
-                    new TirLitVoidExpr( stmt.range )
-                );
-            }
+            if( stmt.value ) stmt.value = modifiedExpr;
+
+            return TirAssertAndContinueExpr.fromStmtsAndContinuation(
+                assertions,
+                modifiedExpr
+            );
         }
         // if( isTirVarDecl( stmt ) ) expressifyVarDecl( ctx, stmt );
         else if( stmt instanceof TirSimpleVarDecl ) {
@@ -532,12 +597,18 @@ export function expressifyFuncBody(
                 );
             }
 
-            // determine affected variables
-            // determine if we have an early return
-            const reassignsAndReturns = determineReassignedVariablesAndReturn( stmt );
+            // determine affected variables, early returns AND loop escapes
+            // (`break`/`continue` inside this statement escaping an
+            // ENCLOSING loop — inner loops' own break/continue excluded)
+            const reassignsAndReturns = determineReassignedVariablesAndFlowInfos( stmt );
 
             // build a SoP type to return
-            const { sop, initState } = getBranchStmtReturnType( reassignsAndReturns, ctx, stmt.range );
+            const { sop, initState } = getBranchStmtReturnType(
+                reassignsAndReturns,
+                ctx,
+                stmt.range,
+                loopReplacements?.loopResultType
+            );
 
             const condition = expressifyVars( ctx, stmt.condition );
 
@@ -617,7 +688,7 @@ export function expressifyFuncBody(
                 typeof doesNotTerminateIdx !== "number" // all cases terminate
                 || onlyOneCaseDoesNotTerminate;
 
-            const reassignsAndReturns = determineReassignedVariablesAndReturn( stmt );
+            const reassignsAndReturns = determineReassignedVariablesAndFlowInfos( stmt );
 
             if( isDirectReturn )
             {
@@ -700,7 +771,12 @@ export function expressifyFuncBody(
             // (mirrors the non-terminating `if` statement handling above)
 
             // build a SoP type to return from each branch
-            const { sop } = getBranchStmtReturnType( reassignsAndReturns, ctx, stmt.range );
+            const { sop } = getBranchStmtReturnType(
+                reassignsAndReturns,
+                ctx,
+                stmt.range,
+                loopReplacements?.loopResultType
+            );
             const reassignedNames = reassignsAndReturns.reassigned;
 
             const finalExpression = new TirCaseExpr(
@@ -1008,7 +1084,10 @@ function wrapNonTerminatingFinalStmtAsCaseExpr(
     nextBodyStmts = nextBodyStmts.slice();
     const continuations: TirCaseMatcher[] = [];
 
-    const contBranchCtx = ctx.newChild();
+    // the continuation after a NON-terminating branch statement runs on
+    // EVERY path (all arms call it) — it stays as (un)conditional as the
+    // region it belongs to
+    const contBranchCtx = ctx.newChild( false );
     const contConstr = sop.constructors[0];
     const contFields = contConstr.fields;
 
@@ -1054,18 +1133,25 @@ function wrapNonTerminatingFinalStmtAsCaseExpr(
     );
 
 
-    if( reassignsAndReturns.returns ) {
-        const earlyRetConstr = sop.constructors[1];
-        const earlyRetField = earlyRetConstr.fields[0];
-        const uniqueFieldName = getUniqueInternalName( earlyRetField.name );
-        const earlyRetPattern = new TirNamedDeconstructVarDecl(
-            earlyRetConstr.name,
+    // Escape arms: each carried value bubbles ONE level at a time — the
+    // arm re-wraps it into the ENCLOSING layer's same-named constructor
+    // when the enclosing expected type is itself a state sop; at the
+    // outermost level (function body / loop body) the value is returned
+    // bare, where its type already matches what the context expects
+    // (the function's return type / the loop function's result type).
+    const mkEscapeArm = ( ctorName: string, enclosingWrapTarget: TirType | undefined ): void => {
+        const constr = sop.constructors.find( c => c.name === ctorName );
+        if( !constr ) return;
+        const field = constr.fields[0];
+        const uniqueFieldName = getUniqueInternalName( field.name );
+        const pattern = new TirNamedDeconstructVarDecl(
+            constr.name,
             new Map([
                 [
-                    earlyRetField.name,
+                    field.name,
                     new TirSimpleVarDecl(
                         uniqueFieldName,
-                        earlyRetField.type,
+                        field.type,
                         undefined, // no init expr (pattern is used as case matcher)
                         false, // not a constant
                         stmtRange
@@ -1078,24 +1164,37 @@ function wrapNonTerminatingFinalStmtAsCaseExpr(
             false, // not a constant
             stmtRange
         );
-        continuations.push(
-            new TirCaseMatcher(
-                earlyRetPattern,
-                new TirVariableAccessExpr(
-                    {
-                        variableInfos: {
-                            name: uniqueFieldName,
-                            type: earlyRetField.type,
-                            isConstant: true,
-                        },
-                        isDefinedOutsideFuncScope: false,
-                    },
-                    stmtRange
-                ),
-                stmtRange
-            )
+        let armBody: TirExpr = new TirVariableAccessExpr(
+            {
+                variableInfos: {
+                    name: uniqueFieldName,
+                    type: field.type,
+                    isConstant: true,
+                },
+                isDefinedOutsideFuncScope: false,
+            },
+            stmtRange
+        );
+        armBody = wrapInStateCtor( enclosingWrapTarget, ctorName, armBody, stmtRange ) ?? armBody;
+        continuations.push( new TirCaseMatcher( pattern, armBody, stmtRange ) );
+    };
+
+    if( reassignsAndReturns.returns ) {
+        // an early return bubbles into the enclosing branch layer, or —
+        // at loop-body level — into the LOOP's own state sop
+        mkEscapeArm(
+            EARLY_RETURN_CONSTR_NAME,
+            isBranchStateSop( ctx.returnType )
+                ? ctx.returnType
+                : loopReplacements?.loopStateSop
         );
     }
+    // a break/continue result bubbles only through branch layers; at
+    // loop-body level it IS the loop function's result (bare)
+    mkEscapeArm(
+        LOOP_ESCAPE_CONSTR_NAME,
+        isBranchStateSop( ctx.returnType ) ? ctx.returnType : undefined
+    );
 
     // expressify as ternary that returns the SoP type
     return new TirCaseExpr(

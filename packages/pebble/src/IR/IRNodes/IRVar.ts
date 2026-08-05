@@ -46,7 +46,23 @@ export class IRVar
 
     toUPLC( ctx: ToUplcCtx ): UPLCVar
     {
-        return new UPLCVar( ctx.getVarAccessDbn( this.name ) );
+        try {
+            return new UPLCVar( ctx.getVarAccessDbn( this.name ) );
+        } catch (e) {
+            // scope-chain failures here are always compiler bugs; dump the
+            // IR ancestry so the mis-placed binding is identifiable
+            // without a debugger (GravityDex BUG 13 class)
+            const chain: string[] = [];
+            let t: { parent?: unknown, constructor: { name: string }, params?: symbol[] } | undefined = this as any;
+            while( t && chain.length < 40 ) {
+                let d = t.constructor?.name ?? "?";
+                if( Array.isArray( t.params ) ) d += "(" + t.params.map( p => String(p.description) ).join(",") + ")";
+                chain.push( d );
+                t = t.parent as any;
+            }
+            console.error( "[IRVar.toUPLC] unresolved:", String( this.name.description ), "\n  ancestry:", chain.join(" < ") );
+            throw e;
+        }
     }
 
     private _hash: IRHash | undefined;

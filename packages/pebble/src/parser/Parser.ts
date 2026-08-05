@@ -3430,6 +3430,19 @@ export class Parser extends DiagnosticEmitter
         // at '<': Type (',' Type)* '>' '('
 
         const state = tn.mark();
+        // This parse is SPECULATIVE: `expr < (...)` is far more often a
+        // comparison than a generic call. Any diagnostic recorded while
+        // attempting the generic interpretation must be rolled back when we
+        // bail — sub-parsers reached from `parseTypeExpr` (e.g.
+        // `parseParameters` inside a `(a: int) => r` function type) emit
+        // errors unconditionally, and a leaked "')' expected" here broke
+        // every `n < (s + 1)` comparison (GravityDex BUG 2).
+        const nDiags = this.diagnostics.length;
+        const bail = (): undefined => {
+            this.diagnostics.length = nDiags;
+            tn.reset(state);
+            return undefined;
+        };
         if (!tn.skip( Token.LessThan)) return undefined;
 
         const startPos = tn.tokenPos;
@@ -3439,29 +3452,18 @@ export class Parser extends DiagnosticEmitter
             if (tn.peek() === Token.GreaterThan) break;
 
             let type = this.parseTypeExpr( /*suppressError*/ true );
-            if( !type ) {
-                tn.reset(state);
-                return undefined;
-            }
-            
+            if( !type ) return bail();
+
             typeArguments.push(type);
         } while( tn.skip( Token.Comma ) );
 
         // closing '>'
-        if( !tn.skip( Token.GreaterThan ) )
-        {
-            tn.reset(state);
-            return undefined;
-        }
+        if( !tn.skip( Token.GreaterThan ) ) return bail();
 
         let end = tn.pos;
         // next token must be '('
         // because this method is called BEFORE parsing arguments
-        if( !tn.skip( Token.OpenParen) )
-        {
-            tn.reset(state);
-            return undefined;
-        }
+        if( !tn.skip( Token.OpenParen) ) return bail();
 
         if( typeArguments.length <= 0 )
         {

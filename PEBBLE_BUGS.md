@@ -31,7 +31,7 @@
 
 ---
 
-## Independent re-verification against 0.4.2 (2026-07-29)
+## Re-verification against 0.4.2 (2026-07-29)
 
 Re-ran the **original, unmodified** audit scripts (`bug-repros/audit-0.4.1-part1.mjs`,
 `-part2.mjs`) against a clean `npm run build` of the working tree

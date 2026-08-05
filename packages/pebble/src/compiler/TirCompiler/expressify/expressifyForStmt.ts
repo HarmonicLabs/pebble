@@ -18,6 +18,8 @@ import { TirIfStmt } from "../../tir/statements/TirIfStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
+import { TirStmt } from "../../tir/statements/TirStmt";
+import { TirMatchStmt } from "../../tir/statements/TirMatchStmt";
 import { TirBoolT } from "../../tir/types/TirNativeType";
 import { TirFuncT } from "../../tir/types/TirNativeType/native/function";
 import { TirSoPStructType } from "../../tir/types/TirStructType";
@@ -151,6 +153,16 @@ export function expressifyForStmt(
         loopBody.range
     );
 
+    // A USER-written `continue` recurses with the CURRENT variable values —
+    // skipping the update statements below (appended only at the body END),
+    // which for a `for`/`for-of` means the induction variable / partial
+    // list never advances and the loop re-runs the SAME iteration forever.
+    // Prepend a copy of the updates to every user `continue` (not those of
+    // nested loops, which own their own updates).
+    if( Array.isArray( stmt.update ) && stmt.update.length > 0 ) {
+        prependUpdatesToUserContinues( loopBody.stmts, stmt.update );
+    }
+
     // add final loop updates
     if( Array.isArray( stmt.update ) ) for( const updateStmt of stmt.update ) {
         loopBody.stmts.push( updateStmt );
@@ -185,6 +197,10 @@ export function expressifyForStmt(
     );
 
     const loopReplacements: LoopReplacements = {
+        loopResultType: effectiveReturnType,
+        // user returns in the loop-body tail wrap into the loop state's
+        // `EarlyReturn`; bare mode excludes returns by construction
+        loopStateSop: isBareMode ? undefined : returnType,
         compileBreak( ctx, stmt ) {
             if( isBareMode )
             {
@@ -235,31 +251,6 @@ export function expressifyForStmt(
                 returnType,
                 stmt.range
             )
-        },
-        replaceReturnValue( ctx, stmt ) {
-            // Synthetic returns inserted by `expressifyIfBranch` (and
-            // analogous callers) carry the inner-if's SoP value as the
-            // continuation of the ternary they participate in — they are
-            // NOT user-written returns escaping the loop. When the loop
-            // has no user-written `return` in its body, `returnType` has
-            // only the "break/continue" constructor: in that case the
-            // value flowing through is already the right type and we
-            // must leave it untouched. (Previously this threw "No return
-            // constructor found in return type" when a for-of body
-            // contained an `if` that mutated a captured `let` — the
-            // synthesized branch-tail returns hit this path even though
-            // the user had no `return` inside the loop.)
-            const ctor = returnType.constructors[1];
-            if( !ctor ) {
-                return stmt.value!;
-            }
-            return new TirLitNamedObjExpr(
-                new Identifier( ctor.name, stmt.range ),
-                [ new Identifier( ctor.fields[0].name, stmt.range ) ],
-                [ stmt.value ],
-                returnType,
-                stmt.range
-            );
         },
         compileContinue( ctx, stmt ) {
             // return recursive call
@@ -352,4 +343,70 @@ export function expressifyForStmt(
         effectiveReturnType,
         stmt.range
     );
+}
+/**
+ * Splice a fresh copy of the loop's update statements in front of every
+ * USER-written `continue` in the body (skipping nested loops, whose
+ * `continue` belongs to them). Without this a `continue` recursed with the
+ * un-advanced induction state and the loop re-ran the same iteration
+ * forever at runtime.
+ */
+// loop updates are assignments/expressions — every concrete kind clones;
+// the TirStmt union is just too wide to see it
+const cloneUpdateStmt = ( u: TirStmt ): TirStmt =>
+    typeof ( u as { clone?(): TirStmt } ).clone === "function"
+        ? ( u as { clone(): TirStmt } ).clone()
+        : u;
+
+function prependUpdatesToUserContinues( stmts: TirStmt[], update: TirStmt[] ): void
+{
+    for( let i = 0; i < stmts.length; i++ )
+    {
+        const stmt = stmts[i];
+        if( stmt instanceof TirContinueStmt )
+        {
+            stmts.splice( i, 0, ...update.map( cloneUpdateStmt ) );
+            i += update.length;
+            continue;
+        }
+        if( stmt instanceof TirBlockStmt )
+        {
+            prependUpdatesToUserContinues( stmt.stmts, update );
+            continue;
+        }
+        if( stmt instanceof TirIfStmt )
+        {
+            if( stmt.thenBranch instanceof TirContinueStmt )
+                stmt.thenBranch = new TirBlockStmt(
+                    [ ...update.map( cloneUpdateStmt ), stmt.thenBranch ],
+                    stmt.thenBranch.range
+                );
+            else if( stmt.thenBranch instanceof TirBlockStmt )
+                prependUpdatesToUserContinues( stmt.thenBranch.stmts, update );
+
+            if( stmt.elseBranch instanceof TirContinueStmt )
+                stmt.elseBranch = new TirBlockStmt(
+                    [ ...update.map( cloneUpdateStmt ), stmt.elseBranch ],
+                    stmt.elseBranch.range
+                );
+            else if( stmt.elseBranch instanceof TirBlockStmt )
+                prependUpdatesToUserContinues( stmt.elseBranch.stmts, update );
+            continue;
+        }
+        if( stmt instanceof TirMatchStmt )
+        {
+            for( const matchCase of stmt.cases )
+            {
+                if( matchCase.body instanceof TirContinueStmt )
+                    matchCase.body = new TirBlockStmt(
+                        [ ...update.map( cloneUpdateStmt ), matchCase.body ],
+                        matchCase.body.range
+                    );
+                else if( matchCase.body instanceof TirBlockStmt )
+                    prependUpdatesToUserContinues( matchCase.body.stmts, update );
+            }
+            continue;
+        }
+        // nested For/ForOf/While: their `continue` is theirs — skip
+    }
 }

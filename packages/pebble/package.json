@@ -1,78 +1,78 @@
 {
-  "name": "@harmoniclabs/pebble",
-  "version": "0.4.3",
-  "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "browser": {
-    "worker_threads": false,
-    "node:fs": false,
-    "fs": false
-  },
-  "type": "module",
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "prepublishOnly": "npm run ci",
-    "buidl": "npm run build",
-    "build": "rm -rf ./dist && npm run build:light",
-    "build:light": "npm run genDiagnosticMessages && npm run --silent genVersion && tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
-    "build-and-replace": "npm run build && cp -r ./dist ../pebble-cli/node_modules/@harmoniclabs/pebble",
-    "genDiagnosticMessages": "node ./scripts/genDiagnosticMessages.js",
-    "genVersion": "node ./scripts/genVersion.js",
-    "test": "jest",
-    "test-dbg": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose",
-    "test:debug": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose",
-    "clear-jest": "jest --clearCache",
-    "test-watch": "jest --watchman",
-    "test-coverage": "jest --coverage",
-    "audit": "npm audit --omit=dev",
-    "ci": "npm i && npm run test && npm run build",
-    "pub": "npm run ci && npm pub"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org"
-  },
-  "keywords": [
-    "cardano",
-    "plutus",
-    "smart contracts",
-    "transaction",
-    "blockchain",
-    "dApp"
-  ],
-  "author": "Michele Nuzzi",
-  "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/HarmonicLabs/pebble.git"
-  },
-  "bugs": {
-    "url": "https://github.com/HarmonicLabs/pebble/issues"
-  },
-  "homepage": "https://github.com/HarmonicLabs/pebble#readme",
-  "dependencies": {
-    "@harmoniclabs/bigint-utils": "^1.0.0",
-    "@harmoniclabs/cardano-costmodels-ts": "^1.6.1",
-    "@harmoniclabs/cbor": "^2.0.1",
-    "@harmoniclabs/crypto": "^0.3.0",
-    "@harmoniclabs/obj-utils": "^1.0.0",
-    "@harmoniclabs/plutus-data": "^2.0.1",
-    "@harmoniclabs/plutus-machine": "^3.0.3",
-    "@harmoniclabs/uint8array-utils": "^1.0.4",
-    "@harmoniclabs/uplc": "^2.0.5"
-  },
-  "devDependencies": {
-    "@babel/preset-env": "^7.18.6",
-    "@babel/preset-typescript": "^7.18.6",
-    "@harmoniclabs/buildooor": "^0.2.6",
-    "@types/jest": "^28.1.4",
-    "@types/node": "^18.14.6",
-    "jest": "^30.4.2",
-    "jest-environment-jsdom": "^30.3.0",
-    "tsc-alias": "^1.7.1",
-    "typescript": "^4.6.3"
-  },
-  "funding": "https://github.com/sponsors/HarmonicLabs"
+    "name": "@harmoniclabs/pebble",
+    "version": "0.4.4",
+    "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "browser": {
+        "worker_threads": false,
+        "node:fs": false,
+        "fs": false
+    },
+    "type": "module",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "prepublishOnly": "npm run ci",
+        "buidl": "npm run build",
+        "build": "rm -rf ./dist && npm run build:light",
+        "build:light": "npm run genDiagnosticMessages && npm run --silent genVersion && tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
+        "build-and-replace": "npm run build && cp -r ./dist ../pebble-cli/node_modules/@harmoniclabs/pebble",
+        "genDiagnosticMessages": "node ./scripts/genDiagnosticMessages.js",
+        "genVersion": "node ./scripts/genVersion.js",
+        "test": "jest",
+        "test-dbg": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose",
+        "test:debug": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose",
+        "clear-jest": "jest --clearCache",
+        "test-watch": "jest --watchman",
+        "test-coverage": "jest --coverage",
+        "audit": "npm audit --omit=dev",
+        "ci": "npm i && npm run test && npm run build",
+        "pub": "npm run ci && npm pub"
+    },
+    "publishConfig": {
+        "registry": "https://registry.npmjs.org"
+    },
+    "keywords": [
+        "cardano",
+        "plutus",
+        "smart contracts",
+        "transaction",
+        "blockchain",
+        "dApp"
+    ],
+    "author": "Michele Nuzzi",
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/HarmonicLabs/pebble.git"
+    },
+    "bugs": {
+        "url": "https://github.com/HarmonicLabs/pebble/issues"
+    },
+    "homepage": "https://github.com/HarmonicLabs/pebble#readme",
+    "dependencies": {
+        "@harmoniclabs/bigint-utils": "^1.0.0",
+        "@harmoniclabs/cardano-costmodels-ts": "^1.6.1",
+        "@harmoniclabs/cbor": "^2.0.2",
+        "@harmoniclabs/crypto": "^0.3.1",
+        "@harmoniclabs/obj-utils": "^1.0.0",
+        "@harmoniclabs/plutus-data": "^2.0.1",
+        "@harmoniclabs/plutus-machine": "^3.0.3",
+        "@harmoniclabs/uint8array-utils": "^1.0.4",
+        "@harmoniclabs/uplc": "^2.0.7"
+    },
+    "devDependencies": {
+        "@babel/preset-env": "^7.18.6",
+        "@babel/preset-typescript": "^7.18.6",
+        "@harmoniclabs/buildooor": "^0.2.6",
+        "@types/jest": "^28.1.4",
+        "@types/node": "^18.14.6",
+        "jest": "^30.4.2",
+        "jest-environment-jsdom": "^30.3.0",
+        "tsc-alias": "^1.7.1",
+        "typescript": "^4.6.3"
+    },
+    "funding": "https://github.com/sponsors/HarmonicLabs"
 }

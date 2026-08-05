@@ -25,6 +25,8 @@ export class TirLettedExpr
         _creationStack?: string | undefined,
         /** see `IRLettedMeta.siteScoped` */
         readonly siteScoped: boolean = false,
+        /** see `IRLettedMeta.eagerFnScope` */
+        readonly eagerFnScope: boolean = false,
     ) {
         if(!(
             typeof varName === "string"
@@ -63,7 +65,8 @@ export class TirLettedExpr
             this.range.clone(),
             this._irVarSym,
             this._creationStack,
-            this.siteScoped
+            this.siteScoped,
+            this.eagerFnScope
         );
     }
     
@@ -74,7 +77,10 @@ export class TirLettedExpr
         return new IRLetted(
             this._irVarSym,
             this.expr.toIR( ctx ),
-            this.siteScoped ? { siteScoped: true } : {}
+            {
+                ...( this.siteScoped ? { siteScoped: true } : {} ),
+                ...( this.eagerFnScope ? { eagerFnScope: true } : {} ),
+            }
         );
     }
 }

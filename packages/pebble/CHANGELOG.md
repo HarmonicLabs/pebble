@@ -2,6 +2,163 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.4
+
+Every bug from the GravityDex-port audit is fixed (regression coverage in
+`compiler.gravityDexBugs.0_4_3.test.ts`; that file's bug numbering).
+
+- **⚠ CRITICAL: integer constants in (2^30, 2^52) no longer corrupt.** The
+  flat encoder in `@harmoniclabs/uplc` delegated naturals up to
+  `MAX_SAFE_INTEGER` to 32-bit bitwise chunking, silently truncating every
+  emitted integer constant with |value| in (2^30, 2^52) — e.g. 1e15 became
+  1e15 mod 2^30. Fixed in `@harmoniclabs/uplc` 2.0.7 (now the minimum
+  dependency); const-folded sums and folded int-list elements landing in
+  the window are covered too.
+- **⚠ Requires `@harmoniclabs/cbor` >= 2.0.2.** That release fixes two
+  bignum defects reachable from Pebble through `data` constants: integers
+  below -(2^64) could not be serialised AT ALL (`CborNegInt` stored the
+  tag-3 payload in place of the value, so the encoder rejected its own
+  object with "encoding invalid negative integer as CBOR"), and every
+  integer above 2^64 fell into a warn-and-recover path that printed a
+  "please report this issue" warning and dumped the object to the console
+  on each occurrence.
+- **⚠ CORRECTNESS: loop control flow at any nesting depth.** A new
+  `LoopEscape` channel threads `break`/`continue` results through
+  intermediate `if`/`match` layers, and `return` wrapping has a single
+  owner (the nearest state layer, bubbling one level at a time):
+  - `return` inside a loop body no longer crashes the backend, and at
+    nesting depth ≥ 2 no longer SILENTLY returns the wrong value;
+  - `break` under two or more `if` levels exits the loop instead of
+    trapping ("constructor tag out of range");
+  - `continue` now advances the iterator: a fresh copy of the loop's
+    update statements is spliced before every user `continue`, fixing the
+    for/for-of infinite loop it always caused, at any depth.
+  (Also fixes a 0.4.3 regression where the loop-state type was mutated
+  through the clone-interning of struct types, deleting its early-return
+  constructor.)
+- **`export function` is visible module-wide.** Statement hoisting now
+  classifies through `export` wrappers, so exported declarations keep
+  their group ordering; previously every exported declaration sank below
+  all plain ones and a non-exported function could not reference an
+  exported one declared first.
+- **`n < (s + 1)` parses as a comparison.** The speculative generic-call
+  interpretation of `<` rolls back any diagnostics it recorded while
+  failing, instead of leaking a bogus "')' expected".
+- **Bare struct literals resolve.** A struct declaration (and a struct
+  import) now registers its constructors for bare literal construction —
+  `const s = SW{ a: x };` works without a type annotation or `using`,
+  including inside loop and `test` bodies.
+- **`std.builtins.mkNilData()` evaluates.** The nullary Pebble builtin is
+  now a delayed UPLC builtin applied to unit, matching the zero-arg
+  calling convention; previously runtime failed with "cannot force
+  builtin mkNilData that has already received all its arguments".
+- Unknown properties on loop-bound map entries (`e.fst`) error with the
+  same 2339 diagnostic as everywhere else (regression-covered).
+- **⚠ CORRECTNESS: free-variable analysis is properly scoped.** The
+  binding-placement machinery's `getUnboundedVars` collected bound binder
+  symbols in one flat set over the whole value — since cloned IR reuses
+  binder symbols, a cloned binder fragment anywhere masked genuinely FREE
+  occurrences of the same symbol elsewhere; mis-detected "closed" values
+  were hoisted to the program root with dangling references, crashing the
+  final lowering with "Variable not found in scope chain" on large
+  validators (GravityDex BUG 13 — const-bound closures passed to
+  higher-order functions). The analysis is now path-scoped; the audit's
+  failing token-pool configuration compiles clean.
+- **⚠ CORRECTNESS: application regrouping bails on reused binder symbols.**
+  A second, independent cause of the same "Variable not found in scope
+  chain" crash: `groupIndependentApplications` keys arguments by parameter
+  SYMBOL, and cloned IR reuses those symbols — so a collapsed application
+  chain could hold the same symbol twice (silently dropping one argument
+  from the symbol-keyed map) or hold one that also occurs free at the
+  regrouping root (masking a real dependency, since free occurrences are
+  subtracted). Either way bindings moved across their own references. Both
+  configurations are now detected and the original chain kept, which is
+  always sound. This is what unblocked `adaStateContract`.
+- **⚠ PERFORMANCE (compute-once): a `const` captured by a loop no longer
+  re-evaluates per iteration.** A binding whose value the compiler cannot
+  prove total (any user-function call) and whose references sit inside a
+  loop was inlined into the loop body — the GravityDex audit measured a
+  fold paying a FULL `isqrt` per element (12.29M cpu each; 71× the
+  reference implementation on the real swap path, pushing the protocol
+  past its own fee cap). Such bindings are now placed ONCE, just above
+  the loop's recursive node — faithful to the source's
+  eager-at-declaration `const` semantics — and the same rescue applies at
+  branch-root placements. Regression-guarded by an evaluated
+  marginal-cost-per-element test (`compiler.computeOnce.test.ts`).
+- **⚠ PERFORMANCE (compute-once, through closures): a `const` captured by
+  a lambda passed to a higher-order function no longer re-evaluates per
+  call.** The dominant real-world shape puts the recursion in the CALLEE
+  (a predicate handed to a fold), so the loop-only rescue above never saw
+  it and the value was buried inside the closure: measured 23.81M cpu per
+  fold element. Placement now floats such a binding above the outermost
+  lambda it does not depend on, governed by an evaluation-frequency
+  automaton — a multi-arm dispatch edge blocks the lift (hoisting an
+  arm-specific value above dispatch would run it on foreign arms) unless
+  an enclosing loop above it justifies pre-loop evaluation. Now 1.15M
+  per element.
+- **⚠ PERFORMANCE (compute-once, across `&&`): a `const` referenced from
+  several conjuncts of a boolean cascade no longer re-evaluates per
+  conjunct.** A `&&` chain lowers to SEQUENTIAL sibling `IRCase`s (each
+  conjunct cases on the previous one's result), so per-branch bindings of
+  a shared value never nest — every conjunct re-bound and re-computed it.
+  The GravityDex swap validator re-ran one oracle fold 44 times: a single
+  script evaluation cost 28.35B cpu. Declarations at the unconditional
+  top level of a function are now marked `eagerFnScope` (source evaluates
+  them exactly once per call regardless of any in-function dispatch), and
+  their placement ignores dispatch debt, settling in ONE binding. That
+  eval now costs 1.67B; the validator's compiled size fell from 20.4 kB
+  to 7.2 kB. Guarded by `compiler.computeOnceAcrossBranches.test.ts`,
+  which asserts cost does not scale with conjunct count. The complementary
+  guarantee — that no binding is floated onto a path the source would not
+  have evaluated — is guarded by `compiler.lazyLambdaConst.test.ts`
+  (a failing `const` inside an uninvoked lambda must not run).
+- **Duplicate nested bindings of the same value are dropped.** Shared
+  bindings surface in waves during placement, and a wave that could not
+  reuse an existing binder created its own binding of the same value —
+  when one nests inside another's scope, the inner one is pure waste
+  (an `IRVar` resolves to the innermost binder, which binds the same
+  value). Such re-bindings are now removed.
+- **OPTIMIZATION: predicate closures eta-reduce to partial builtin
+  applications.** `const isTarget = (e: int) => e == captured;` compiles
+  to `equalsInteger captured` (commutative flip), and `\x -> f x` reduces
+  to `f` when `x` is not free in `f` — no closure allocation, fewer
+  captures for the binding-placement machinery. Guarded so nothing
+  effectful ever moves from call time to build time
+  (`etaReduceLambdasAndReturnRoot`).
+- **⚠ PERFORMANCE: compile time was quadratic in program size.** Several
+  IR passes drove their worklist with `pop()` + `unshift(...)`, and three
+  helpers collected application spines with `args.unshift(arg)`. Both look
+  like ordinary FIFO code and neither changes the emitted script by a single
+  byte — but `Array.prototype.unshift` moves every element already in the
+  array, so walking a tree cost O(nodes^2) in hidden memmove. Measured on a
+  6.6 kB validator: 630k visits against a worklist peaking at 11.5k entries,
+  i.e. **5.5 billion element moves in one pass call**. All of them now use an
+  index-advanced queue (same visit order) or `push` + a single `reverse`.
+  Measured on the GravityDex corpus, with byte-identical output: the two
+  worst passes **181.1s -> 4.6s (39x)**, `stateContract` **4.7 -> 2.0 min**,
+  and the largest validator **65.9 -> 6.3 min (10x)**. `getSortedLettedSet`
+  also replaced a linear `indexOf` per term with a map lookup.
+  Regression-guarded by `compiler.compileWorkBounds.test.ts`, which asserts
+  on DETERMINISTIC operation counts (identical on every machine) and their
+  scaling, never on wall-clock time.
+- **PERFORMANCE: large-validator exports are significantly faster.** The
+  binding-placement pass searched the WHOLE program once per shared
+  binding (quadratic; measured 26% of a near-hour GravityDex export) —
+  it now searches from the binding's anchor scope. Array-like IR proxies
+  iterate their backing array directly (was ~9%). Measured: a real
+  8.8 kB validator export dropped from 77.5 s to under 60 s with
+  byte-identical output; the compiler's own suite runs ~2× faster.
+- **Internal scope-chain errors identify the mis-placed binding.** A
+  "Variable not found in scope chain" failure is always a compiler bug, and
+  it used to surface with no indication of WHERE. It now reports the
+  offending variable's IR ancestry (binder chain with parameter names), so
+  the bad placement is identifiable from the error alone.
+- **Const-bound struct literals no longer poison the enclosing function.**
+  `const c = S { a: x, b: 2 };` inside any function resolves (same
+  constructor-registration fix as the bare-literal item above); previously
+  every later reference to the enclosing function failed with
+  "is not defined" naming the function.
+
 ## v0.4.3
 
 Generic and recursive struct declarations, for both the data and the runtime

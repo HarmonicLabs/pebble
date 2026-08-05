@@ -1,69 +1,69 @@
 {
-  "name": "@harmoniclabs/pebble-cli",
-  "version": "0.4.3",
-  "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
-  "bin": {
-    "pebble": "./dist/index.js",
-    "pebble-cli": "./dist/index.js"
-  },
-  "types": "./dist/index.d.ts",
-  "engines": {
-    "node": ">=22",
-    "bun": ">=1.2.0"
-  },
-  "type": "module",
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "prepublishOnly": "npm run build",
-    "buidl": "npm run build",
-    "build": "rm -rf ./dist && npm i && npm run build:light",
-    "test": "jest",
-    "genVersions": "node ./scripts/genVersions.js",
-    "build:light": "npm run --silent genVersions && tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
-    "build:no-gen": "tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
-    "start:light": "node --max-old-space-size=8192 ./dist/index.js",
-    "start": "npm run build && npm run start:light",
-    "build-exe": "bun run genVersions && bun build src/index.ts --compile --production --target=node --outfile=out/pebble --packages=bundle"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org"
-  },
-  "keywords": [
-    "cardano",
-    "plutus",
-    "smart contracts",
-    "transaction",
-    "blockchain",
-    "dApp"
-  ],
-  "author": "Michele Nuzzi",
-  "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/HarmonicLabs/pebble.git"
-  },
-  "bugs": {
-    "url": "https://github.com/HarmonicLabs/pebble/issues"
-  },
-  "homepage": "https://github.com/HarmonicLabs/pebble#readme",
-  "dependencies": {
-    "@harmoniclabs/crypto": "^0.3.0",
-    "@harmoniclabs/obj-utils": "^1.0.0",
-    "@harmoniclabs/pebble": "0.4.3",
-    "@harmoniclabs/plutus-machine": "^3.0.0",
-    "@harmoniclabs/uint8array-utils": "^1.0.4",
-    "@harmoniclabs/uplc": "^2.0.5",
-    "@inquirer/prompts": "^7.9.0",
-    "chalk": "^5.6.2",
-    "commander": "^14.0.3"
-  },
-  "devDependencies": {
-    "@types/jest": "^28.1.4",
-    "@types/node": "^18.14.6",
-    "tsc-alias": "^1.7.1",
-    "typescript": "^4.6.3"
-  },
-  "funding": "https://github.com/sponsors/HarmonicLabs"
+    "name": "@harmoniclabs/pebble-cli",
+    "version": "0.4.4",
+    "description": "A simple, yet rock solid, functional language with an imperative bias, targeting UPLC",
+    "bin": {
+        "pebble": "./dist/index.js",
+        "pebble-cli": "./dist/index.js"
+    },
+    "types": "./dist/index.d.ts",
+    "engines": {
+        "node": ">=22",
+        "bun": ">=1.2.0"
+    },
+    "type": "module",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "prepublishOnly": "npm run build",
+        "buidl": "npm run build",
+        "build": "rm -rf ./dist && npm i && npm run build:light",
+        "test": "jest",
+        "genVersions": "node ./scripts/genVersions.js",
+        "build:light": "npm run --silent genVersions && tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
+        "build:no-gen": "tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
+        "start:light": "node --max-old-space-size=8192 ./dist/index.js",
+        "start": "npm run build && npm run start:light",
+        "build-exe": "bun run genVersions && bun build src/index.ts --compile --production --target=node --outfile=out/pebble --packages=bundle"
+    },
+    "publishConfig": {
+        "registry": "https://registry.npmjs.org"
+    },
+    "keywords": [
+        "cardano",
+        "plutus",
+        "smart contracts",
+        "transaction",
+        "blockchain",
+        "dApp"
+    ],
+    "author": "Michele Nuzzi",
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/HarmonicLabs/pebble.git"
+    },
+    "bugs": {
+        "url": "https://github.com/HarmonicLabs/pebble/issues"
+    },
+    "homepage": "https://github.com/HarmonicLabs/pebble#readme",
+    "dependencies": {
+        "@harmoniclabs/crypto": "^0.3.1",
+        "@harmoniclabs/obj-utils": "^1.0.0",
+        "@harmoniclabs/pebble": "0.4.4",
+        "@harmoniclabs/plutus-machine": "^3.0.0",
+        "@harmoniclabs/uint8array-utils": "^1.0.4",
+        "@harmoniclabs/uplc": "^2.0.7",
+        "@inquirer/prompts": "^7.9.0",
+        "chalk": "^5.6.2",
+        "commander": "^14.0.3"
+    },
+    "devDependencies": {
+        "@types/jest": "^28.1.4",
+        "@types/node": "^18.14.6",
+        "tsc-alias": "^1.7.1",
+        "typescript": "^4.6.3"
+    },
+    "funding": "https://github.com/sponsors/HarmonicLabs"
 }

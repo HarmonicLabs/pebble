@@ -61,6 +61,16 @@ export interface IRLettedMeta extends BaseIRMetadata {
      * otherwise.
      */
     siteScoped?: boolean
+    /**
+     * `true` for letted values introduced by a `const`/variable DECLARATION
+     * STATEMENT at the UNCONDITIONAL top level of a function body (never
+     * under an `if`/`match` arm or loop body). Source semantics evaluate
+     * such a declaration EXACTLY ONCE whenever the function runs — so the
+     * placement engine may bind it once below its anchor even when its
+     * references sit behind dispatch arms or inside lambdas, where the
+     * conservative dispatch-debt rule would otherwise re-bind per branch.
+     */
+    eagerFnScope?: boolean
 }
 
 export interface IRLettedMetadata extends IRMetadata {
@@ -245,14 +255,17 @@ export class IRLetted
 export function getSortedLettedSet( lettedTerms: LettedSetEntry[] ): LettedSetEntry[]
 {
     const set: LettedSetEntry[] = [];
-    const hashesSet: symbol[] = [];
+    // symbol -> index in `set`. This was a linear `indexOf` over a parallel
+    // array, which made the pass quadratic in the number of distinct letted
+    // symbols (and it runs once per placement, so the cost compounded on
+    // validator-sized inputs).
+    const idxOfSymbol = new Map<symbol, number>();
      
     /**
-     * **O((n * m) * d)**
+     * **O(m * d)**
      * 
      * where
      * 
-     *      n = length of set
      *      m = number of terms passed
      *      d = number of unique dependencies among the passed terms
      */
@@ -263,14 +276,14 @@ export function getSortedLettedSet( lettedTerms: LettedSetEntry[] ): LettedSetEn
             const thisLettedEntry = _terms[i]; 
             const thisHash = thisLettedEntry.letted.name;
 
-            const idxInSet = hashesSet.indexOf( thisHash )
+            const idxInSet = idxOfSymbol.get( thisHash ) ?? -1;
             if( idxInSet < 0 ) // not present
             {
                 // add dependencies first
                 // dependencies don't have references to the current letted
                 addToSet( getLettedTerms( thisLettedEntry.letted.value ) );
 
-                hashesSet.push( thisHash );
+                idxOfSymbol.set( thisHash, set.length );
                 set.push({
                     letted: thisLettedEntry.letted,
                     nReferences: thisLettedEntry.nReferences

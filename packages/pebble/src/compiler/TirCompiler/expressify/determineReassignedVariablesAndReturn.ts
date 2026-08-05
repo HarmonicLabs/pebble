@@ -1,4 +1,5 @@
 import { Identifier } from "../../../ast/nodes/common/Identifier";
+import { TirType } from "../../tir/types/TirType";
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { keepSortedStrArrInplace } from "../../../utils/array/keepSortedArrInplace";
 import { getUniqueInternalName } from "../../internalVar";
@@ -328,15 +329,52 @@ export interface BranchStmtSopAndInitState {
     initState: TirLitNamedObjExpr;
 }
 
+/** first constructor of every branch-state sop: the reassigned variables */
+export const REASSIGNS_CONSTR_NAME = "Reassigns";
+/** carries a user `return`'s value up through the state layers */
+export const EARLY_RETURN_CONSTR_NAME = "EarlyReturn";
+/**
+ * carries a `break`/`continue` RESULT (a value of the enclosing LOOP's
+ * return type) up through intermediate branch-state layers — without it a
+ * `break`/`continue` nested two or more `if`/`match` levels deep inside a
+ * loop body had no way to skip the enclosing layers' continuations
+ * (GravityDex BUG 6: runtime "constructor tag out of range", compiler
+ * hangs, silently dropped returns).
+ */
+export const LOOP_ESCAPE_CONSTR_NAME = "LoopEscape";
+
+const BRANCH_STATE_SOP_PREFIX = "__StmtSideEffects";
+
+/**
+ * `true` for the synthetic state sops built by `getBranchStmtReturnType`
+ * (branch layers AND loop return states) — the only types the
+ * return/break/continue wrapping machinery may target.
+ */
+export function isBranchStateSop( t: unknown ): t is TirSoPStructType
+{
+    return (
+        t instanceof TirSoPStructType
+        && t.name.includes( BRANCH_STATE_SOP_PREFIX )
+    );
+}
+
 export function getBranchStmtReturnType(
-    { reassigned, returns }: ReassignedVariablesAndReturn,
+    { reassigned, returns, canBreak, canContinue }: ReassignedVariablesAndReturn & Partial<ReassignedVariablesAndFlowInfos>,
     ctx: ExpressifyCtx,
-    stmtRange: SourceRange
+    stmtRange: SourceRange,
+    /**
+     * The enclosing LOOP's result type. Pass it (from
+     * `loopReplacements.loopResultType`) when building a BRANCH-layer state
+     * inside a loop body: if the branch can `break`/`continue`, the sop
+     * gains a `LoopEscape` constructor carrying that type. NEVER passed
+     * when building the loop's own return state.
+     */
+    loopEscapeType: TirType | undefined = undefined
 ): BranchStmtSopAndInitState
 {
-    const uniqueName = getUniqueInternalName("__StmtSideEffects");
-    const reassignsConstrName = "Reassigns";
-    const earlyReturnConstrName = "EarlyReturn";
+    const uniqueName = getUniqueInternalName(BRANCH_STATE_SOP_PREFIX);
+    const reassignsConstrName = REASSIGNS_CONSTR_NAME;
+    const earlyReturnConstrName = EARLY_RETURN_CONSTR_NAME;
 
     const initVars = reassigned.map( varName => {
         const varExpr = ctx.getVariable( varName );
@@ -377,7 +415,20 @@ export function getBranchStmtReturnType(
                 [
                     new TirStructField(
                         "returnValue",
-                        ctx.returnType
+                        ctx.functionReturnType ?? ctx.returnType
+                    )
+                ]
+            )
+        );
+    }
+    if( loopEscapeType && ( canBreak || canContinue ) ) {
+        constrs.push(
+            new TirStructConstr(
+                LOOP_ESCAPE_CONSTR_NAME,
+                [
+                    new TirStructField(
+                        "escapeValue",
+                        loopEscapeType
                     )
                 ]
             )
@@ -409,9 +460,23 @@ export function getBodyStateType(
     initState: TirLitNamedObjExpr,
 }
 {
-    const bodyStateType = sop.clone();
-    bodyStateType.constructors.length = 1; // keep only the first constructor
-    const bodyStateConstr = bodyStateType.constructors[0];
+    // build an EXPLICIT copy: struct `clone()` returns `this` since 0.4.3
+    // (interning, required for recursive struct types), so truncating
+    // `constructors` / pushing fields on a "clone" would MUTATE the shared
+    // loop-state sop — deleting its `EarlyReturn` constructor and breaking
+    // every loop containing a `return` (backend crash reading '.fields')
+    // or a deeply nested `break` ("constructor tag 1 out of range").
+    const baseConstr = sop.constructors[0];
+    const bodyStateConstr = new TirStructConstr(
+        baseConstr.name,
+        baseConstr.fields.slice()
+    );
+    const bodyStateType = new TirSoPStructType(
+        sop.name,
+        sop.fileUid,
+        [ bodyStateConstr ],
+        new Map(), // no methods
+    );
 
     for( const { name, type, range, initExpr, isConst } of stmt.init )
     {
