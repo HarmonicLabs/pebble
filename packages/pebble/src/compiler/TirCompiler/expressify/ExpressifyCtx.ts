@@ -1,3 +1,4 @@
+import { getUnaliased } from "../../tir/types/utils/getUnaliased";
 import { isObject } from "@harmoniclabs/obj-utils";
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { getUniqueInternalName } from "../../internalVar";
@@ -425,7 +426,9 @@ export class ExpressifyCtx
         implicitAssertions: TirAssertStmt[],
         nestedDeconstructs: TirVarDecl[]
     } {
-        const structType = stmt.type;
+        // aliases of data structs (e.g. `AccountId` = Credential) deconstruct
+        // exactly like the struct they alias
+        const structType = getUnaliased( stmt.type );
         if(!( stmt.initExpr )) throw new Error("expected init expr in deconstruct data statement");
         if(!( structType instanceof TirDataStructType )) throw new Error("expected data struct type in deconstruct data statement");
 

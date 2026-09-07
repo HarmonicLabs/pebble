@@ -1469,6 +1469,223 @@ export function populatePreludeScope( program: TypedProgram ): void
         }, onlyData
     );
 
+    // ==================================================================
+    // Plutus V4 (Dijkstra era) script-context types.
+    //
+    // Mirrors `PlutusLedgerApi.V4` as released in plutus-ledger-api
+    // 1.68.0.0 (2026-08-21): constructor order and field order below
+    // track `V4/Contexts.hs`, `V4/Address.hs`, `V4/Time.hs`, `V4/Tx.hs`
+    // exactly (their `makeIsDataSchemaIndexed` indices).
+    //
+    // NOTE the Dijkstra hard fork (protocol version 12) has not happened
+    // yet and CIP-0118 is still Proposed, so these shapes may move with
+    // upstream until the fork; they are versioned with a `V4` suffix and
+    // coexist with the (stable) V3 prelude above.
+    // ==================================================================
+
+    // newtype AccountId = AccountId Credential (identical data encoding)
+    const accountId_t = _defineUnambigousAlias( "AccountId", credential_t );
+
+    // struct AddressV4 { payment: Credential, stakingAccount: Optional<AccountId> }
+    const opt_accountId_t = program.getAppliedGeneric(
+        TirDataOptT.toTirTypeKey(),
+        [ accountId_t ]
+    );
+    if(!opt_accountId_t) throw new Error("expected opt_accountId_t");
+    const { data: addressV4_t } = defineSingleConstructorStruct(
+        "AddressV4", {
+            payment: credential_t,
+            stakingAccount: opt_accountId_t
+        }, onlyData
+    );
+
+    // struct POSIXTimeRange { fromInclusive: Optional<int>, untilExclusive: Optional<int> }
+    // (V4 replaces the V3 Interval/boundary machinery with this pair;
+    //  `None` means -inf / +inf respectively)
+    const { data: posixTimeRange_t } = defineSingleConstructorStruct(
+        "POSIXTimeRange", {
+            fromInclusive: opt_int_t,
+            untilExclusive: opt_int_t
+        }, onlyData
+    );
+
+    // struct TxOutV4 { address, value, datum, referenceScript }
+    const { data: txOutV4_t } = defineSingleConstructorStruct(
+        "TxOutV4", {
+            address: addressV4_t,
+            value: value_t,
+            datum: outputDatum_t,
+            referenceScript: opt_scriptHash_t
+        }, onlyData
+    );
+    // struct TxInV4 { ref, resolved }
+    const { data: txInV4_t } = defineSingleConstructorStruct(
+        "TxInV4", {
+            ref: txOutRef_t,
+            resolved: txOutV4_t
+        }, onlyData
+    );
+
+    // struct AccountBalanceInterval (4 constructors)
+    const { data: accountBalanceInterval_t } = defineMultiConstructorStruct(
+        "AccountBalanceInterval", {
+            LowerBound: { lovelaces: int_t },
+            UpperBound: { lovelaces: int_t },
+            BothBounds: { from: int_t, to: int_t },
+            Exact: { lovelaces: int_t }
+        }, onlyData
+    );
+    // type AccountBalanceIntervals = LinearMap<AccountId, AccountBalanceInterval>
+    const map_accountId_abi_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(),
+        [ accountId_t, accountBalanceInterval_t ]
+    );
+    if(!map_accountId_abi_t) throw new Error("expected map_accountId_abi_t");
+    const accountBalanceIntervals_t = _defineUnambigousAlias(
+        "AccountBalanceIntervals",
+        map_accountId_abi_t
+    );
+
+    // struct TxCertV4 (11 constructors, account-based)
+    const { data: txCertV4_t } = defineMultiConstructorStruct(
+        "TxCertV4", {
+            RegAccount: { account: accountId_t, deposit: int_t },
+            UnRegAccount: { account: accountId_t, refund: int_t },
+            DelegAccount: { account: accountId_t, delegatee: delegatee_t },
+            RegAccountDeleg: { account: accountId_t, delegatee: delegatee_t, deposit: int_t },
+            RegDRep: { drep: credential_t, deposit: int_t },
+            UpdateDRep: { drep: credential_t },
+            UnRegDRep: { drep: credential_t, refund: int_t },
+            PoolRegister: { poolId: pubKeyHash_t, poolVrf: pubKeyHash_t },
+            PoolRetire: { poolId: pubKeyHash_t, epoch: int_t },
+            AuthHotCommittee: { cold: credential_t, hot: credential_t },
+            ResignColdCommittee: { cold: credential_t }
+        }, onlyData
+    );
+
+    // struct ScriptPurposeV4 (every constructor leads with the script hash)
+    const { data: scriptPurposeV4_t } = defineMultiConstructorStruct(
+        "ScriptPurposeV4", {
+            Minting: { scriptHash: scriptHash_t, policy: policyId_t },
+            Spending: { scriptHash: scriptHash_t, ref: txOutRef_t },
+            Withdrawing: { scriptHash: scriptHash_t, credential: credential_t },
+            Certifying: { scriptHash: scriptHash_t, certificateIndex: int_t, certificate: txCertV4_t },
+            Voting: { scriptHash: scriptHash_t, voter: voter_t },
+            Proposing: { scriptHash: scriptHash_t, proposalIndex: int_t, proposal: proposalProcedure_t },
+            Guarding: { scriptHash: scriptHash_t, guardIndex: int_t }
+        }, onlyData
+    );
+
+    // applied generics for the V4 aggregate fields
+    const list_txInV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txInV4_t ] );
+    const list_txOutV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txOutV4_t ] );
+    const list_txCertV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txCertV4_t ] );
+    const list_credential_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ credential_t ] );
+    const list_txHash_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txHash_t ] );
+    const list_scriptPurposeV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ scriptPurposeV4_t ] );
+    const opt_data_v4_t = program.getAppliedGeneric( TirDataOptT.toTirTypeKey(), [ data_t ] );
+    const map_cred_optData_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ credential_t, opt_data_v4_t! ] );
+    const map_purposeV4_data_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ scriptPurposeV4_t, data_t ] );
+    const map_txHash_data_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ txHash_t, data_t ] );
+    if(!(
+        list_txInV4_t && list_txOutV4_t && list_txCertV4_t && list_credential_t
+        && list_txHash_t && list_scriptPurposeV4_t && opt_data_v4_t
+        && map_cred_optData_t && map_purposeV4_data_t && map_txHash_data_t
+    )) throw new Error("expected V4 applied generics");
+
+    // struct TxV4 — `PlutusLedgerApi.V4.Contexts.TxInfo` (19 fields;
+    // note: NO fee, NO requiredSigners — both are gone in V4)
+    const { data: txV4_t } = defineSingleConstructorStruct(
+        "TxV4", {
+            id: txHash_t,
+            subTxIx: opt_int_t,
+            inputs: list_txInV4_t,
+            refInputs: list_txInV4_t,
+            outputs: list_txOutV4_t,
+            mint: value_t,
+            certificates: list_txCertV4_t,
+            withdrawals: map_cred_int_t,
+            directDeposits: map_cred_int_t,
+            accountBalanceIntervals: accountBalanceIntervals_t,
+            validityInterval: posixTimeRange_t,
+            guards: list_credential_t,
+            requiredTopLevelGuards: map_cred_optData_t,
+            redeemers: map_purposeV4_data_t,
+            datums: map_hash32_data_t,
+            votes: map_voter_map_txOutRef_vote_t,
+            proposals: list_proposalProcedure_t,
+            currentTreasury: opt_int_t,
+            treasuryDonation: int_t
+        }, onlyData
+    );
+
+    // struct TopTxInfoSimplified — aggregated whole-batch view (18 fields)
+    const { data: topTxInfoSimplified_t } = defineSingleConstructorStruct(
+        "TopTxInfoSimplified", {
+            ids: list_txHash_t,
+            inputs: list_txInV4_t,
+            refInputs: list_txInV4_t,
+            outputs: list_txOutV4_t,
+            mints: value_t,
+            burns: value_t,
+            certificates: list_txCertV4_t,
+            withdrawals: map_cred_int_t,
+            directDeposits: map_cred_int_t,
+            validityInterval: posixTimeRange_t,
+            guards: list_credential_t,
+            requiredTopLevelGuards: list_credential_t,
+            scriptPurposes: list_scriptPurposeV4_t,
+            datums: map_hash32_data_t,
+            votes: map_voter_map_txOutRef_vote_t,
+            proposals: list_proposalProcedure_t,
+            currentTreasury: opt_int_t,
+            treasuryDonations: int_t
+        }, onlyData
+    );
+
+    // struct TopTxInfo — top-level view over the sub-transactions
+    const list_txV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txV4_t ] );
+    if(!list_txV4_t) throw new Error("expected list_txV4_t");
+    const { data: topTxInfo_t } = defineSingleConstructorStruct(
+        "TopTxInfo", {
+            subTransactions: list_txV4_t,
+            datums: map_txHash_data_t,
+            startingAccountBalanceIntervals: accountBalanceIntervals_t,
+            simplified: topTxInfoSimplified_t
+        }, onlyData
+    );
+    const opt_topTxInfo_t = program.getAppliedGeneric(
+        TirDataOptT.toTirTypeKey(), [ topTxInfo_t ] );
+    if(!opt_topTxInfo_t) throw new Error("expected opt_topTxInfo_t");
+
+    // struct ScriptInfoV4 (the `Guard` info carries the whole-batch view
+    // when executed at the top level)
+    const { data: scriptInfoV4_t } = defineMultiConstructorStruct(
+        "ScriptInfoV4", {
+            Mint: { policy: policyId_t },
+            Spend: { ref: txOutRef_t, optionalDatum: opt_data_t },
+            Withdraw: { account: accountId_t },
+            Certificate: { certificateIndex: int_t, certificate: txCertV4_t },
+            Vote: { voter: voter_t },
+            Propose: { proposalIndex: int_t, proposal: proposalProcedure_t },
+            Guard: { guardIndex: int_t, topTxInfo: opt_topTxInfo_t }
+        }, onlyData
+    );
+
+    // struct ScriptContextV4 { tx, redeemer, purpose, scriptHash }
+    // (V4 adds the executing script's own hash as a 4th field)
+    const { data: scriptContextV4_t } = defineSingleConstructorStruct(
+        "ScriptContextV4", {
+            tx: txV4_t,
+            redeemer: data_t,
+            purpose: scriptInfoV4_t,
+            scriptHash: scriptHash_t
+        }, onlyData
+    );
+
     // ------------------------------------------------------------------
     // Script-context helper methods (milestone 2 stdlib expansion).
     //
