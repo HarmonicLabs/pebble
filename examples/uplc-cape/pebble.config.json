@@ -1,0 +1,6 @@
+{
+  "compilerVersion": ">=0.4.5",
+  "entry": "./src/fibonacci.pebble",
+  "outDir": "./out",
+  "removeTraces": true
+}

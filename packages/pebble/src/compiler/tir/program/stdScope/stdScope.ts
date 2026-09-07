@@ -1760,7 +1760,10 @@ export function populatePreludeScope( program: TypedProgram ): void
     ): IRTerm
     {
         const extPair = Symbol("bound_extPair");
-        // isInclusive: bool data (true = Constr 0, false = Constr 1)
+        // isInclusive: bool data in the LEDGER encoding (PlutusTx `Bool`:
+        // False = Constr 0, True = Constr 1). NOTE this is the opposite of
+        // pebble's own bool data convention — these helpers read the
+        // ledger-provided ScriptContext, so the ledger convention applies.
         const inclusiveIR = _ir_apps(
             IRNative.equalsInteger,
             _ir_apps(
@@ -1770,7 +1773,7 @@ export function populatePreludeScope( program: TypedProgram ): void
                     irStructField( new IRVar( boundVar ), 1 )
                 )
             ),
-            IRConst.int( 0 )
+            IRConst.int( 1 )
         );
         return _ir_apps(
             new IRFunc(

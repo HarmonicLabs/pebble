@@ -2,6 +2,67 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.5.0
+
+Milestone 2 release: the built-in test framework is complete, and the
+standard library grows the "common dApp patterns" layer.
+
+### Test framework (`pebble test`)
+
+- **Typed default fuzzers for every practical parameter type.** Property
+  tests now fuzz `bytes`, `string`, `data`, enums, `Optional<T>` (both
+  encodings — SoP optionals and runtime structs are passed as UPLC 1.2
+  `constr` terms), `List<T>`, `LinearMap<K,V>`, `Value`, data structs
+  (driven off the struct's constructors and field types, recursion-safe)
+  and runtime (SoP) structs, in addition to the existing `int`/`bool`.
+  Generators are seeded, deterministic, and edge-biased (zero/±1/int
+  bounds, empty/hash-length byte strings, empty/singleton collections).
+- **`via <expr>` fuzzers are now executable.** The compiler synthesizes a
+  `( seed: int ) => T` entry point from the `via` expression — either a
+  function of that shape or a plain `T` value (a degenerate constant
+  fuzzer, e.g. `via 42`) — and the runner CEK-evaluates it with a fresh
+  seed each iteration. Fuzzed values must be constant-representable
+  (SoP-typed fuzzer results are rejected with a located reason).
+- **Shrinking.** When a property test fails, the runner greedily minimizes
+  the failing input tuple (integers log-converge toward the smallest
+  counterexample; byte strings, strings, lists and maps shrink
+  structurally) and reports the minimal inputs alongside the original
+  failure. Shrink evaluations do not count toward the reported budget.
+- **CLI**: `pebble test --json` emits machine-readable results (budgets
+  included); `--bail` stops at the first failing file; failing property
+  reports show the minimal counterexample.
+
+### Standard library
+
+- **Value arithmetic**: `negate`, `equals`, `subtract`, `isZero`, `geq`,
+  `leq` as `Value` methods and under `std.value`, plus the
+  `std.value.singleton( policy, name, amount )` and
+  `std.value.assetClass( policy, name )` constructors,
+  `Value.amountOfAsset( ac )`, the `AssetClass` prelude struct and the
+  `POSIXTime` alias.
+- **Script-context helpers** (methods on the prelude types, mirrored under
+  `std.tx` / `std.interval`): `Tx.signedBy( pkh )`,
+  `Tx.findInput( ref )`, `Tx.outputsToCredential( c )`,
+  `Tx.inputsFromCredential( c )`, `Tx.valuePaidTo( addr )`,
+  `TxOut.inlineDatum()`, `Interval.lowerBoundFinite()`,
+  `Interval.upperBoundFinite()`, `Interval.contains( t )`,
+  `Interval.isEntirelyAfter( t )`, `Interval.isEntirelyBefore( t )`.
+  The interval helpers read `isInclusive` with the LEDGER bool encoding
+  (PlutusTx: `False = Constr 0`, `True = Constr 1`).
+- **Lists**: `std.list.at` (returns `Optional<T>`), `concat`, `reverse`,
+  `sum`, `count`.
+- **LinearMap**: `std.linearMap.has`, `insert` (replace-or-prepend),
+  `remove`.
+- Fix: single-constructor prelude structs now carry their method table on
+  the type itself (`methodNamesPtr`), enabling methods on `Tx`, `TxOut`
+  and `Interval`.
+
+### UPLC-CAPE
+
+- New `examples/uplc-cape` project with the open-optimization `fibonacci`
+  and `factorial` submissions and the `two_party_escrow` real-world
+  contract submission (see `BENCHMARKS.md`).
+
 ## v0.4.5
 
 A single fix, but a consequential one: it removes the last known

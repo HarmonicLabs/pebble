@@ -1,0 +1,115 @@
+// UPLC-CAPE `two_party_escrow` scenario (open optimization, real-world).
+//
+// Fully-applied validator `( data ) => void` per
+// scenarios/two_party_escrow/two_party_escrow.md. All parameters are baked
+// in as required by the scenario:
+//
+//   buyer  = #aa.. (32 bytes)     seller = #bb.. (32 bytes)
+//   price  = 75_000_000 lovelace  deadline = 1800 s after depositTime
+//   script = #11.. (29 bytes)     (the harness' dummy script hash)
+//
+// Redeemers are RAW integers (I 0 = Deposit, I 1 = Accept, I 2 = Refund);
+// the escrow datum is `Constr 0 [Constr state [], I depositTime]`.
+//
+// Validation summary (behaviour pinned by the scenario's cape-tests.json):
+//   Deposit: buyer signed; validity-range upper bound finite; the sum paid
+//            to the script credential is EXACTLY the price.
+//   Accept:  seller signed; datum state is Deposited; the sum paid to the
+//            seller is EXACTLY the price; NO output back to the script.
+//   Refund:  buyer signed; datum state is Deposited; validity-range lower
+//            bound finite and STRICTLY past depositTime + deadline; the sum
+//            paid to the buyer is EXACTLY the price; NO output back to the
+//            script.
+
+struct EscrowState {
+    Deposited {}
+    Accepted {}
+    Refunded {}
+}
+
+struct EscrowDatum {
+    EscrowDatum {
+        state: EscrowState,
+        depositTime: int
+    }
+}
+
+const PRICE: int = 75000000;
+const DEADLINE: int = 1800;
+
+/**
+ * total lovelace paid by `tx` to outputs whose payment credential is
+ * `cred`, FAILING if any output pays the escrow script itself — accept
+ * and refund must leave nothing behind. One pass over the outputs.
+ */
+function paidClean( tx: Tx, cred: Credential, script: Credential ): int {
+    let total = 0;
+    for( const o of tx.outputs ) {
+        const p = o.address.payment;
+        if( p == cred ) {
+            total = total + o.value.lovelaces();
+        } else {
+            assert !( p == script ) else "nothing may remain at the escrow";
+        }
+    }
+    return total;
+}
+
+/** total lovelace paid by `tx` to outputs whose payment credential is `cred` */
+function paidTo( tx: Tx, cred: Credential ): int {
+    let total = 0;
+    for( const o of tx.outputsToCredential( cred ) ) {
+        total = total + o.value.lovelaces();
+    }
+    return total;
+}
+
+/** the spending datum, decoded as the escrow datum */
+function escrowDatum( ctx: ScriptContext ): EscrowDatum {
+    const Spend{ optionalDatum } = ctx.purpose;
+    const Some{ value: datumData } = optionalDatum;
+    return datumData as EscrowDatum;
+}
+
+export function two_party_escrow( ctxData: data ): void {
+    const ctx = ctxData as ScriptContext;
+    const tx = ctx.tx;
+    const redeemer = ctx.redeemer as int;
+
+    const buyerCred  = Credential.PubKey{ hash: #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa };
+    const sellerCred = Credential.PubKey{ hash: #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb };
+    const scriptCred = Credential.Script{ hash: #1111111111111111111111111111111111111111111111111111111111 };
+
+    if( redeemer == 0 ) {
+        // ── Deposit ───────────────────────────────────────────────────
+        assert tx.signedBy( #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa )
+            else "deposit: buyer signature required";
+        // the deposit time is recorded from the UPPER bound: it must be finite
+        const Finite{ n: _depositTime } = tx.validityInterval.to.boundary;
+        assert paidTo( tx, scriptCred ) == PRICE
+            else "deposit: exactly the price must reach the escrow";
+    } else if( redeemer == 1 ) {
+        // ── Accept ────────────────────────────────────────────────────
+        assert tx.signedBy( #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb )
+            else "accept: seller signature required";
+        const EscrowDatum{ state, depositTime: _t } = escrowDatum( ctx );
+        assert state is Deposited else "accept: no valid deposit";
+        assert paidClean( tx, sellerCred, scriptCred ) == PRICE
+            else "accept: exactly the price must reach the seller";
+    } else if( redeemer == 2 ) {
+        // ── Refund ────────────────────────────────────────────────────
+        assert tx.signedBy( #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa )
+            else "refund: buyer signature required";
+        const EscrowDatum{ state, depositTime } = escrowDatum( ctx );
+        assert state is Deposited else "refund: no valid deposit";
+        // the refund window opens STRICTLY after depositTime + deadline,
+        // proven by a finite lower bound
+        const Finite{ n: earliest } = tx.validityInterval.from.boundary;
+        assert earliest > depositTime + DEADLINE
+            else "refund: deadline has not passed";
+        assert paidClean( tx, buyerCred, scriptCred ) == PRICE
+            else "refund: exactly the price must return to the buyer";
+    } else {
+        assert false else "invalid redeemer";
+    }
+}

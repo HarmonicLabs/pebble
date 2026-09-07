@@ -65,9 +65,11 @@ const mkTxOut = ( address: Data, value: Data, datum: Data = noDatum ) =>
     new DataConstr( 0, [ address, value, datum, new DataConstr( 1, [] ) ] );
 /** TxIn{ ref, resolved } */
 const mkTxIn = ( ref: Data, resolved: Data ) => new DataConstr( 0, [ ref, resolved ] );
-/** IntervalBoundary{ boundary: Finite{n}, isInclusive } */
+/** IntervalBoundary{ boundary: Finite{n}, isInclusive } — the isInclusive
+ * bool uses the LEDGER encoding (PlutusTx: False = Constr 0, True = Constr 1),
+ * which is what the interval helpers read on-chain. */
 const finiteBound = ( n: number, inclusive: boolean ) =>
-    new DataConstr( 0, [ new DataConstr( 1, [ iData( n ) ] ), new DataConstr( inclusive ? 0 : 1, [] ) ] );
+    new DataConstr( 0, [ new DataConstr( 1, [ iData( n ) ] ), new DataConstr( inclusive ? 1 : 0, [] ) ] );
 /** Interval{ from, to } */
 const mkInterval = ( from: Data, to: Data ) => new DataConstr( 0, [ from, to ] );
 
