@@ -2,6 +2,52 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.4.5
+
+A single fix, but a consequential one: it removes the last known
+compute-once hole, and takes compiled size and compile time down with it.
+
+- **⚠ PERFORMANCE (compute-once, across `&&` — second path): a `const`
+  whose references all sit INSIDE branches is no longer duplicated per
+  branch.** v0.4.4's `&&` fix (below) covers values whose references surface
+  in WAVES, which take the single-reference placement path. When every
+  reference is already in the tree at once, placement instead takes the
+  per-branch DUPLICATION block — and that had no `eagerFnScope` exemption,
+  so a `&&` cascade (which lowers to SEQUENTIAL sibling cases, one "branch
+  group" per conjunct) gave the value one binding PER CONJUNCT, all of them
+  evaluated on the accept path. Whether a validator hit this came down to
+  how its references happened to surface rather than to anything in its
+  source, which is why two structurally equivalent GravityDex swap handlers
+  sat at 0.93x and 7.2x of the reference implementation. A fn-scope-eager
+  declaration evaluates once per call regardless of in-function dispatch,
+  so it now skips that block entirely. On the affected validator the
+  heaviest evaluation went **10.955B -> 0.891B cpu (12x)** and its artifact
+  **11.9 kB -> 5.8 kB**. Guarded by a second case in
+  `compiler.computeOnceAcrossBranches.test.ts`, which keeps every reference
+  out of the first conjunct — that is what arms the duplication block.
+- **Compile time drops with it.** The duplication was also inflating the IR
+  tree, so removing it cut whole-project build time by an order of
+  magnitude. The single validator that had resisted every earlier
+  compile-time fix (65.9 min, previously assumed to be an unrelated
+  bottleneck) turns out to have been this same defect, and now compiles in
+  4.6 min.
+
+Measured across the GravityDex audit corpus (26 validators, same harness and
+seed as the 0.4.4 numbers):
+
+| | 0.4.4 | 0.4.5 |
+|---|---|---|
+| a2t pool validator vs reference impl | 7.2x | **0.94x** |
+| a2t family total | — | **88.0% cpu / 83.5% mem** |
+| t2t family total | 93.5% / 85.6% | **90.0% / 82.8%** |
+| script size vs aiken | 117% | **83%** (smaller on 9 of 10) |
+| whole-project compile | ~66 min | **4.7 min** |
+
+Behaviour is unchanged everywhere it was already correct: 844 compiler
+tests, the masterpiece regression gate, the 74-case validator matrix and the
+t2t / a2t / stable accept+reject harnesses all pass, with no redeemer
+encoding drift.
+
 ## v0.4.4
 
 Every bug from the GravityDex-port audit is fixed (regression coverage in

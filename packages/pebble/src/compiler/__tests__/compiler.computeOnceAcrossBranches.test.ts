@@ -90,3 +90,52 @@ test("an expensive const referenced across && conjuncts evaluates once", async (
     // which dominates the whole script — by 8.
     expect( eight ).toBeLessThan( one * 3n / 2n );
 });
+
+// ── GravityDex BUG 16: the same defect through the OTHER door ──────────────
+//
+// The fix above covers values whose references surface in singleton WAVES
+// (nested inside container letteds, appearing one at a time). When all the
+// references are in the tree SIMULTANEOUSLY — one pop, many refs — placement
+// takes the per-branch DUPLICATION block instead, which had no eagerFnScope
+// exemption: a const referenced from N conjuncts (each a sibling branch of a
+// SEQUENTIAL case) got up to N per-branch bindings, all evaluated on the
+// accept path. The a2t swap validator paid 13-20 bindings per hot const —
+// 7.2x plu-ts — while the structurally identical t2t one sat at parity
+// because its refs happened to surface in waves.
+//
+// Keeping every `kk` reference OUT of the first conjunct forces
+// `allRefsCrossBranches` (every ref inside some branch), which is what arms
+// the duplication block.
+
+const srcAllRefsInBranches = ( nConjuncts: number ) => `
+function isqrt( n: int ): int {
+    if (n < 2) return n;
+    let x: int = n;
+    let y: int = (x + 1) / 2;
+    while (y < x) {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    return x;
+}
+export function main( xs: data, k: int ): boolean {
+    const kk = isqrt(k * 1_000_000 * 1_000_000);
+    let n: int = 0;
+    for (const e of std.builtins.unListData(xs)) {
+        n = n + std.builtins.unIData(e);
+    }
+    // first conjunct does NOT touch kk; every kk ref sits inside a branch
+    const ok: boolean =
+        n > 0
+        && ${CONJUNCTS.slice( 0, nConjuncts ).join("\n        && ")};
+    return ok;
+}`;
+
+test("an expensive const referenced only from inside && branches evaluates once", async () => {
+    const one = await evalMain( srcAllRefsInBranches( 1 ) );
+    const eight = await evalMain( srcAllRefsInBranches( 8 ) );
+
+    // pre-fix: up to one binding PER conjunct, all on the accept path —
+    // cost scaled with the conjunct count instead of staying flat
+    expect( eight ).toBeLessThan( one * 3n / 2n );
+});

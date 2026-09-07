@@ -505,6 +505,20 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             if(
                 allRefsCrossBranches
                 && branchGroups.size > 1
+                // fn-scope-eager USER declarations evaluate once per call in
+                // source semantics REGARDLESS of in-function dispatch, so
+                // they must NOT be duplicated per branch: `&&` cascades
+                // lower to SEQUENTIAL sibling cases, every conjunct is its
+                // own "branch group", and each per-branch copy on the taken
+                // path re-evaluates the value plus its cloned dependency
+                // chain (GravityDex BUG 16: consts referenced from 13-20
+                // conjuncts got that many bindings — the a2t swap path cost
+                // 7x plu-ts while the structurally identical t2t one, whose
+                // refs happened to surface in singleton waves and took the
+                // already-eagerFnScope-aware single-ref path, was at
+                // parity). They fall through to the general placement path,
+                // whose float rescue may ignore dispatch debt for them.
+                && letted.meta.eagerFnScope !== true
                 // NON-CLOSED values need the per-branch duplication:
                 // evaluating them outside their branch is the actual
                 // miscompilation (field extractors crash on foreign arms).
@@ -576,7 +590,9 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                         // instead of re-evaluating per iteration; when no
                         // single binder covers every ref but all paths are
                         // dispatch-debt-free, bind AT the root below.
-                        const dec = outermostFloatTargetBetween( root, refs, getUnboundedVars( letted.value ), letted.meta.eagerFnScope === true );
+                        // (never eagerFnScope here: those skip this whole
+                        // per-branch duplication block via the outer guard)
+                        const dec = outermostFloatTargetBetween( root, refs, getUnboundedVars( letted.value ) );
                         if( dec !== undefined && "above" in dec && bindAboveNode( letted, dec.above, refs ) )
                         { process.env.PEBBLE_DBG_ALL && console.error( "[pop]   -> branch-dup float-above" ); continue; }
                         if( !( dec !== undefined && "atPlacement" in dec && letted.meta.siteScoped !== true ) )
