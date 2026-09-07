@@ -36,6 +36,32 @@ export class PRNG
     }
 
     /**
+     * Returns a random byte string, biased toward common Cardano lengths:
+     * 1 in 4 returns one of length 0, 1, 28 (hash) or 32 (hash),
+     * otherwise a uniform length in 0..64.
+     */
+    nextBytes(): Uint8Array
+    {
+        const edgeRoll = this.next32() & 0x3;
+        let len: number;
+        if( edgeRoll === 0 )
+        {
+            const edges = [ 0, 1, 28, 32 ];
+            len = edges[ this.next32() % edges.length ];
+        }
+        else len = this.next32() % 65;
+        return this.nextBytesOfLength( len );
+    }
+
+    /** Returns `len` random bytes. */
+    nextBytesOfLength( len: number ): Uint8Array
+    {
+        const out = new Uint8Array( len );
+        for( let i = 0; i < len; i++ ) out[i] = this.next32() & 0xFF;
+        return out;
+    }
+
+    /**
      * Returns a random bigint, biased toward edge values.
      *
      * 1 in 16 returns one of: 0, 1, -1, INT64_MAX, INT64_MIN, INT32_MAX, INT32_MIN.

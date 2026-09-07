@@ -1,5 +1,5 @@
 {
-  "compilerVersion": "0.4.3",
+  "compilerVersion": "^0.4.3",
   "entry": "./src/index.pebble",
   "outDir": "./out",
   "removeTraces": false

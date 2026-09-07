@@ -1,22 +1,25 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
+import { TirType } from "../types/TirType";
 import { ITirStmt } from "./TirStmt";
 
 /**
  * Per-parameter fuzzer descriptor.
  *
- * - `kind: "primitive"`: the runner generates values directly in TS for a
- *   supported primitive type (`int`, `bool`, etc.). No Pebble-side fuzzer call.
+ * - `kind: "typed"`: the runner generates values directly in TS for the
+ *   parameter's resolved TIR type (see `test/fuzz/typedFuzzers.ts`).
+ *   No Pebble-side fuzzer call.
+ * - `kind: "via"`: the user wrote `via <expr>`; the compiler synthesized a
+ *   Pebble-side fuzzer entry point named `tirFuncName` of shape
+ *   `( seed: int ) => T`. The runner compiles it once per test and
+ *   CEK-evaluates it with a fresh seed each iteration.
  * - `kind: "unsupported"`: the parameter type has no default generator and
- *   no `via` was supplied; the runner emits a SKIP `TestResult` carrying
- *   `reason`.
- * - `kind: "via_not_implemented"`: the user wrote `via <expr>` and the
- *   compiler successfully type-checked it, but executing user-defined
- *   fuzzers is not wired up yet (Phase 2). Surfaced as SKIP.
+ *   no usable `via` was supplied; the runner emits a SKIP `TestResult`
+ *   carrying `reason`.
  */
 export type FuzzerInfo =
-    | { kind: "primitive"; primitive: "int" | "bool" }
-    | { kind: "unsupported"; reason: string }
-    | { kind: "via_not_implemented" };
+    | { kind: "typed"; type: TirType }
+    | { kind: "via"; tirFuncName: string }
+    | { kind: "unsupported"; reason: string };
 
 /**
  * A `test name( params? ) { body }` block.

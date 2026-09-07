@@ -104,6 +104,8 @@ program.command("test [path]")
     .option("-t, --testNamePattern <regex>", "Run only tests whose name matches this regex")
     .option("--property-runs <n>", "Number of iterations per property test (default 100)")
     .option("--seed <int>", "Seed for the property-test PRNG (default 0)")
+    .option("--json", "Emit machine-readable JSON results on stdout instead of the human report")
+    .option("--bail", "Stop running after the first failing test file")
     .action( async ( target, opts ) => {
         await runTestsCommand( target, {
             config: opts.config,
@@ -111,6 +113,8 @@ program.command("test [path]")
             testNamePattern: opts.testNamePattern,
             propertyRuns: opts.propertyRuns,
             seed: opts.seed,
+            json: opts.json === true,
+            bail: opts.bail === true,
         });
     });
 

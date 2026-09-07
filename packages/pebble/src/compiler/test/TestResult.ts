@@ -36,6 +36,12 @@ export interface TestResult {
     skippedReason?: string;
     /** seed used by the property runner (only set for property tests) */
     seed?: number;
+    /**
+     * set (> 0) when a failing property input tuple was minimized;
+     * the LAST entry of `iterations` then holds the minimal failing inputs
+     * (shrink evaluations are not counted in `totalBudget`)
+     */
+    shrinkSteps?: number;
 }
 
 export function zeroBudget(): TestBudget
