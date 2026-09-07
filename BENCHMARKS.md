@@ -20,10 +20,11 @@ scenario, and one shared harness measures them all. The live report is at
   entry per compiler, main track). Lower is better everywhere.
 - **Pebble artifacts** are compiled by Pebble **0.5.0** with default
   settings from [`examples/uplc-cape`](examples/uplc-cape); each submission
-  pins the exact commit. Until the 0.5.0 submission PRs are merged
-  upstream, the Pebble rows are measured with the same test vectors on the
-  local CEK machine (`@harmoniclabs/plutus-machine`, PV11 cost model) —
-  the official numbers land with the PRs.
+  pins the exact commit. The Pebble rows below are measured with the
+  **official CAPE `measure` tool** (evaluator `PlutusTx.Eval-1.63.0.0`),
+  every scenario test vector passing — the same tool that produces the
+  numbers on the live report. Aggregates cover each scenario's measured
+  (positive) vectors, matching the report's accounting.
 
 ## `fibonacci` (open optimization)
 
@@ -33,7 +34,7 @@ Pebble's entry is a plain iterative pair accumulator — no lookup tables.
 | submission | CPU units | memory units | size (B) |
 | --- | ---: | ---: | ---: |
 | Scalus 0.18.2 ¹ | 14,567,412 | 23,874 | 113 |
-| **Pebble 0.5.0** | **55,856,726** | **222,144** | **73** |
+| **Pebble 0.5.0** | **55,846,226** | **222,119** | **75** |
 | Plinth 1.67.0.0 | 59,334,107 | 243,219 | 63 |
 | Aiken 1.1.19 (tailrec) | 67,838,022 | 256,986 | 77 |
 | OpShin 1.0.0 | 240,131,414 | 1,306,476 | 227 |
@@ -49,31 +50,35 @@ Sum over the 11 scenario inputs (n ∈ {0..5, 8, 10, 12, −5}).
 
 | submission | CPU units | memory units | size (B) |
 | --- | ---: | ---: | ---: |
-| **Pebble 0.5.0** | **25,680,360** | **104,214** | **47** |
+| **Pebble 0.5.0** | **25,651,296** | **104,195** | **49** |
 | Plutarch 1.11.0 (exbudget) | 37,001,975 | 137,290 | 65 |
 | Scalus 0.17.0 | 37,481,975 | 140,290 | 40 |
 
-Pebble's iterative loop is ~31% cheaper on CPU than the best previous
-entry.
+Pebble's iterative loop is ~31% cheaper on CPU (and the cheapest on
+memory) than the best previous entry.
 
 ## `two_party_escrow` (open optimization, real-world contract)
 
 A fully-applied `(data) → unit` spending validator with deposit / accept /
 refund endpoints, validated against the scenario's 47 positive and negative
-test vectors. Sum over the 10 measured (positive) vectors.
+test vectors. Aggregate over the 10 measured (positive) vectors, official
+CAPE accounting:
 
 | submission | CPU units | memory units | size (B) |
 | --- | ---: | ---: | ---: |
-| **Pebble 0.5.0** | **212,485,196** | **475,965** | 1,377 |
-| Plinth 1.67.0.0 | 234,254,380 | 588,937 | 1,570 |
-| Plinth 1.65.0.0 | 241,625,986 | 677,161 | 1,310 |
-| Scalus 0.18.2 | 343,534,594 | 809,179 | 1,392 |
+| **Pebble 0.5.0** | **163,663,780** | 574,564 | 1,355 |
+| Plinth 1.67.0.0 | 163,748,290 | 486,576 | 1,570 |
+| Plinth 1.65.0.0 | 168,065,744 | 536,464 | 1,310 |
+| Scalus 0.18.2 | 231,874,447 | 619,461 | 1,392 |
 
-Pebble takes the **lowest CPU and memory** of the suite on its first
-real-world-contract entry (−9% CPU vs the best Plinth build), with the
-second-smallest script. The win comes from the compiler's compute-once
-placement and from validating each endpoint in a single traversal of the
-transaction outputs.
+Pebble takes the **lowest CPU of the suite** on its first
+real-world-contract entry — 29% ahead of Scalus and just past the best
+Plinth build — with the second-smallest script. The implementation
+validates each endpoint in a single traversal of the outputs, compares
+signatures and credentials as raw bytes, and reads lovelace through the
+compiler's raw-value-map `amountOf` fast path (skipping `unValueData`'s
+whole-map conversion); that fast path trades a little memory for CPU,
+which is why Plinth keeps the memory lead here.
 
 ## Fixed-algorithm scenarios (naive recursion)
 

@@ -1,54 +1,79 @@
 # Plutus V4 codegen — status
 
-*Milestone 2 note, 2026-09. Updated as upstream definitions land.*
+*Milestone 2 note. Re-verified against upstream on 2026-09-07.*
 
 ## What "Plutus V4 codegen" means for Pebble
 
 For Pebble, Plutus V4 support is about the **ledger API**: the
-Dijkstra-era script-context type definitions — a V4 `ScriptContext`, the
-V4 `ScriptInfo`/`Tx` shapes, and whatever purpose-dispatch changes the new
-ledger era introduces. It is **not** about UPLC versions or UPLC term
-kinds: everything at that level (UPLC 1.2 `case`/`constr`, builtin casing,
-the batch-6 builtins — `dropList`, `expModInteger`, arrays, the
-multi-asset `Value` builtins, BLS multi-scalar multiplication) already
-shipped in the **van Rossem hard fork (protocol version 11, intra-Conway,
-mainnet 2026-07-18)** and Pebble 0.5.0 emits it today. Pebble contracts
-compiled now run on PV11 mainnet as `PlutusV3` scripts with the extended
-builtin set.
+Dijkstra-era script-context type definitions — the V4 `ScriptContext`,
+`ScriptInfo`/`TxInfo` shapes and the purpose-dispatch changes of the new
+ledger era. It is **not** about UPLC versions or UPLC term kinds:
+everything at that level (UPLC 1.2 `case`/`constr`, builtin casing, the
+batch-6 builtins) already shipped in the **van Rossem hard fork (protocol
+version 11, intra-Conway, mainnet 2026-07-18)** and Pebble 0.5.0 emits it
+today. Pebble contracts compiled now run on PV11 mainnet as `PlutusV3`
+scripts with the extended builtin set.
 
-## Why it cannot be implemented yet
+## Upstream status (verified 2026-09-07)
 
-Plutus V4 is a **Dijkstra-era** feature — the *next* hard fork, not van
-Rossem. As of this writing there is:
+The V4 definitions are **no longer missing**:
 
-- **no finalized V4 script-context specification** — the
-  `plutus-ledger-api` V4 context types do not exist upstream; only
-  ledger-level plumbing is sketched (script ref tag 4, witness-set key 8,
-  aux-data key 5, per the IntersectMBO `cardano-ledger` Dijkstra CDDL);
-- **no final V4 cost model** — `@harmoniclabs/cardano-costmodels-ts`
-  carries a `v4` module explicitly reserved for the future language
-  version;
-- **no `PlutusScriptV4` on-chain language tag** a transaction could carry;
-- **no public preview/preprod network running V4** to produce execution
-  evidence on.
+- **plutus-ledger-api 1.68.0.0 (released 2026-08-21)** ships
+  `PlutusLedgerApi.V4` — complete script-context types
+  (`plutus-ledger-api/src/PlutusLedgerApi/V4/Contexts.hs`), a V4
+  `ParamName` cost-model parameter list, a V4 `EvaluationContext`, and
+  `dijkstraPV = MajorProtocolVersion 12` ("The Dijkstra HF will introduce
+  the Dijkstra era and Plutus V4"). 1.67 carried the first draft; 1.68
+  formalized it.
+- **cardano-ledger master** has the full Dijkstra-era
+  `EraPlutusTxInfo 'PlutusV4 DijkstraEra` translation
+  (`eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxInfo.hs`).
 
-The milestone's V4 deliverable is therefore blocked on missing upstream
-definitions, and on nothing else.
+The V4 context is a substantial redesign, driven by
+**CIP-0118 (Nested Transactions)** + **CIP-0112 (Observe/Guard scripts)**
+plus the spending-accounts work:
 
-## What the work will be, once the definitions exist
+- `ScriptContext` gains a 4th field, `scriptContextScriptHash`.
+- `TxInfo` is reordered (`txInfoId` first) and reshaped: new
+  `txInfoSubTxIx`, `txInfoDirectDeposits`,
+  `txInfoAccountBalanceIntervals`, `txInfoGuards`,
+  `txInfoRequiredTopLevelGuards`; `txInfoFee` and `txInfoSignatories`
+  are GONE.
+- `ScriptPurpose` now carries the executing `ScriptHash` in every
+  constructor, and a new `Guarding` purpose (index 6) exists; the
+  matching `GuardingScript` `ScriptInfo` carries an optional `TopTxInfo`
+  describing the whole batch (sub-transactions, aggregated view).
+- New `AccountId` / `AccountBalanceInterval(s)` types; `TxCert` is
+  rebuilt around accounts (`TxCertRegAccount`, ... — 11 constructors).
+- New V4 `Address` type and a new `POSIXTimeRange` datatype.
 
-1. Add the V4 prelude types (`ScriptContext`/`ScriptInfo`/`Tx` variants
-   and any new purpose shapes) alongside the V3 ones in
-   `src/compiler/tir/program/stdScope/stdScope.ts`, selectable as a
-   compilation target.
-2. Wire the finalized V4 cost model (`cardano-costmodels-ts` `v4`) into
-   the test runner and budget reporting.
-3. Emit the `PlutusScriptV4` envelope/tag in the export pipeline and in
-   downstream tooling (buildooor: witness-set key 8, language views for
-   `scriptDataHash`).
-4. Compile and execute an example contract on the first V4-capable
-   preview/preprod network and commit the evidence (tx link / logs).
+## What still blocks the milestone's acceptance criterion
 
-Everything else in Milestone 2 — the test framework, the stdlib
-expansion, the UPLC-CAPE submissions and the benchmark write-up — is
-delivered without waiting on the fork.
+The acceptance criterion needs a V4 script **executing on a public
+preview/preprod node**. That requires the Dijkstra hard fork (PV12), and:
+
+- no public preview/preprod network runs the Dijkstra era yet;
+- the **cost-model values** for V4 are not final (the `ParamName` shape
+  exists; new CIP-0168 builtin costings were still being added to V4
+  after the 1.68 release — 2026-08-25/28);
+- CIP-0118, which the V4 context shape encodes, is still **Proposed**,
+  so the shapes may yet shift before the fork.
+
+## Work now possible (and what remains)
+
+With released type definitions, Pebble can now:
+
+1. add the V4 prelude types from plutus-ledger-api 1.68
+   (`ScriptContextV4` / `TxInfoV4` / `ScriptInfoV4` / accounts and guard
+   types) so `(data) => void` validators can be written against the V4
+   context today;
+2. wire the V4 cost-model shape (`cardano-costmodels-ts` `v4`) into the
+   test runner once parameter values are published;
+3. emit the `PlutusScriptV4` envelope/tag in the export pipeline and in
+   buildooor (witness-set key 8, language views) when the ledger
+   finalizes them;
+4. compile and execute an example on the first Dijkstra-capable
+   preview/preprod network and commit the evidence.
+
+Item 1 is implementable immediately (tracking a *Proposed*-status shape);
+items 2–4 wait on the fork's finalization.

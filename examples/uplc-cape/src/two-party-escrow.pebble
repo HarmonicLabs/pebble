@@ -6,7 +6,7 @@
 //
 //   buyer  = #aa.. (32 bytes)     seller = #bb.. (32 bytes)
 //   price  = 75_000_000 lovelace  deadline = 1800 s after depositTime
-//   script = #11.. (29 bytes)     (the harness' dummy script hash)
+//   script = #3131.. (58 bytes)   (the harness' dummy script hash "1"*58, ASCII)
 //
 // Redeemers are RAW integers (I 0 = Deposit, I 1 = Accept, I 2 = Refund);
 // the escrow datum is `Constr 0 [Constr state [], I depositTime]`.
@@ -20,6 +20,11 @@
 //            bound finite and STRICTLY past depositTime + deadline; the sum
 //            paid to the buyer is EXACTLY the price; NO output back to the
 //            script.
+//
+// Performance notes: signatures and credentials are compared as raw BYTES
+// (`match` + equalsByteString) rather than as data values, and lovelace is
+// read with `amountOf("", "")`, whose lowering walks the raw value map and
+// skips `unValueData`'s whole-map conversion.
 
 struct EscrowState {
     Deposited {}
@@ -37,29 +42,44 @@ struct EscrowDatum {
 const PRICE: int = 75000000;
 const DEADLINE: int = 1800;
 
+/** true iff `pkh` is among the tx's required signers (byte comparison) */
+function signedBy( tx: Tx, pkh: bytes ): boolean {
+    for( const s of tx.requiredSigners ) {
+        if( s == pkh ) return true;
+    }
+    return false;
+}
+
 /**
- * total lovelace paid by `tx` to outputs whose payment credential is
- * `cred`, FAILING if any output pays the escrow script itself — accept
- * and refund must leave nothing behind. One pass over the outputs.
+ * total lovelace paid to pub-key outputs whose key hash is `target`,
+ * FAILING if any output pays the escrow script itself — accept and refund
+ * must leave nothing behind. One pass over the outputs.
  */
-function paidClean( tx: Tx, cred: Credential, script: Credential ): int {
+function paidClean( tx: Tx, target: bytes, script: bytes ): int {
     let total = 0;
     for( const o of tx.outputs ) {
-        const p = o.address.payment;
-        if( p == cred ) {
-            total = total + o.value.lovelaces();
-        } else {
-            assert !( p == script ) else "nothing may remain at the escrow";
+        match o.address.payment {
+            when PubKey{ hash }: {
+                if( hash == target ) total = total + o.value.amountOf( "", "" );
+            }
+            when Script{ hash }: {
+                assert !( hash == script ) else "nothing may remain at the escrow";
+            }
         }
     }
     return total;
 }
 
-/** total lovelace paid by `tx` to outputs whose payment credential is `cred` */
-function paidTo( tx: Tx, cred: Credential ): int {
+/** total lovelace paid to script outputs whose script hash is `script` */
+function paidToScript( tx: Tx, script: bytes ): int {
     let total = 0;
-    for( const o of tx.outputsToCredential( cred ) ) {
-        total = total + o.value.lovelaces();
+    for( const o of tx.outputs ) {
+        match o.address.payment {
+            when Script{ hash }: {
+                if( hash == script ) total = total + o.value.amountOf( "", "" );
+            }
+            when PubKey{ hash: _h }: {}
+        }
     }
     return total;
 }
@@ -76,30 +96,27 @@ export function two_party_escrow( ctxData: data ): void {
     const tx = ctx.tx;
     const redeemer = ctx.redeemer as int;
 
-    const buyerCred  = Credential.PubKey{ hash: #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa };
-    const sellerCred = Credential.PubKey{ hash: #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb };
-    const scriptCred = Credential.Script{ hash: #1111111111111111111111111111111111111111111111111111111111 };
+    const buyer  = #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
+    const seller = #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;
+    const script = #31313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131;
 
     if( redeemer == 0 ) {
         // ── Deposit ───────────────────────────────────────────────────
-        assert tx.signedBy( #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa )
-            else "deposit: buyer signature required";
+        assert signedBy( tx, buyer ) else "deposit: buyer signature required";
         // the deposit time is recorded from the UPPER bound: it must be finite
         const Finite{ n: _depositTime } = tx.validityInterval.to.boundary;
-        assert paidTo( tx, scriptCred ) == PRICE
+        assert paidToScript( tx, script ) == PRICE
             else "deposit: exactly the price must reach the escrow";
     } else if( redeemer == 1 ) {
         // ── Accept ────────────────────────────────────────────────────
-        assert tx.signedBy( #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb )
-            else "accept: seller signature required";
+        assert signedBy( tx, seller ) else "accept: seller signature required";
         const EscrowDatum{ state, depositTime: _t } = escrowDatum( ctx );
         assert state is Deposited else "accept: no valid deposit";
-        assert paidClean( tx, sellerCred, scriptCred ) == PRICE
+        assert paidClean( tx, seller, script ) == PRICE
             else "accept: exactly the price must reach the seller";
     } else if( redeemer == 2 ) {
         // ── Refund ────────────────────────────────────────────────────
-        assert tx.signedBy( #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa )
-            else "refund: buyer signature required";
+        assert signedBy( tx, buyer ) else "refund: buyer signature required";
         const EscrowDatum{ state, depositTime } = escrowDatum( ctx );
         assert state is Deposited else "refund: no valid deposit";
         // the refund window opens STRICTLY after depositTime + deadline,
@@ -107,7 +124,7 @@ export function two_party_escrow( ctxData: data ): void {
         const Finite{ n: earliest } = tx.validityInterval.from.boundary;
         assert earliest > depositTime + DEADLINE
             else "refund: deadline has not passed";
-        assert paidClean( tx, buyerCred, scriptCred ) == PRICE
+        assert paidClean( tx, buyer, script ) == PRICE
             else "refund: exactly the price must return to the buyer";
     } else {
         assert false else "invalid redeemer";

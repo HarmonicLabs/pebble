@@ -36,10 +36,11 @@ What you get out of the box:
   tests on the real CEK machine, with typed fuzzers for every parameter
   type, user-defined `via` fuzzers, failing-input shrinking, and per-test
   cpu/mem budgets;
-- **competitive output**: Pebble holds the lowest CPU and memory numbers
-  in the [UPLC-CAPE](https://github.com/IntersectMBO/UPLC-CAPE)
+- **competitive output**: Pebble holds the lowest CPU numbers in the
+  [UPLC-CAPE](https://github.com/IntersectMBO/UPLC-CAPE)
   `two_party_escrow` real-world benchmark and the `factorial` open
-  benchmark — see [BENCHMARKS.md](./BENCHMARKS.md) and the
+  benchmark (where it leads memory too) — see
+  [BENCHMARKS.md](./BENCHMARKS.md) and the
   [live report](https://intersectmbo.github.io/UPLC-CAPE/).
 
 ## Benchmarks
