@@ -72,6 +72,7 @@ uplcSubcommand.command("pretty")
     .description("Pretty prints a UPLC program from a flat UPLC file")
     .option("-i, --input <string>", "The input flat-encoded UPLC file path", "./out/out.flat")
     .option("-o, --output <string>", "The output file path (extension: .uplc) (if missing, prints to console)")
+    .option("--canonical", "Emit spec-compliant UPLC concrete syntax (parseable by plutus-core) instead of the richer pebble format")
     .action( prettyPrintUplcFromFile );
 
 /*

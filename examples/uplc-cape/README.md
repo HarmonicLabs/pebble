@@ -23,9 +23,9 @@ pebble export --function-name fibonacci        --entry ./src/fibonacci.pebble   
 pebble export --function-name factorial        --entry ./src/factorial.pebble        && mv out/out.flat out/factorial.flat
 pebble export --function-name two_party_escrow --entry ./src/two-party-escrow.pebble && mv out/out.flat out/two_party_escrow.flat
 
-pebble uplc pretty -i ./out/fibonacci.flat        -o ./out/fibonacci.uplc
-pebble uplc pretty -i ./out/factorial.flat        -o ./out/factorial.uplc
-pebble uplc pretty -i ./out/two_party_escrow.flat -o ./out/two_party_escrow.uplc
+pebble uplc pretty --canonical -i ./out/fibonacci.flat        -o ./out/fibonacci.uplc
+pebble uplc pretty --canonical -i ./out/factorial.flat        -o ./out/factorial.uplc
+pebble uplc pretty --canonical -i ./out/two_party_escrow.flat -o ./out/two_party_escrow.uplc
 ```
 
 The `.uplc` files are what gets submitted; each submission's `metadata.json`
