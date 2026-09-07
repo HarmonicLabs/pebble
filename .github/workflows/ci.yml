@@ -25,3 +25,14 @@ jobs:
 
       - name: Run tests
         run: cd packages/pebble && npm run test && cd ../..
+
+      # `pebble test` on the example projects: exercises the built-in test
+      # framework end-to-end (typed fuzzers, `via` fuzzers, CEK execution)
+      # against the shipped CLI build. The local compiler build is copied
+      # over the CLI's installed dependency so CI always tests THIS commit.
+      - name: Run example test suites (pebble test)
+        shell: bash
+        run: |
+          cp -r packages/pebble/dist/* packages/pebble-cli/node_modules/@harmoniclabs/pebble/dist/
+          node packages/pebble-cli/dist/index.js test examples/linear-vesting --config examples/linear-vesting/pebble.config.json
+          node packages/pebble-cli/dist/index.js test examples/two-party-escrow --config examples/two-party-escrow/pebble.config.json
