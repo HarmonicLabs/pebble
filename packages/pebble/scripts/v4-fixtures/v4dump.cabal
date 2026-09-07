@@ -1,0 +1,18 @@
+cabal-version: 3.0
+name: v4dump
+version: 0.1.0.0
+build-type: Simple
+
+executable v4dump
+  main-is: Main.hs
+  hs-source-dirs: app
+  default-language: GHC2021
+  ghc-options: -Wall
+  build-depends:
+    , base
+    , bytestring
+    , base16-bytestring
+    , serialise
+    , plutus-core ^>=1.68
+    , plutus-tx ^>=1.68
+    , plutus-ledger-api ^>=1.68
