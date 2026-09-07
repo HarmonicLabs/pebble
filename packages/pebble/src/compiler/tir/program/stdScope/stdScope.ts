@@ -33,6 +33,7 @@ import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { IRConst } from "../../../../IR/IRNodes/IRConst";
 import { IRTerm } from "../../../../IR/IRTerm";
 import { _ir_lazyIfThenElse } from "../../../../IR/tree_utils/_ir_lazyIfThenElse";
+import { TargetPlutusVersion } from "../../../../IR/toUPLC/CompilerOptions";
 
 export const void_t = new TirVoidT();
 export const int_t = new TirIntT();
@@ -208,7 +209,11 @@ export function populateStdScope( program: TypedProgram ): void
     stdScope.readonly();
 }
 
-export function populatePreludeScope( program: TypedProgram ): void
+export function populatePreludeScope(
+    program: TypedProgram,
+    /** which family the UNSUFFIXED context type names resolve to */
+    targetPlutusVersion: TargetPlutusVersion = "v3"
+): void
 {
     const preludeScope = program.preludeScope;
     // empty string will be never generated as uid,
@@ -1685,6 +1690,43 @@ export function populatePreludeScope( program: TypedProgram ): void
             scriptHash: scriptHash_t
         }, onlyData
     );
+
+    // ------------------------------------------------------------------
+    // `targetPlutusVersion` — bind the UNSUFFIXED context names.
+    //
+    // Both families are always fully defined under explicit names:
+    //   V3: ScriptContextV3, TxV3, TxInV3, TxOutV3, AddressV3,
+    //       ScriptInfoV3, ScriptPurposeV3 (aliases of the plain V3 defs)
+    //   V4: ScriptContextV4, TxV4, ... (defined above)
+    // The compiler option only decides which family the PLAIN names
+    // (`ScriptContext`, `Tx`, ...) resolve to, so a project can flip the
+    // target without touching code that used the unsuffixed names, while
+    // mixed code stays possible through the suffixed ones.
+    // ------------------------------------------------------------------
+    {
+        const versionedPairs: [ plain: string, v4Name: string ][] = [
+            [ "ScriptContext", "ScriptContextV4" ],
+            [ "Tx",            "TxV4" ],
+            [ "TxIn",          "TxInV4" ],
+            [ "TxOut",         "TxOutV4" ],
+            [ "Address",       "AddressV4" ],
+            [ "ScriptInfo",    "ScriptInfoV4" ],
+            [ "ScriptPurpose", "ScriptPurposeV4" ],
+        ];
+        for( const [ plain, v4Name ] of versionedPairs )
+        {
+            const v3Info = preludeScope.resolveLocalType( plain );
+            const v4Info = preludeScope.resolveLocalType( v4Name );
+            if( !v3Info || !v4Info )
+            throw new Error( `prelude: missing type info for '${plain}' / '${v4Name}'` );
+
+            // explicit V3 name, always available
+            preludeScope.defineType( plain + "V3", v3Info );
+
+            if( targetPlutusVersion === "v4" )
+            preludeScope.overrideType( plain, v4Info );
+        }
+    }
 
     // ------------------------------------------------------------------
     // Script-context helper methods (milestone 2 stdlib expansion).

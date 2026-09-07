@@ -11,7 +11,7 @@ import { SourceRange } from "../../ast/Source/SourceRange";
 import { DiagnosticEmitter } from "../../diagnostics/DiagnosticEmitter";
 import { DiagnosticMessage } from "../../diagnostics/DiagnosticMessage";
 import { DiagnosticCode } from "../../diagnostics/diagnosticMessages.generated";
-import { CompilerOptions } from "../../IR/toUPLC/CompilerOptions";
+import { CompilerOptions, normalizeTargetPlutusVersion } from "../../IR/toUPLC/CompilerOptions";
 import { Parser } from "../../parser/Parser";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol } from "./scope/AstScope";
@@ -158,7 +158,10 @@ export class AstCompiler extends DiagnosticEmitter
     )
     {
         super( diagnostics );
-        this.program = new TypedProgram( this.diagnostics );
+        this.program = new TypedProgram(
+            this.diagnostics,
+            normalizeTargetPlutusVersion( (cfg as Partial<CompilerOptions>)?.targetPlutusVersion )
+        );
         // normalize entry to absolute path so import resolution works correctly
         if( typeof cfg.entry === "string" && typeof cfg.root === "string" )
         {
@@ -2582,6 +2585,23 @@ export class AstCompiler extends DiagnosticEmitter
         srcUid: string = ""
     ): FuncDecl | undefined
     {
+        // `contract` sugar derives its entry point from the V3 ScriptContext
+        // (purpose dispatch, `tx.requiredSigners`, spendingRef, ...); under
+        // targetPlutusVersion "v4" the unsuffixed context names bind to the
+        // Dijkstra-era shapes and the derivation would silently mistype.
+        // Reject with a clear message until the sugar learns V4.
+        if( this.program.targetPlutusVersion === "v4" )
+        {
+            this.error(
+                DiagnosticCode.Not_implemented_0,
+                contractDecl.name.range,
+                "`contract` declarations currently target Plutus V3; with "
+                + "`targetPlutusVersion: \"v4\"` write a plain exported validator "
+                + "(`( ctx: data ) => void`) against `ScriptContextV4` instead"
+            );
+            return undefined;
+        }
+
         const funcName = getUniqueInternalName( contractDecl.name.text );
 
         const paramsInternalNamesMap = new Map<string, string>();

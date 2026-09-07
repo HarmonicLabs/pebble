@@ -57,6 +57,21 @@ standard library grows the "common dApp patterns" layer.
   the type itself (`methodNamesPtr`), enabling methods on `Tx`, `TxOut`
   and `Interval`.
 
+### `targetPlutusVersion` compiler option
+
+- New `pebble.config.json` / `CompilerOptions` field
+  `targetPlutusVersion: "v3" | "v4"` (default `"v3"`, case-insensitive)
+  deciding which ledger-API family the **unsuffixed** prelude names
+  (`ScriptContext`, `Tx`, `TxIn`, `TxOut`, `Address`, `ScriptInfo`,
+  `ScriptPurpose`) resolve to. The suffixed names (`ScriptContextV3`,
+  `ScriptContextV4`, ...) are always available under both targets, so
+  mixed code can stay explicit and a project can flip the target
+  without touching code written against the plain names.
+- `contract` declarations derive their entry from the V3 context and
+  are rejected under `"v4"` with a located diagnostic — write plain
+  exported validators (`( ctx: data ) => void`) until the sugar learns
+  the Dijkstra shapes.
+
 ### Plutus V4 (Dijkstra) prelude types
 
 - The full V4 script-context type family, mirroring
