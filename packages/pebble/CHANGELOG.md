@@ -73,10 +73,33 @@ standard library grows the "common dApp patterns" layer.
   shapes explicit while CIP-0118 is still Proposed. When the fork lands,
   `"v4"` becomes the name and `"experimental-v4"` will keep working as
   an alias.
-- `contract` declarations derive their entry from the V3 context and
-  are rejected under `"experimental-v4"` with a located diagnostic —
-  write plain exported validators (`( ctx: data ) => void`) until the
-  sugar learns the Dijkstra shapes.
+- **`contract` declarations compile under `"experimental-v4"`**: the
+  purpose dispatch derives against whichever context family the target
+  selects (the V4 `Withdraw` arm keeps the `credential` field name — an
+  `AccountId` is a credential — so every pre-existing purpose keeps
+  working), and `context.tx` is the V4 `Tx`.
+- **New `guard` contract method keyword** for the Plutus V4 guarding
+  purpose (CIP-0112 / CIP-0118):
+
+  ```ts
+  contract Batch {
+      guard check() {
+          const { guardIndex, topTxInfo } = context;
+          match topTxInfo {
+              when Some{ value: top }: { /* top-level: whole batch visible */ }
+              when None{}: { /* executing inside a sub-transaction */ }
+          }
+      }
+  }
+  ```
+
+  `context.guardIndex` and `context.topTxInfo` (`Optional<TopTxInfo>`)
+  are available in guard methods. Guard methods are appended LAST in the
+  merged direct-redeemer union, so adding a guard to an existing contract
+  never changes the tags of its other methods. `guard` requires
+  `targetPlutusVersion` `"experimental-v4"` (or newer): under `"v3"` it
+  is rejected with a located diagnostic naming the option; inside a
+  `state` it is a parse error (states only have spend methods).
 
 ### Plutus V4 (Dijkstra) prelude types
 

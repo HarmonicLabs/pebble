@@ -398,6 +398,7 @@ export class Parser extends DiagnosticEmitter
         const withdrawMethods: FuncDecl[] = [];
         const proposeMethods: FuncDecl[] = [];
         const voteMethods: FuncDecl[] = [];
+        const guardMethods: FuncDecl[] = [];
         const stateDecls: StateDecl[] = [];
         while( !tn.skip( Token.CloseBrace ) )
         {
@@ -453,7 +454,8 @@ export class Parser extends DiagnosticEmitter
                 case Token.Certify: 
                 case Token.Withdraw: 
                 case Token.Propose:
-                case Token.Vote: {
+                case Token.Vote:
+                case Token.Guard: {
                     const funcDecl = this.parseFuncDecl(
                         CommonFlags.None,
                         thisStartPos,
@@ -473,6 +475,7 @@ export class Parser extends DiagnosticEmitter
                         nextToken === Token.Withdraw ? withdrawMethods :
                         nextToken === Token.Propose ? proposeMethods :
                         nextToken === Token.Vote ? voteMethods :
+                        nextToken === Token.Guard ? guardMethods :
                         spendMethods // default to spendMethods, should never happen
                     ).push( funcDecl );
                     continue;
@@ -500,6 +503,7 @@ export class Parser extends DiagnosticEmitter
             withdrawMethods,
             proposeMethods,
             voteMethods,
+            guardMethods,
             stateDecls,
             tn.range( startPos, tn.pos )
         );
@@ -562,6 +566,7 @@ export class Parser extends DiagnosticEmitter
                 || nextToken === Token.Withdraw
                 || nextToken === Token.Propose
                 || nextToken === Token.Vote
+                || nextToken === Token.Guard
             ) {
                 return this.error(
                     DiagnosticCode._0_expected,

@@ -1701,7 +1701,10 @@ export function populatePreludeScope(
         "ScriptInfo", {
             Mint: { policy: policyId_t },
             Spend: { ref: txOutRef_t, optionalDatum: opt_data_t },
-            Withdraw: { account: accountId_t },
+            // the field keeps the V3 name `credential` (an AccountId IS a
+            // credential) so the contract sugar's Withdraw arm derives
+            // identically under both targets
+            Withdraw: { credential: accountId_t },
             Certificate: { certificateIndex: int_t, certificate: txCertV4_t },
             Vote: { voter: voter_t },
             Propose: { proposalIndex: int_t, proposal: proposalProcedure_t },

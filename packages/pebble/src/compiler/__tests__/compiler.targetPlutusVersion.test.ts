@@ -120,10 +120,13 @@ export function probe( d: data ): void {
         expect( under3.error ).toBeDefined();
     });
 
-    test("`contract` declarations are rejected under experimental-v4 with a clear message", async () => {
+    test("`contract` declarations compile under experimental-v4 (the sugar is V4-aware)", async () => {
         const src = `
 contract C {
-    spend go() {}
+    spend go() {
+        const { tx } = context;
+        assert std.list.length( tx.guards ) >= 0 else "guards";
+    }
 }`;
         const ioApi = createMemoryCompilerIoApi({
             sources: new Map([ [ "main.pebble", fromUtf8( src ) ] ]),
@@ -134,10 +137,8 @@ contract C {
         } as any );
         await expect(
             c.compile({ entry: "main.pebble", root: "/" } as any )
-        ).rejects.toThrow();
-        expect(
-            c.diagnostics.some( d => d.toString().includes( "contract" ) && d.toString().includes( "experimental-v4" ) )
-        ).toBe( true );
+        ).resolves.toBeDefined();
+        expect( c.diagnostics.filter( d => d.toString().startsWith( "ERROR" ) ) ).toEqual( [] );
     });
 
     test("values are normalized case-insensitively; unknown values throw", async () => {

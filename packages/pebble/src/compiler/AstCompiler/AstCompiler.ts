@@ -2585,23 +2585,6 @@ export class AstCompiler extends DiagnosticEmitter
         srcUid: string = ""
     ): FuncDecl | undefined
     {
-        // `contract` sugar derives its entry point from the V3 ScriptContext
-        // (purpose dispatch, `tx.requiredSigners`, spendingRef, ...); under
-        // targetPlutusVersion "experimental-v4" the unsuffixed context names bind to the
-        // Dijkstra-era shapes and the derivation would silently mistype.
-        // Reject with a clear message until the sugar learns V4.
-        if( this.program.targetPlutusVersion === "experimental-v4" )
-        {
-            this.error(
-                DiagnosticCode.Not_implemented_0,
-                contractDecl.name.range,
-                "`contract` declarations currently target Plutus V3; with "
-                + "`targetPlutusVersion: \"experimental-v4\"` write a plain exported validator "
-                + "(`( ctx: data ) => void`) against `ScriptContextV4` instead"
-            );
-            return undefined;
-        }
-
         const funcName = getUniqueInternalName( contractDecl.name.text );
 
         const paramsInternalNamesMap = new Map<string, string>();

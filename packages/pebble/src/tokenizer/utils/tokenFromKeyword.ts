@@ -67,10 +67,11 @@ export function tokenFromKeyword(text: string): Token {
             if (text === "finally") return Token.Finally;
             break;
         }
-        // case CharCode.g: {
-        //     if (text === "get") return Token.Get;
-        //     break;
-        // }
+        case CharCode.g: {
+            // if (text === "get") return Token.Get;
+            if (text === "guard") return Token.Guard;
+            break;
+        }
         case CharCode.i: {
             if (len === 2) {
                 if (text === "if") return Token.If;

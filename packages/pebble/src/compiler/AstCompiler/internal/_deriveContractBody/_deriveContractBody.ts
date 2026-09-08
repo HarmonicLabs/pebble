@@ -89,6 +89,7 @@ export function _deriveContractBody(
         && contractDecl.withdrawMethods.length === 0
         && contractDecl.proposeMethods.length === 0
         && contractDecl.voteMethods.length === 0
+        && contractDecl.guardMethods.length === 0
         && contractDecl.stateDecls.length === 0
     ) return new BlockStmt([
         new FailStmt( undefined, contractRange )
@@ -457,6 +458,69 @@ export function _deriveContractBody(
             new MatchStmtCase(
                 new NamedDeconstructVarDecl(
                     new Identifier( "Vote", mockRange ),
+                    fields,
+                    undefined, // rest
+                    undefined, // type (inferred from initExpr)
+                    undefined, // initExpr
+                    CommonFlags.Const,
+                    contractRange
+                ),
+                new BlockStmt(
+                    bodyStmts,
+                    contractRange
+                ),
+                contractRange
+            )
+        );
+    }
+
+    if( contractDecl.guardMethods.length > 0 ) {
+        // the guarding purpose only exists in the Plutus V4 (Dijkstra) context
+        if( compiler.program.targetPlutusVersion === "v3" )
+        {
+            return compiler.error(
+                DiagnosticCode._guard_contract_methods_target_the_Plutus_V4_guarding_purpose_and_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0,
+                contractDecl.guardMethods[0].expr.name.range,
+                compiler.program.targetPlutusVersion
+            );
+        }
+
+        const guardIndexUniqueName = getUniqueInternalName("guardIndex");
+        const topTxInfoUniqueName = getUniqueInternalName("topTxInfo");
+        const fields: Map<Identifier, SimpleVarDecl> = new Map([
+            [
+                new Identifier( "guardIndex", mockRange ),
+                SimpleVarDecl.onlyNameConst( guardIndexUniqueName, mockRange )
+            ],
+            [
+                new Identifier( "topTxInfo", mockRange ),
+                SimpleVarDecl.onlyNameConst( topTxInfoUniqueName, mockRange )
+            ],
+        ]);
+        const bodyStmts = _getMatchedPurposeBlockStatements(
+            compiler,
+            contractDecl.guardMethods,
+            paramsInternalNamesMap,
+            // contextVarsMapping: `context.guardIndex` and
+            // `context.topTxInfo` (`Some` = executing at the top level of a
+            // nested-transaction batch, with the whole-batch view; `None` =
+            // executing inside a sub-transaction)
+            Object.freeze({
+                tx: txUniqueName,
+                purposeData: purposeUniqueName,
+                redeemerData: redeemerUniqueName,
+                guardIndex: guardIndexUniqueName,
+                topTxInfo: topTxInfoUniqueName,
+            }),
+            derived.directRedeemerTypeDef!,
+            contractRange,
+        );
+        if( !Array.isArray( bodyStmts ) ) return undefined;
+
+        purposeMatchCases.push(
+            new MatchStmtCase(
+                new NamedDeconstructVarDecl(
+                    new Identifier( "Guard", mockRange ),
                     fields,
                     undefined, // rest
                     undefined, // type (inferred from initExpr)

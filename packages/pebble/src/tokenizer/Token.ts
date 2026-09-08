@@ -97,6 +97,7 @@ export enum Token {
     Withdraw,       // withdraw methodName() { ... }
     Propose,        // propose methodName() { ... }
     Vote,           // vote methodName() { ... }
+    Guard,          // guard methodName() { ... }  (Plutus V4 guarding purpose)
     Context,        // context (aviable in contract methods (like `arguments` in JS))
   
     // punctuation

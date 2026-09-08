@@ -60,6 +60,9 @@ export function directMethodsInOrder( contractDecl: ContractDecl ): FuncDecl[]
         ...contractDecl.certifyMethods,
         ...contractDecl.proposeMethods,
         ...contractDecl.voteMethods,
+        // guard methods come LAST so the tags of every pre-existing purpose
+        // keep their encoding when a contract adds a guard
+        ...contractDecl.guardMethods,
     ];
 }
 
