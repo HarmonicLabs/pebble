@@ -74,23 +74,23 @@ describe("targetPlutusVersion — unsuffixed prelude names", () => {
         expect( v4.error ).toBeDefined(); // no `guards` on the V3 Tx
     });
 
-    test("v4: `ScriptContext`/`Tx` are the V4 shapes", async () => {
-        const v4 = await exportWith( usesV4Tx, "probe", { targetPlutusVersion: "v4" } );
+    test("experimental-v4: `ScriptContext`/`Tx` are the V4 shapes", async () => {
+        const v4 = await exportWith( usesV4Tx, "probe", { targetPlutusVersion: "experimental-v4" } );
         expect( v4.error ).toBeUndefined();
 
-        const v3 = await exportWith( usesV3Tx, "probe", { targetPlutusVersion: "v4" } );
+        const v3 = await exportWith( usesV3Tx, "probe", { targetPlutusVersion: "experimental-v4" } );
         expect( v3.error ).toBeDefined(); // no `fee` on the V4 Tx
     });
 
     ( Object.keys( fixtures ).length > 0 ? test : test.skip )(
-        "v4: the plain `ScriptContext` decodes the real 1.68 encoding", async () => {
+        "experimental-v4: the plain `ScriptContext` decodes the real 1.68 encoding", async () => {
         const { flat, error } = await exportWith(`
 export function probe( d: data ): void {
     const ctx = d as ScriptContext;
     const Some{ value: ix } = ctx.tx.subTxIx;
     assert ix == 3 else "subTxIx";
     assert ctx.scriptHash == #11111111111111111111111111111111111111111111111111111111 else "scriptHash";
-}`, "probe", { targetPlutusVersion: "v4" } );
+}`, "probe", { targetPlutusVersion: "experimental-v4" } );
         expect( error ).toBeUndefined();
         const r = evalFixture( flat!, "scriptcontext_full" );
         if( !r.ok ) throw new Error( `rejected: ${r.msg}\n${r.logs.join( "\n" )}` );
@@ -107,7 +107,7 @@ export function probe( d: data ): void {
     const ctx = d as ScriptContextV4;
     assert std.list.length( ctx.tx.guards ) >= 0 else "guards";
 }`;
-        for( const target of [ "v3", "v4" ] )
+        for( const target of [ "v3", "experimental-v4" ] )
         {
             const a = await exportWith( explicitV3, "probe", { targetPlutusVersion: target } );
             expect( a.error ).toBeUndefined();
@@ -116,7 +116,7 @@ export function probe( d: data ): void {
         }
     });
 
-    test("`contract` declarations are rejected under v4 with a clear message", async () => {
+    test("`contract` declarations are rejected under experimental-v4 with a clear message", async () => {
         const src = `
 contract C {
     spend go() {}
@@ -126,22 +126,29 @@ contract C {
             useConsoleAsOutput: false,
         });
         const c = new Compiler( ioApi, {
-            ...testOptions, compilerVersion: COMPILER_VERSION, targetPlutusVersion: "v4"
+            ...testOptions, compilerVersion: COMPILER_VERSION, targetPlutusVersion: "experimental-v4"
         } as any );
         await expect(
             c.compile({ entry: "main.pebble", root: "/" } as any )
         ).rejects.toThrow();
         expect(
-            c.diagnostics.some( d => d.toString().includes( "contract" ) && d.toString().includes( "v4" ) )
+            c.diagnostics.some( d => d.toString().includes( "contract" ) && d.toString().includes( "experimental-v4" ) )
         ).toBe( true );
     });
 
     test("values are normalized case-insensitively; unknown values throw", async () => {
-        const ok = await exportWith( usesV4Tx, "probe", { targetPlutusVersion: "V4" } );
+        const ok = await exportWith( usesV4Tx, "probe", { targetPlutusVersion: "Experimental-V4" } );
         expect( ok.error ).toBeUndefined();
 
         const bad = await exportWith( usesV3Tx, "probe", { targetPlutusVersion: "v5" } );
         expect( bad.error ).toBeDefined();
         expect( bad.error ).toContain( "targetPlutusVersion" );
+    });
+
+    test('the plain "v4" spelling is reserved until the fork, with guidance', async () => {
+        const r = await exportWith( usesV4Tx, "probe", { targetPlutusVersion: "v4" } );
+        expect( r.error ).toBeDefined();
+        expect( r.error ).toContain( "reserved" );
+        expect( r.error ).toContain( "experimental-v4" );
     });
 });

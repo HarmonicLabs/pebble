@@ -148,17 +148,21 @@ export interface CompilerOptions {
      *
      * - `"v3"` (default): the stable Conway-era types — today's on-chain
      *   reality (protocol version 11 runs PlutusV3 scripts).
-     * - `"v4"`: the Dijkstra-era types (mirroring plutus-ledger-api
-     *   1.68.0.0). The suffixed names (`ScriptContextV4`, `ScriptContextV3`,
-     *   ...) are ALWAYS available regardless of this option, so mixed code
-     *   can be explicit. `contract` declarations currently derive their
-     *   entry from the V3 context and are rejected under `"v4"` — write
-     *   plain exported validators (`( ctx: data ) => void`) instead.
+     * - `"experimental-v4"`: the Dijkstra-era types (mirroring
+     *   plutus-ledger-api 1.68.0.0). EXPERIMENTAL until Plutus V4 is live
+     *   on mainnet — the shapes track a still-Proposed CIP and may change;
+     *   the plain `"v4"` spelling is reserved for when the fork lands and
+     *   is rejected with guidance until then. The suffixed names
+     *   (`ScriptContextV4`, `ScriptContextV3`, ...) are ALWAYS available
+     *   regardless of this option, so mixed code can be explicit.
+     *   `contract` declarations currently derive their entry from the V3
+     *   context and are rejected under `"experimental-v4"` — write plain
+     *   exported validators (`( ctx: data ) => void`) instead.
      */
     targetPlutusVersion: TargetPlutusVersion;
 }
 
-export type TargetPlutusVersion = "v3" | "v4";
+export type TargetPlutusVersion = "v3" | "experimental-v4";
 
 /**
  * Case-insensitive normalization for `targetPlutusVersion` (config files
@@ -169,9 +173,18 @@ export function normalizeTargetPlutusVersion( v: unknown ): TargetPlutusVersion
     if( v === undefined || v === null ) return "v3";
     const s = String( v ).toLowerCase().replace( /^plutus[\s_-]*/, "" );
     if( s === "v3" || s === "3" ) return "v3";
-    if( s === "v4" || s === "4" ) return "v4";
+    if( s === "experimental-v4" || s === "experimentalv4" || s === "experimental_v4" )
+    return "experimental-v4";
+    // reserve the plain "v4" spelling for when Plutus V4 is live on mainnet
+    // (the Dijkstra hard fork); until then the target is explicitly
+    // experimental — shapes track a still-Proposed CIP and may change
+    if( s === "v4" || s === "4" )
     throw new Error(
-        `invalid "targetPlutusVersion": ${JSON.stringify( v )}; expected "v3" or "v4"`
+        `"targetPlutusVersion": "v4" is reserved until Plutus V4 is active on ` +
+        `mainnet; use "experimental-v4" to opt into the pre-release Dijkstra types`
+    );
+    throw new Error(
+        `invalid "targetPlutusVersion": ${JSON.stringify( v )}; expected "v3" or "experimental-v4"`
     );
 }
 

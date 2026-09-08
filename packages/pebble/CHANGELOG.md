@@ -60,17 +60,23 @@ standard library grows the "common dApp patterns" layer.
 ### `targetPlutusVersion` compiler option
 
 - New `pebble.config.json` / `CompilerOptions` field
-  `targetPlutusVersion: "v3" | "v4"` (default `"v3"`, case-insensitive)
-  deciding which ledger-API family the **unsuffixed** prelude names
-  (`ScriptContext`, `Tx`, `TxIn`, `TxOut`, `Address`, `ScriptInfo`,
-  `ScriptPurpose`) resolve to. The suffixed names (`ScriptContextV3`,
-  `ScriptContextV4`, ...) are always available under both targets, so
-  mixed code can stay explicit and a project can flip the target
-  without touching code written against the plain names.
+  `targetPlutusVersion: "v3" | "experimental-v4"` (default `"v3"`,
+  case-insensitive) deciding which ledger-API family the **unsuffixed**
+  prelude names (`ScriptContext`, `Tx`, `TxIn`, `TxOut`, `Address`,
+  `ScriptInfo`, `ScriptPurpose`) resolve to. The suffixed names
+  (`ScriptContextV3`, `ScriptContextV4`, ...) are always available under
+  both targets, so mixed code can stay explicit and a project can flip
+  the target without touching code written against the plain names.
+- The plain `"v4"` spelling is **reserved until Plutus V4 is active on
+  mainnet** (the Dijkstra hard fork) and rejected with guidance; the
+  `experimental-` prefix makes the pre-release nature of the Dijkstra
+  shapes explicit while CIP-0118 is still Proposed. When the fork lands,
+  `"v4"` becomes the name and `"experimental-v4"` will keep working as
+  an alias.
 - `contract` declarations derive their entry from the V3 context and
-  are rejected under `"v4"` with a located diagnostic — write plain
-  exported validators (`( ctx: data ) => void`) until the sugar learns
-  the Dijkstra shapes.
+  are rejected under `"experimental-v4"` with a located diagnostic —
+  write plain exported validators (`( ctx: data ) => void`) until the
+  sugar learns the Dijkstra shapes.
 
 ### Plutus V4 (Dijkstra) prelude types
 

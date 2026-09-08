@@ -1723,7 +1723,7 @@ export function populatePreludeScope(
             // explicit V3 name, always available
             preludeScope.defineType( plain + "V3", v3Info );
 
-            if( targetPlutusVersion === "v4" )
+            if( targetPlutusVersion === "experimental-v4" )
             preludeScope.overrideType( plain, v4Info );
         }
     }

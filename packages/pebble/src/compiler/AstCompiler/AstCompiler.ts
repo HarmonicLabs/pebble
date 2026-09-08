@@ -2587,16 +2587,16 @@ export class AstCompiler extends DiagnosticEmitter
     {
         // `contract` sugar derives its entry point from the V3 ScriptContext
         // (purpose dispatch, `tx.requiredSigners`, spendingRef, ...); under
-        // targetPlutusVersion "v4" the unsuffixed context names bind to the
+        // targetPlutusVersion "experimental-v4" the unsuffixed context names bind to the
         // Dijkstra-era shapes and the derivation would silently mistype.
         // Reject with a clear message until the sugar learns V4.
-        if( this.program.targetPlutusVersion === "v4" )
+        if( this.program.targetPlutusVersion === "experimental-v4" )
         {
             this.error(
                 DiagnosticCode.Not_implemented_0,
                 contractDecl.name.range,
                 "`contract` declarations currently target Plutus V3; with "
-                + "`targetPlutusVersion: \"v4\"` write a plain exported validator "
+                + "`targetPlutusVersion: \"experimental-v4\"` write a plain exported validator "
                 + "(`( ctx: data ) => void`) against `ScriptContextV4` instead"
             );
             return undefined;
