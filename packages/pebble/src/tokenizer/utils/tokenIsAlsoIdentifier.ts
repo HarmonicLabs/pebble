@@ -30,6 +30,8 @@ export function tokenIsAlsoIdentifier(token: Token): boolean {
         case Token.Propose:
         case Token.Vote:
         case Token.Guard:
+        case Token.Top:
+        case Token.Nested:
         // case Token.Context:
 
         // case Token.Type: // we don't allow it in pebble

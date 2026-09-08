@@ -73,8 +73,10 @@ With released type definitions, Pebble can now:
    `contract` sugar is V4-aware too: it compiles under
    `targetPlutusVersion: "experimental-v4"` and gains the `guard` method
    keyword for the guarding purpose (`context.guardIndex`,
-   `context.topTxInfo`), tested against fixture-derived guard contexts
-   (`compiler.contractGuard.test.ts`);
+   `context.topTxInfo`) and the `top` / `nested` execution-level method
+   keywords (the body matches `tx.subTxIx` before the purpose; level-less
+   contracts are top-only), tested against fixture-derived contexts
+   (`compiler.contractGuard.test.ts`, `compiler.contractLevels.test.ts`);
 2. wire the V4 cost-model shape (`cardano-costmodels-ts` `v4`) into the
    test runner once parameter values are published;
 3. emit the `PlutusScriptV4` envelope/tag in the export pipeline and in

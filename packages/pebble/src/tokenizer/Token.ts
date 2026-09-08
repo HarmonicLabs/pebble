@@ -98,6 +98,8 @@ export enum Token {
     Propose,        // propose methodName() { ... }
     Vote,           // vote methodName() { ... }
     Guard,          // guard methodName() { ... }  (Plutus V4 guarding purpose)
+    Top,            // top <purpose> methodName() { ... }     (execution level: top-level tx; the default)
+    Nested,         // nested <purpose> methodName() { ... }  (execution level: inside a sub-transaction)
     Context,        // context (aviable in contract methods (like `arguments` in JS))
   
     // punctuation

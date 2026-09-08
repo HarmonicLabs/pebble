@@ -6,7 +6,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { Data, DataConstr, dataFromCbor } from "@harmoniclabs/plutus-data";
+import { Data, DataConstr, DataI, dataFromCbor } from "@harmoniclabs/plutus-data";
 
 // `guard name() { ... }` contract methods — the Plutus V4 guarding purpose
 // (CIP-0112 / CIP-0118). Only meaningful under
@@ -48,12 +48,22 @@ async function compileContract(
     }
 }
 
-/** V4 ScriptContext = Constr 0 [ tx, redeemer, scriptInfo, scriptHash ] */
-function guardContext( purposeFixture: string, redeemer: Data ): Data
+/**
+ * V4 ScriptContext = Constr 0 [ tx, redeemer, scriptInfo, scriptHash ].
+ * The fixture's tx carries `subTxIx = Some 3` (a sub-transaction); the
+ * execution level is set explicitly per case since level-less contract
+ * methods are top-only (see compiler.contractLevels.test.ts).
+ */
+function guardContext( purposeFixture: string, redeemer: Data, level: "top" | "nested" = "top" ): Data
 {
     const full = dataFromCbor( fromHex( fixtures[ "scriptcontext_full" ] ) ) as DataConstr;
+    const tx = full.fields[0] as DataConstr;
+    const txFields = tx.fields.slice();
+    txFields[1] = level === "top"
+        ? new DataConstr( 1, [] )                   // subTxIx = None
+        : new DataConstr( 0, [ new DataI( 3 ) ] );  // subTxIx = Some 3
     const purpose = dataFromCbor( fromHex( fixtures[ purposeFixture ] ) );
-    return new DataConstr( 0, [ full.fields[0], redeemer, purpose, full.fields[3] ] );
+    return new DataConstr( 0, [ new DataConstr( 0, txFields ), redeemer, purpose, full.fields[3] ] );
 }
 
 function run( flat: Uint8Array, ctx: Data ): { ok: boolean; msg?: string; logs: string[] } {
@@ -116,9 +126,10 @@ contract C {
     });
 
     ( hasFixtures ? test : test.skip )("sub-transaction guard gets topTxInfo = None", async () => {
-        const r = await compileContract( guardOnly, "experimental-v4" );
+        // a guard meant for sub-transactions must be declared `nested`
+        const r = await compileContract( guardOnly.replace( "    guard check()", "    nested guard check()" ), "experimental-v4" );
         expect( r.error ).toBeUndefined();
-        const res = run( r.flat!, guardContext( "scriptinfo_guarding_sub", new DataConstr( 0, [] ) ) );
+        const res = run( r.flat!, guardContext( "scriptinfo_guarding_sub", new DataConstr( 0, [] ), "nested" ) );
         if( !res.ok ) throw new Error( `rejected: ${res.msg}\n${res.logs.join( "\n" )}` );
     });
 

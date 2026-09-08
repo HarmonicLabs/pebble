@@ -34,7 +34,7 @@ import { BreakStmt } from "../../../../ast/nodes/statements/BreakStmt";
 import { ContinueStmt } from "../../../../ast/nodes/statements/ContinueStmt";
 import { ContractDecl } from "../../../../ast/nodes/statements/declarations/ContractDecl";
 import { StateDecl } from "../../../../ast/nodes/statements/declarations/StateDecl";
-import { FuncDecl } from "../../../../ast/nodes/statements/declarations/FuncDecl";
+import { ContractExecLevel, FuncDecl } from "../../../../ast/nodes/statements/declarations/FuncDecl";
 import { ArrowKind } from "../../../../ast/nodes/expr/functions/ArrowKind";
 import { AstBooleanType, AstFuncType, AstVoidType } from "../../../../ast/nodes/types/AstNativeTypeExpr";
 import { LessThanExpr } from "../../../../ast/nodes/expr/binary/BinaryExpr";
@@ -187,6 +187,133 @@ export function _deriveContractBody(
         }, onlyData
     );
      */
+    // ------------------------------------------------------------------
+    // Execution level (Plutus V4 nested transactions, CIP-0118).
+    //
+    // Every contract method has an execution level — `top <purpose>` (the
+    // default when no level keyword is written) or `nested <purpose>` —
+    // and the derived body matches the transaction's `subTxIx` BEFORE the
+    // purpose: `None` (top-level transaction) dispatches the top-level
+    // methods, `Some{ value }` (sub-transaction) the nested ones. A level
+    // with no methods is unconditionally `fail`, so a contract written
+    // without any level keyword always fails when executed inside a
+    // sub-transaction.
+    //
+    // Under the "v3" target there are no sub-transactions: `nested` is an
+    // error and the body is exactly the plain purpose dispatch.
+    // ------------------------------------------------------------------
+    const target = compiler.program.targetPlutusVersion;
+    const firstNested = _firstMethodAtLevel( contractDecl, "nested" );
+
+    if( target === "v3" )
+    {
+        if( firstNested )
+        return compiler.error(
+            DiagnosticCode._nested_contract_methods_sub_transaction_execution_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0,
+            firstNested.expr.name.range,
+            target
+        );
+        const purposeMatch = _buildPurposeMatchStmt(
+            compiler, contractDecl, derived, paramsInternalNamesMap,
+            txUniqueName, purposeUniqueName, redeemerUniqueName, contractRange
+        );
+        if( !purposeMatch ) return undefined;
+        bodyStmts.push( purposeMatch );
+        bodyStmts.push( new FailStmt( undefined, contractRange ) ); // unreachable in theory (else case)
+        return new BlockStmt( bodyStmts, contractRange );
+    }
+
+    const levelBlock = ( level: ContractExecLevel ): BodyStmt[] | undefined => {
+        const view = _contractViewAtLevel( contractDecl, level );
+        if( !_hasAnyMethod( view ) ) return [ new FailStmt( undefined, contractRange ) ];
+        const purposeMatch = _buildPurposeMatchStmt(
+            compiler, view, derived, paramsInternalNamesMap,
+            txUniqueName, purposeUniqueName, redeemerUniqueName, contractRange
+        );
+        if( !purposeMatch ) return undefined;
+        return [ purposeMatch, new FailStmt( undefined, contractRange ) ];
+    };
+    const topBlock = levelBlock( "top" );
+    if( !topBlock ) return undefined;
+    const nestedBlock = levelBlock( "nested" );
+    if( !nestedBlock ) return undefined;
+
+    // const { subTxIx: <subTxIx> } = tx;
+    const subTxIxUniqueName = getUniqueInternalName("subTxIx");
+    bodyStmts.push(
+        new VarStmt(
+            [ new SingleDeconstructVarDecl(
+                new Map<Identifier, VarDecl>([
+                    [
+                        new Identifier( "subTxIx", mockRange ),
+                        SimpleVarDecl.onlyNameConst( subTxIxUniqueName, mockRange )
+                    ],
+                ]),
+                undefined, // rest
+                undefined, // type (inferred from initExpr)
+                new Identifier( txUniqueName, mockRange ), // initExpr
+                CommonFlags.Const,
+                contractRange
+            ) ],
+            contractRange
+        )
+    );
+    // match subTxIx { when None{}: <top>  when Some{ value }: <nested> }
+    const nestedIxUniqueName = getUniqueInternalName("nestedTxIx");
+    bodyStmts.push(
+        new MatchStmt(
+            new Identifier( subTxIxUniqueName, mockRange ),
+            [
+                new MatchStmtCase(
+                    new NamedDeconstructVarDecl(
+                        new Identifier( "None", mockRange ),
+                        new Map(),
+                        undefined, undefined, undefined,
+                        CommonFlags.Const,
+                        contractRange
+                    ),
+                    new BlockStmt( topBlock, contractRange ),
+                    contractRange
+                ),
+                new MatchStmtCase(
+                    new NamedDeconstructVarDecl(
+                        new Identifier( "Some", mockRange ),
+                        new Map<Identifier, SimpleVarDecl>([
+                            [
+                                new Identifier( "value", mockRange ),
+                                SimpleVarDecl.onlyNameConst( nestedIxUniqueName, mockRange )
+                            ],
+                        ]),
+                        undefined, undefined, undefined,
+                        CommonFlags.Const,
+                        contractRange
+                    ),
+                    new BlockStmt( nestedBlock, contractRange ),
+                    contractRange
+                ),
+            ],
+            undefined, // exhaustive: Some / None
+            contractRange
+        )
+    );
+
+    bodyStmts.push( new FailStmt( undefined, contractRange ) ); // unreachable in theory
+    return new BlockStmt( bodyStmts, contractRange );
+}
+
+/** the purpose dispatch (`match purpose { when Spend{..}: ... else fail }`) for the given contract (view) */
+function _buildPurposeMatchStmt(
+    compiler: AstCompiler,
+    contractDecl: ContractDecl,
+    derived: DerivedContractTypes,
+    paramsInternalNamesMap: Map<string, string>,
+    txUniqueName: string,
+    purposeUniqueName: string,
+    redeemerUniqueName: string,
+    contractRange: SourceRange,
+): MatchStmt | undefined
+{
+    const mockRange = SourceRange.mock;
     const purposeMatchCases: MatchStmtCase[] = [];
     if(
         contractDecl.spendMethods.length > 0
@@ -537,20 +664,55 @@ export function _deriveContractBody(
         );
     }
 
-    bodyStmts.push(
-        new MatchStmt(
-            new Identifier( purposeUniqueName, mockRange ),
-            purposeMatchCases,
-            new MatchStmtElseCase(
-                new FailStmt( undefined, contractRange ),
-                contractRange
-            ),
+    return new MatchStmt(
+        new Identifier( purposeUniqueName, mockRange ),
+        purposeMatchCases,
+        new MatchStmtElseCase(
+            new FailStmt( undefined, contractRange ),
             contractRange
-        )
+        ),
+        contractRange
     );
+}
 
-    bodyStmts.push( new FailStmt( undefined, contractRange ) ); // unreachable in theory (else case)
-    return new BlockStmt( bodyStmts, contractRange );
+/** a shallow copy of the contract keeping only the methods declared at `level`
+ * (every state is kept — the datum union must not change — with its methods filtered) */
+function _contractViewAtLevel( decl: ContractDecl, level: ContractExecLevel ): ContractDecl
+{
+    const at = ( ms: FuncDecl[] ) => ms.filter( m => m.execLevel === level );
+    return new ContractDecl(
+        decl.name,
+        decl.params,
+        at( decl.spendMethods ),
+        at( decl.mintMethods ),
+        at( decl.certifyMethods ),
+        at( decl.withdrawMethods ),
+        at( decl.proposeMethods ),
+        at( decl.voteMethods ),
+        at( decl.guardMethods ),
+        decl.stateDecls.map( s => new StateDecl( s.name, s.fields, at( s.spendMethods ), s.range ) ),
+        decl.range
+    );
+}
+
+function _allMethods( decl: ContractDecl ): FuncDecl[]
+{
+    return [
+        ...decl.spendMethods, ...decl.mintMethods, ...decl.certifyMethods,
+        ...decl.withdrawMethods, ...decl.proposeMethods, ...decl.voteMethods,
+        ...decl.guardMethods,
+        ...decl.stateDecls.flatMap( s => s.spendMethods ),
+    ];
+}
+
+function _hasAnyMethod( decl: ContractDecl ): boolean
+{
+    return _allMethods( decl ).length > 0;
+}
+
+function _firstMethodAtLevel( decl: ContractDecl, level: ContractExecLevel ): FuncDecl | undefined
+{
+    return _allMethods( decl ).find( m => m.execLevel === level );
 }
 
 function _getMatchedPurposeBlockStatements(

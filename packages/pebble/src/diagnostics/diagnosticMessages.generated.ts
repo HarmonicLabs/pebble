@@ -300,6 +300,7 @@ export enum DiagnosticCode {
     Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda = 30207,
     Circular_import_of_0_may_only_reference_types_and_contracts = 6056,
     _guard_contract_methods_target_the_Plutus_V4_guarding_purpose_and_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0 = 30208,
+    _nested_contract_methods_sub_transaction_execution_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0 = 30209,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -604,6 +605,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 30207: return "Lambdas can only capture 'const' bindings; '{0}' is a mutable 'let'. Copy it into a 'const' before the lambda.";
         case 6056: return "Circular import of '{0}' may only reference types and contracts.";
         case 30208: return "'guard' contract methods target the Plutus V4 guarding purpose and require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".";
+        case 30209: return "'nested' contract methods (sub-transaction execution) require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

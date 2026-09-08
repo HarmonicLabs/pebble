@@ -36,6 +36,7 @@ import { LitStrExpr } from "../ast/nodes/expr/litteral/LitStrExpr";
 import { TemplateStrExpr } from "../ast/nodes/expr/litteral/TemplateStrExpr";
 import { LitIntExpr } from "../ast/nodes/expr/litteral/LitIntExpr";
 import { LitHexBytesExpr } from "../ast/nodes/expr/litteral/LitHexBytesExpr";
+import { ContractExecLevel } from "../ast/nodes/statements/declarations/FuncDecl";
 import { CallExpr } from "../ast/nodes/expr/functions/CallExpr";
 import { BlockStmt } from "../ast/nodes/statements/BlockStmt";
 import { BreakStmt } from "../ast/nodes/statements/BreakStmt";
@@ -407,7 +408,23 @@ export class Parser extends DiagnosticEmitter
             const thisStartPos = tn.tokenPos;
 
             const prevState = tn.mark();
-            const nextToken = tn.next();
+            let nextToken = tn.next();
+
+            // optional execution-level keyword: `top <purpose>` / `nested <purpose>`
+            let execLevel: ContractExecLevel = "top";
+            if( nextToken === Token.Top || nextToken === Token.Nested )
+            {
+                const levelToken = nextToken;
+                const afterLevel = tn.next();
+                if( !isContractPurposeToken( afterLevel ) )
+                return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "contract method purpose (spend, mint, certify, withdraw, propose, vote, guard)"
+                );
+                execLevel = levelToken === Token.Nested ? "nested" : "top";
+                nextToken = afterLevel;
+            }
+
             switch( nextToken ) {
                 case Token.State: {
                     const stateDecl = this.parseStateDecl( thisStartPos );
@@ -467,6 +484,7 @@ export class Parser extends DiagnosticEmitter
                         DiagnosticCode.Contract_methods_must_return_void_or_fail,
                         funcDecl.expr.signature.returnType?.range ?? funcDecl.expr.signature.range
                     );
+                    funcDecl.execLevel = execLevel;
 
                     (
                         nextToken === Token.Spend ? spendMethods :
@@ -542,7 +560,23 @@ export class Parser extends DiagnosticEmitter
 
             const memberStartPos = tn.tokenPos;
             const prevState = tn.mark();
-            const nextToken = tn.next();
+            let nextToken = tn.next();
+
+            // optional execution-level keyword before a spend method; a field
+            // may legitimately be NAMED `top`/`nested`, so only treat the
+            // token as a level when a purpose keyword follows
+            let execLevel: ContractExecLevel = "top";
+            if( nextToken === Token.Top || nextToken === Token.Nested )
+            {
+                const levelState = tn.mark();
+                const afterLevel = tn.next();
+                if( isContractPurposeToken( afterLevel ) )
+                {
+                    execLevel = nextToken === Token.Nested ? "nested" : "top";
+                    nextToken = afterLevel;
+                }
+                else tn.reset( levelState );
+            }
 
             if( nextToken === Token.Spend ) {
                 const funcDecl = this.parseFuncDecl(
@@ -556,6 +590,7 @@ export class Parser extends DiagnosticEmitter
                     DiagnosticCode.Contract_methods_must_return_void_or_fail,
                     funcDecl.expr.signature.returnType?.range ?? funcDecl.expr.signature.range
                 );
+                funcDecl.execLevel = execLevel;
                 spendMethods.push( funcDecl );
                 continue;
             }
@@ -4807,4 +4842,18 @@ export interface ParseVarOpts {
     isFor: boolean;
     isForOf: boolean;
     isParam: boolean
+}
+
+/** the contract method purpose keywords (`top`/`nested` may precede any of them) */
+function isContractPurposeToken( tok: Token ): boolean
+{
+    return (
+        tok === Token.Spend
+        || tok === Token.Mint
+        || tok === Token.Certify
+        || tok === Token.Withdraw
+        || tok === Token.Propose
+        || tok === Token.Vote
+        || tok === Token.Guard
+    );
 }

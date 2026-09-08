@@ -311,6 +311,7 @@
   "Circular import of '{0}' may only reference types and contracts.": 6056,
 
   "'guard' contract methods target the Plutus V4 guarding purpose and require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".": 30208,
+  "'nested' contract methods (sub-transaction execution) require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".": 30209,
 
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }

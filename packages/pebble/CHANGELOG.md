@@ -100,6 +100,21 @@ standard library grows the "common dApp patterns" layer.
   `targetPlutusVersion` `"experimental-v4"` (or newer): under `"v3"` it
   is rejected with a located diagnostic naming the option; inside a
   `state` it is a parse error (states only have spend methods).
+- **New `top` / `nested` execution-level keywords for contract methods**
+  (Plutus V4 nested transactions, CIP-0118): `top <purpose>` declares a
+  method valid only in the top-level transaction, `nested <purpose>` one
+  valid only inside a sub-transaction — `nested spend`, `top guard`,
+  `nested mint`, ... A purpose keyword without a level keyword defaults
+  to `top`. The derived contract body matches `tx.subTxIx` **before**
+  the purpose (`None` → top-level methods, `Some` → nested methods), and
+  a level with no methods is unconditionally `fail` — so **a contract
+  written without any level keyword always fails when executed inside a
+  sub-transaction**. Levels apply to state spend methods too, and the
+  merged redeemer union / tag order is level-independent (a contract
+  compiled under `"v3"` with `top` keywords is byte-identical to one
+  without). Under `"v3"` `nested` is rejected with a located diagnostic
+  naming the option; `top`/`nested` remain usable as identifiers (a state
+  field named `top` still parses).
 
 ### Plutus V4 (Dijkstra) prelude types
 
