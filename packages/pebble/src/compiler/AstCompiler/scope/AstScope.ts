@@ -313,23 +313,6 @@ export class AstScope
         return true;
     }
 
-    /**
-     * Re-binds an existing type name to a (possibly different) type-info
-     * entry. Used by the prelude to point the unsuffixed script-context
-     * names at the V3 or V4 family per `targetPlutusVersion` — regular
-     * user code goes through `defineType`, which refuses redefinition.
-     */
-    overrideType(
-        name: string,
-        possibleTirTypes: PossibleTirTypes
-    ): void
-    {
-        if( this._isReadonly ) {
-            throw new Error("Cannot override type on readonly scope");
-        }
-        this.types.set( name, possibleTirTypes );
-    }
-
     resolveLocalType(
         name: string
     ): PossibleTirTypes | undefined

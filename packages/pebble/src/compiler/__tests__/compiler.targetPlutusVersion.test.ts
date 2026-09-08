@@ -8,9 +8,10 @@ import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
 import { dataFromCbor } from "@harmoniclabs/plutus-data";
 
-// `targetPlutusVersion`: decides which ledger-API family the UNSUFFIXED
-// prelude type names (`ScriptContext`, `Tx`, `TxOut`, ...) resolve to.
-// The suffixed names (`...V3` / `...V4`) are always available.
+// `targetPlutusVersion`: the context type NAMES are always the same
+// (`ScriptContext`, `Tx`, `TxOut`, ...) — this option decides which
+// ledger-API family DEFINES them. There are no suffixed variants: one
+// family exists per compilation.
 
 async function exportWith(
     src: string,
@@ -96,24 +97,27 @@ export function probe( d: data ): void {
         if( !r.ok ) throw new Error( `rejected: ${r.msg}\n${r.logs.join( "\n" )}` );
     });
 
-    test("the suffixed names are available under BOTH targets", async () => {
-        const explicitV3 = `
-export function probe( d: data ): void {
-    const ctx = d as ScriptContextV3;
-    assert ctx.tx.fee >= 0 else "fee";
-}`;
-        const explicitV4 = `
+    test("there are NO suffixed type names — one family per compilation", async () => {
+        const suffixed = `
 export function probe( d: data ): void {
     const ctx = d as ScriptContextV4;
-    assert std.list.length( ctx.tx.guards ) >= 0 else "guards";
+    assert true else "x";
 }`;
         for( const target of [ "v3", "experimental-v4" ] )
         {
-            const a = await exportWith( explicitV3, "probe", { targetPlutusVersion: target } );
-            expect( a.error ).toBeUndefined();
-            const b = await exportWith( explicitV4, "probe", { targetPlutusVersion: target } );
-            expect( b.error ).toBeUndefined();
+            const r = await exportWith( suffixed, "probe", { targetPlutusVersion: target } );
+            expect( r.error ).toBeDefined(); // ScriptContextV4 is not a type
         }
+        // V4-only auxiliary names exist ONLY under experimental-v4
+        const aux = `
+export function probe( d: data ): void {
+    const r = d as POSIXTimeRange;
+    assert r.fromInclusive is None else "x";
+}`;
+        const under4 = await exportWith( aux, "probe", { targetPlutusVersion: "experimental-v4" } );
+        expect( under4.error ).toBeUndefined();
+        const under3 = await exportWith( aux, "probe" );
+        expect( under3.error ).toBeDefined();
     });
 
     test("`contract` declarations are rejected under experimental-v4 with a clear message", async () => {

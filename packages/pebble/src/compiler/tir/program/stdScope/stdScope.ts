@@ -216,6 +216,16 @@ export function populatePreludeScope(
 ): void
 {
     const preludeScope = program.preludeScope;
+    // The context-type family is SINGLE per program: the same names
+    // (`ScriptContext`, `Tx`, ...) always exist, and `targetPlutusVersion`
+    // decides which DEFINITION they carry. Under "experimental-v4" the V3
+    // versions of these names are still constructed (internal scaffolding
+    // for the V3-only helpers) but NOT registered — the V4 definitions
+    // below take the names instead.
+    const v4TakesOver = targetPlutusVersion === "experimental-v4";
+    const suppressedV3Names = v4TakesOver
+        ? new Set([ "ScriptPurpose", "ScriptInfo", "Address", "TxOut", "TxIn", "Tx", "ScriptContext" ])
+        : new Set<string>();
     // empty string will be never generated as uid,
     // so it is fine to use it for prelude
     const preludeFileUid = "";
@@ -318,6 +328,11 @@ export function populatePreludeScope(
         // forward methodsNames into the TYPE constructors too: method-call
         // dispatch reads `TirStructType.methodNamesPtr` (expressifyVars),
         // not only the scope-level table
+        // the suppressed family is not part of this compilation target at
+        // all — skip construction; the callers that would consume the
+        // result are gated on the same condition
+        if( suppressedV3Names.has( name ) )
+        return { sop: undefined as any, data: undefined as any };
         const { sop, data } = mkSingleConstructorStruct( name, fields, methodsNames );
         const sop_key = sop.toTirTypeKey();
         const data_key = data.toTirTypeKey();
@@ -380,6 +395,8 @@ export function populatePreludeScope(
         methodsNames: Map<AstFuncName, TirFuncName> = new Map()
     ): { sop: TirSoPStructType, data: TirDataStructType }
     {
+        if( suppressedV3Names.has( name ) )
+        return { sop: undefined as any, data: undefined as any };
         const { sop, data } = mkMultiConstructorStruct( name, constrs, methodsNames );
         const sop_key = sop.toTirTypeKey();
         const data_key = data.toTirTypeKey();
@@ -1389,16 +1406,16 @@ export function populatePreludeScope(
     //     currentTreasury: Optional<int>,
     //     treasuryDonation: Optional<int>
     // }
-    const list_txIn_t = program.getAppliedGeneric(
+    const list_txIn_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ txIn_t ]
     );
-    if(!list_txIn_t) throw new Error("expected list_txIn_t");
-    const list_txOut_t = program.getAppliedGeneric(
+    if( !v4TakesOver && !list_txIn_t ) throw new Error("expected list_txIn_t");
+    const list_txOut_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ txOut_t ]
     );
-    if(!list_txOut_t) throw new Error("expected list_txOut_t");
+    if( !v4TakesOver && !list_txOut_t ) throw new Error("expected list_txOut_t");
     const list_certificate_t = program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ certificate_t ]
@@ -1409,11 +1426,11 @@ export function populatePreludeScope(
         [ pubKeyHash_t ]
     );
     if(!list_pubKeyHash_t) throw new Error("expected list_pubKeyHash_t");
-    const map_scriptPurpose_data_t = program.getAppliedGeneric(
+    const map_scriptPurpose_data_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(),
         [ scriptPurpose_t, data_t ]
     );
-    if(!map_scriptPurpose_data_t) throw new Error("expected map_scriptPurpose_data_t");
+    if( !v4TakesOver && !map_scriptPurpose_data_t ) throw new Error("expected map_scriptPurpose_data_t");
     const map_hash32_data_t = program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(),
         [ hash32_t, data_t ]
@@ -1434,18 +1451,20 @@ export function populatePreludeScope(
         [ proposalProcedure_t ]
     );
     if(!list_proposalProcedure_t) throw new Error("expected list_proposalProcedure_t");
+    // the `!` assertions are safe: under "experimental-v4" this whole
+    // definition is suppressed (early return) before the fields are read
     const { data: tx_t } = defineSingleConstructorStruct(
         "Tx", {
-            inputs: list_txIn_t,
-            refInputs: list_txIn_t,
-            outputs: list_txOut_t,
+            inputs: list_txIn_t!,
+            refInputs: list_txIn_t!,
+            outputs: list_txOut_t!,
             fee: int_t,
             mint: value_t,
             certificates: list_certificate_t,
             withdrawals: map_cred_int_t,
             validityInterval: interval_t,
             requiredSigners: list_pubKeyHash_t,
-            redeemers: map_scriptPurpose_data_t,
+            redeemers: map_scriptPurpose_data_t!,
             datums: map_hash32_data_t,
             hash: txHash_t,
             votes: map_voter_map_txOutRef_vote_t,
@@ -1475,7 +1494,11 @@ export function populatePreludeScope(
     );
 
     // ==================================================================
-    // Plutus V4 (Dijkstra era) script-context types.
+    // Plutus V4 (Dijkstra era) script-context types — defined ONLY when
+    // `targetPlutusVersion` is "experimental-v4", and under the SAME
+    // names as the V3 family (`ScriptContext`, `Tx`, `TxOut`, ...): the
+    // config decides which definition the names carry, there are no
+    // suffixed variants.
     //
     // Mirrors `PlutusLedgerApi.V4` as released in plutus-ledger-api
     // 1.68.0.0 (2026-08-21): constructor order and field order below
@@ -1484,21 +1507,27 @@ export function populatePreludeScope(
     //
     // NOTE the Dijkstra hard fork (protocol version 12) has not happened
     // yet and CIP-0118 is still Proposed, so these shapes may move with
-    // upstream until the fork; they are versioned with a `V4` suffix and
-    // coexist with the (stable) V3 prelude above.
+    // upstream until the fork — hence the `experimental-` prefix on the
+    // config value.
     // ==================================================================
+
+    if( v4TakesOver )
+    {
+    // the V3 versions of these names were constructed but not registered;
+    // from here on the V4 definitions take the names
+    suppressedV3Names.clear();
 
     // newtype AccountId = AccountId Credential (identical data encoding)
     const accountId_t = _defineUnambigousAlias( "AccountId", credential_t );
 
-    // struct AddressV4 { payment: Credential, stakingAccount: Optional<AccountId> }
+    // struct Address (V4) { payment: Credential, stakingAccount: Optional<AccountId> }
     const opt_accountId_t = program.getAppliedGeneric(
         TirDataOptT.toTirTypeKey(),
         [ accountId_t ]
     );
     if(!opt_accountId_t) throw new Error("expected opt_accountId_t");
     const { data: addressV4_t } = defineSingleConstructorStruct(
-        "AddressV4", {
+        "Address", {
             payment: credential_t,
             stakingAccount: opt_accountId_t
         }, onlyData
@@ -1514,18 +1543,18 @@ export function populatePreludeScope(
         }, onlyData
     );
 
-    // struct TxOutV4 { address, value, datum, referenceScript }
+    // struct TxOut (V4) { address, value, datum, referenceScript }
     const { data: txOutV4_t } = defineSingleConstructorStruct(
-        "TxOutV4", {
+        "TxOut", {
             address: addressV4_t,
             value: value_t,
             datum: outputDatum_t,
             referenceScript: opt_scriptHash_t
         }, onlyData
     );
-    // struct TxInV4 { ref, resolved }
+    // struct TxIn (V4) { ref, resolved }
     const { data: txInV4_t } = defineSingleConstructorStruct(
-        "TxInV4", {
+        "TxIn", {
             ref: txOutRef_t,
             resolved: txOutV4_t
         }, onlyData
@@ -1551,9 +1580,9 @@ export function populatePreludeScope(
         map_accountId_abi_t
     );
 
-    // struct TxCertV4 (11 constructors, account-based)
+    // struct TxCert (V4; 11 constructors, account-based)
     const { data: txCertV4_t } = defineMultiConstructorStruct(
-        "TxCertV4", {
+        "TxCert", {
             RegAccount: { account: accountId_t, deposit: int_t },
             UnRegAccount: { account: accountId_t, refund: int_t },
             DelegAccount: { account: accountId_t, delegatee: delegatee_t },
@@ -1568,9 +1597,9 @@ export function populatePreludeScope(
         }, onlyData
     );
 
-    // struct ScriptPurposeV4 (every constructor leads with the script hash)
+    // struct ScriptPurpose (V4; every constructor leads with the script hash)
     const { data: scriptPurposeV4_t } = defineMultiConstructorStruct(
-        "ScriptPurposeV4", {
+        "ScriptPurpose", {
             Minting: { scriptHash: scriptHash_t, policy: policyId_t },
             Spending: { scriptHash: scriptHash_t, ref: txOutRef_t },
             Withdrawing: { scriptHash: scriptHash_t, credential: credential_t },
@@ -1601,10 +1630,10 @@ export function populatePreludeScope(
         && map_cred_optData_t && map_purposeV4_data_t && map_txHash_data_t
     )) throw new Error("expected V4 applied generics");
 
-    // struct TxV4 — `PlutusLedgerApi.V4.Contexts.TxInfo` (19 fields;
+    // struct Tx (V4) — `PlutusLedgerApi.V4.Contexts.TxInfo` (19 fields;
     // note: NO fee, NO requiredSigners — both are gone in V4)
     const { data: txV4_t } = defineSingleConstructorStruct(
-        "TxV4", {
+        "Tx", {
             id: txHash_t,
             subTxIx: opt_int_t,
             inputs: list_txInV4_t,
@@ -1666,10 +1695,10 @@ export function populatePreludeScope(
         TirDataOptT.toTirTypeKey(), [ topTxInfo_t ] );
     if(!opt_topTxInfo_t) throw new Error("expected opt_topTxInfo_t");
 
-    // struct ScriptInfoV4 (the `Guard` info carries the whole-batch view
+    // struct ScriptInfo (V4; the `Guard` info carries the whole-batch view
     // when executed at the top level)
     const { data: scriptInfoV4_t } = defineMultiConstructorStruct(
-        "ScriptInfoV4", {
+        "ScriptInfo", {
             Mint: { policy: policyId_t },
             Spend: { ref: txOutRef_t, optionalDatum: opt_data_t },
             Withdraw: { account: accountId_t },
@@ -1680,53 +1709,19 @@ export function populatePreludeScope(
         }, onlyData
     );
 
-    // struct ScriptContextV4 { tx, redeemer, purpose, scriptHash }
+    // struct ScriptContext (V4) { tx, redeemer, purpose, scriptHash }
     // (V4 adds the executing script's own hash as a 4th field)
     const { data: scriptContextV4_t } = defineSingleConstructorStruct(
-        "ScriptContextV4", {
+        "ScriptContext", {
             tx: txV4_t,
             redeemer: data_t,
             purpose: scriptInfoV4_t,
             scriptHash: scriptHash_t
         }, onlyData
     );
+    void scriptContextV4_t;
 
-    // ------------------------------------------------------------------
-    // `targetPlutusVersion` — bind the UNSUFFIXED context names.
-    //
-    // Both families are always fully defined under explicit names:
-    //   V3: ScriptContextV3, TxV3, TxInV3, TxOutV3, AddressV3,
-    //       ScriptInfoV3, ScriptPurposeV3 (aliases of the plain V3 defs)
-    //   V4: ScriptContextV4, TxV4, ... (defined above)
-    // The compiler option only decides which family the PLAIN names
-    // (`ScriptContext`, `Tx`, ...) resolve to, so a project can flip the
-    // target without touching code that used the unsuffixed names, while
-    // mixed code stays possible through the suffixed ones.
-    // ------------------------------------------------------------------
-    {
-        const versionedPairs: [ plain: string, v4Name: string ][] = [
-            [ "ScriptContext", "ScriptContextV4" ],
-            [ "Tx",            "TxV4" ],
-            [ "TxIn",          "TxInV4" ],
-            [ "TxOut",         "TxOutV4" ],
-            [ "Address",       "AddressV4" ],
-            [ "ScriptInfo",    "ScriptInfoV4" ],
-            [ "ScriptPurpose", "ScriptPurposeV4" ],
-        ];
-        for( const [ plain, v4Name ] of versionedPairs )
-        {
-            const v3Info = preludeScope.resolveLocalType( plain );
-            const v4Info = preludeScope.resolveLocalType( v4Name );
-            if( !v3Info || !v4Info )
-            throw new Error( `prelude: missing type info for '${plain}' / '${v4Name}'` );
-
-            // explicit V3 name, always available
-            preludeScope.defineType( plain + "V3", v3Info );
-
-            if( targetPlutusVersion === "experimental-v4" )
-            preludeScope.overrideType( plain, v4Info );
-        }
-    }
+    } // if( v4TakesOver ) — end of the V4 family
 
     // ------------------------------------------------------------------
     // Script-context helper methods (milestone 2 stdlib expansion).
@@ -1763,6 +1758,13 @@ export function populatePreludeScope(
     // Interval: from = 0, to = 1; IntervalBoundary: boundary = 0, isInclusive = 1
     // ExtendedInteger ctor tags: NegInf = 0, Finite = 1, PosInf = 2
     // OutputDatum ctor tags: NoDatum = 0, DatumHash = 1, InlineDatum = 2
+
+    // The Tx / TxOut helpers below read fields by the V3 LAYOUT and are
+    // typed against the V3 structs, so they exist only under the "v3"
+    // target — under "experimental-v4" the V3 family is unregistered
+    // scaffolding, and registering V3-typed functions would let V4 values
+    // flow into them through same-name struct identity.
+    if( !v4TakesOver ) {
 
     // Tx.signedBy( pkh: PubKeyHash ): bool
     // -- some( \d -> equalsData( d, bData pkh ), unListData( tx.requiredSigners ) )
@@ -1998,6 +2000,8 @@ export function populatePreludeScope(
             )
         );
     }
+
+    } // if( !v4TakesOver ) — end of the V3-layout Tx/TxOut helpers
 
     // ------------------------------------------------------------------
     // Interval helpers.
