@@ -6,14 +6,14 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { Data, DataConstr, DataI, dataFromCbor } from "@harmoniclabs/plutus-data";
+import { Data, DataConstr, DataList, DataI, dataFromCbor } from "@harmoniclabs/plutus-data";
 
 // `guard name() { ... }` contract methods — the Plutus V4 guarding purpose
 // (CIP-0112 / CIP-0118). Only meaningful under
 // `targetPlutusVersion: "experimental-v4"`; rejected under "v3".
 //
 // The guard script contexts below are assembled from the REAL
-// plutus-ledger-api 1.68 encodings in fixtures/v4-data-encodings.json:
+// plutus-ledger-api 1.71 encodings in fixtures/v4-data-encodings.json:
 // `scriptcontext_full`'s tx + script hash with the purpose swapped for
 // `scriptinfo_guarding_top` / `scriptinfo_guarding_sub`.
 
@@ -49,21 +49,22 @@ async function compileContract(
 }
 
 /**
- * V4 ScriptContext = Constr 0 [ tx, redeemer, scriptInfo, scriptHash ].
+ * V4 ScriptContext = List [ tx, redeemer, scriptInfo, scriptHash ]
+ * (V4 product types are list-encoded).
  * The fixture's tx carries `subTxIx = Some 3` (a sub-transaction); the
  * execution level is set explicitly per case since level-less contract
  * methods are top-only (see compiler.contractLevels.test.ts).
  */
 function guardContext( purposeFixture: string, redeemer: Data, level: "top" | "nested" = "top" ): Data
 {
-    const full = dataFromCbor( fromHex( fixtures[ "scriptcontext_full" ] ) ) as DataConstr;
-    const tx = full.fields[0] as DataConstr;
-    const txFields = tx.fields.slice();
+    const full = dataFromCbor( fromHex( fixtures[ "scriptcontext_full" ] ) ) as DataList;
+    const tx = full.list[0] as DataList;
+    const txFields = tx.list.slice();
     txFields[1] = level === "top"
         ? new DataConstr( 1, [] )                   // subTxIx = None
         : new DataConstr( 0, [ new DataI( 3 ) ] );  // subTxIx = Some 3
     const purpose = dataFromCbor( fromHex( fixtures[ purposeFixture ] ) );
-    return new DataConstr( 0, [ new DataConstr( 0, txFields ), redeemer, purpose, full.fields[3] ] );
+    return new DataList([ new DataList( txFields ), redeemer, purpose, full.list[3] ]);
 }
 
 function run( flat: Uint8Array, ctx: Data ): { ok: boolean; msg?: string; logs: string[] } {

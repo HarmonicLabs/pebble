@@ -13,6 +13,6 @@ packages: .
 
 index-state:
   , hackage.haskell.org 2025-10-17T00:26:22Z
-  , cardano-haskell-packages 2026-09-01T00:00:00Z
+  , cardano-haskell-packages 2026-10-09T14:30:01Z
 
 tests: False

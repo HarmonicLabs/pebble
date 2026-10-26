@@ -84,7 +84,7 @@ describe("targetPlutusVersion — unsuffixed prelude names", () => {
     });
 
     ( Object.keys( fixtures ).length > 0 ? test : test.skip )(
-        "experimental-v4: the plain `ScriptContext` decodes the real 1.68 encoding", async () => {
+        "experimental-v4: the plain `ScriptContext` decodes the real 1.71 encoding", async () => {
         const { flat, error } = await exportWith(`
 export function probe( d: data ): void {
     const ctx = d as ScriptContext;

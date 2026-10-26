@@ -283,7 +283,9 @@ export function populatePreludeScope(
     function mkSingleConstructorStruct(
         name: string,
         fields: { [x: string]: TirType },
-        methodNames: Map<AstFuncName, TirFuncName> = new Map()
+        methodNames: Map<AstFuncName, TirFuncName> = new Map(),
+        /** `listData(fields)` instead of `constrData(0, fields)` */
+        untagged: boolean = false
     ): { sop: TirSoPStructType, data: TirDataStructType }
     {
         const sop = new TirSoPStructType(
@@ -310,13 +312,16 @@ export function populatePreludeScope(
                     )
                 )
             ],
-            methodNames
+            methodNames,
+            untagged
         );
         return { sop, data };
     }
     interface DefineStructOpts {
         data: boolean;
         sop: boolean;
+        /** data encoding is `listData(fields)` (single constructor only) */
+        untagged?: boolean;
     }
     function defineSingleConstructorStruct(
         name: string,
@@ -333,7 +338,7 @@ export function populatePreludeScope(
         // result are gated on the same condition
         if( suppressedV3Names.has( name ) )
         return { sop: undefined as any, data: undefined as any };
-        const { sop, data } = mkSingleConstructorStruct( name, fields, methodsNames );
+        const { sop, data } = mkSingleConstructorStruct( name, fields, methodsNames, opts.untagged === true );
         const sop_key = sop.toTirTypeKey();
         const data_key = data.toTirTypeKey();
         if( opts.sop ) program.types.set( sop_key, sop );
@@ -418,16 +423,27 @@ export function populatePreludeScope(
         return { sop, data };
     }
 
-    const onlyData = {
+    const onlyData: DefineStructOpts = {
         sop: false,
         data: true
     };
+    // Plutus V4 encodes every PRODUCT type of the ledger API as a plain
+    // `List` of fields rather than `Constr 0 fields` (plutus-ledger-api
+    // >= 1.69). `v4Product` is for the types SHARED by both families
+    // (`TxOutRef`, `Rational`, ...): tagged under "v3", list-encoded under
+    // "experimental-v4". Sum types keep their constructor indices.
+    const onlyDataListEncoded: DefineStructOpts = {
+        sop: false,
+        data: true,
+        untagged: true
+    };
+    const v4Product: DefineStructOpts = v4TakesOver ? onlyDataListEncoded : onlyData;
 
     const { data: txOutRef_t } = defineSingleConstructorStruct(
         "TxOutRef", {
             id: txHash_t,
             index: int_t
-        }, onlyData
+        }, v4Product
     );
     const { data: credential_t } = defineMultiConstructorStruct(
         "Credential", {
@@ -460,13 +476,13 @@ export function populatePreludeScope(
         "Rational", {
             numerator: int_t,
             denominator: int_t
-        }, onlyData
+        }, v4Product
     );
     const { data: protocolVersion_t } = defineSingleConstructorStruct(
         "ProtocolVersion", {
             major: int_t,
             minor: int_t
-        }, onlyData
+        }, v4Product
     );
     // struct ConstitutionInfo {
     //     consitutionScriptHash: Optional<ScriptHash>
@@ -480,7 +496,7 @@ export function populatePreludeScope(
     const { data: constitutionInfo_t } = defineSingleConstructorStruct(
         "ConstitutionInfo", {
             consitutionScriptHash: opt_scriptHash_t
-        }, onlyData
+        }, v4Product
     );
     // struct GovAction {
     //     ParameterChange {
@@ -567,7 +583,7 @@ export function populatePreludeScope(
             deposit: int_t,
             credential: credential_t,
             action: govAction_t
-        }, onlyData
+        }, v4Product
     );
     // struct Voter {
     //     Committee {
@@ -1240,7 +1256,7 @@ export function populatePreludeScope(
         "AssetClass", {
             policy: policyId_t,
             name: tokenName_t
-        }, onlyData
+        }, v4Product
     );
 
     // std.value.assetClass( policy, name ): AssetClass
@@ -1253,21 +1269,21 @@ export function populatePreludeScope(
             ( ctx ) => {
                 const policy = Symbol("assetClass_policy");
                 const name = Symbol("assetClass_name");
+                const fieldsIR = _ir_apps(
+                    IRNative.mkCons,
+                    _ir_apps( IRNative.bData, new IRVar( policy ) ),
+                    _ir_apps(
+                        IRNative.mkCons,
+                        _ir_apps( IRNative.bData, new IRVar( name ) ),
+                        IRConst.listOf( data_t )([])
+                    )
+                );
                 return new IRFunc(
                     [ policy, name ],
-                    _ir_apps(
-                        IRNative.constrData,
-                        IRConst.int( 0 ),
-                        _ir_apps(
-                            IRNative.mkCons,
-                            _ir_apps( IRNative.bData, new IRVar( policy ) ),
-                            _ir_apps(
-                                IRNative.mkCons,
-                                _ir_apps( IRNative.bData, new IRVar( name ) ),
-                                IRConst.listOf( data_t )([])
-                            )
-                        )
-                    )
+                    // must track the encoding `AssetClass` is declared with
+                    assetClass_t.untagged
+                        ? _ir_apps( IRNative.listData, fieldsIR )
+                        : _ir_apps( IRNative.constrData, IRConst.int( 0 ), fieldsIR )
                 );
             },
             SourceRange.unknown
@@ -1297,10 +1313,12 @@ export function populatePreludeScope(
                                 new IRVar( self )
                             )
                         ),
-                        _ir_apps(
-                            IRNative.sndPair,
-                            _ir_apps( IRNative.unConstrData, new IRVar( ac ) )
-                        )
+                        assetClass_t.untagged
+                            ? _ir_apps( IRNative.unListData, new IRVar( ac ) )
+                            : _ir_apps(
+                                IRNative.sndPair,
+                                _ir_apps( IRNative.unConstrData, new IRVar( ac ) )
+                            )
                     )
                 );
             },
@@ -1501,9 +1519,11 @@ export function populatePreludeScope(
     // suffixed variants.
     //
     // Mirrors `PlutusLedgerApi.V4` as released in plutus-ledger-api
-    // 1.68.0.0 (2026-08-21): constructor order and field order below
+    // 1.71.0.0 (2026-09-29): constructor order and field order below
     // track `V4/Contexts.hs`, `V4/Address.hs`, `V4/Time.hs`, `V4/Tx.hs`
-    // exactly (their `makeIsDataSchemaIndexed` indices).
+    // exactly — `makeIsDataSchemaIndexed` indices for the sum types,
+    // `makeIsDataSchemaAsList` (a plain list of fields, no constructor)
+    // for the product types.
     //
     // NOTE the Dijkstra hard fork (protocol version 12) has not happened
     // yet and CIP-0118 is still Proposed, so these shapes may move with
@@ -1530,7 +1550,7 @@ export function populatePreludeScope(
         "Address", {
             payment: credential_t,
             stakingAccount: opt_accountId_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
 
     // struct POSIXTimeRange { fromInclusive: Optional<int>, untilExclusive: Optional<int> }
@@ -1540,7 +1560,7 @@ export function populatePreludeScope(
         "POSIXTimeRange", {
             fromInclusive: opt_int_t,
             untilExclusive: opt_int_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
 
     // struct TxOut (V4) { address, value, datum, referenceScript }
@@ -1550,14 +1570,14 @@ export function populatePreludeScope(
             value: value_t,
             datum: outputDatum_t,
             referenceScript: opt_scriptHash_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
     // struct TxIn (V4) { ref, resolved }
     const { data: txInV4_t } = defineSingleConstructorStruct(
         "TxIn", {
             ref: txOutRef_t,
             resolved: txOutV4_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
 
     // struct AccountBalanceInterval (4 constructors)
@@ -1616,7 +1636,7 @@ export function populatePreludeScope(
     const list_txCertV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txCertV4_t ] );
     const list_credential_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ credential_t ] );
     const list_txHash_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txHash_t ] );
-    const list_scriptPurposeV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ scriptPurposeV4_t ] );
+    const list_scriptHashV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ scriptHash_t ] );
     const opt_data_v4_t = program.getAppliedGeneric( TirDataOptT.toTirTypeKey(), [ data_t ] );
     const map_cred_optData_t = program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(), [ credential_t, opt_data_v4_t! ] );
@@ -1626,7 +1646,7 @@ export function populatePreludeScope(
         TirLinearMapT.toTirTypeKey(), [ txHash_t, data_t ] );
     if(!(
         list_txInV4_t && list_txOutV4_t && list_txCertV4_t && list_credential_t
-        && list_txHash_t && list_scriptPurposeV4_t && opt_data_v4_t
+        && list_txHash_t && list_scriptHashV4_t && opt_data_v4_t
         && map_cred_optData_t && map_purposeV4_data_t && map_txHash_data_t
     )) throw new Error("expected V4 applied generics");
 
@@ -1653,7 +1673,7 @@ export function populatePreludeScope(
             proposals: list_proposalProcedure_t,
             currentTreasury: opt_int_t,
             treasuryDonation: int_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
 
     // struct TopTxInfoSimplified — aggregated whole-batch view (18 fields)
@@ -1671,13 +1691,15 @@ export function populatePreludeScope(
             validityInterval: posixTimeRange_t,
             guards: list_credential_t,
             requiredTopLevelGuards: list_credential_t,
-            scriptPurposes: list_scriptPurposeV4_t,
+            // plutus-ledger-api >= 1.71: the script hashes of all the
+            // redeemers (was `ttisScriptPurposes :: [ScriptPurpose]`)
+            redeemerHashes: list_scriptHashV4_t,
             datums: map_hash32_data_t,
             votes: map_voter_map_txOutRef_vote_t,
             proposals: list_proposalProcedure_t,
             currentTreasury: opt_int_t,
             treasuryDonations: int_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
 
     // struct TopTxInfo — top-level view over the sub-transactions
@@ -1689,7 +1711,7 @@ export function populatePreludeScope(
             datums: map_txHash_data_t,
             startingAccountBalanceIntervals: accountBalanceIntervals_t,
             simplified: topTxInfoSimplified_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
     const opt_topTxInfo_t = program.getAppliedGeneric(
         TirDataOptT.toTirTypeKey(), [ topTxInfo_t ] );
@@ -1720,7 +1742,7 @@ export function populatePreludeScope(
             redeemer: data_t,
             purpose: scriptInfoV4_t,
             scriptHash: scriptHash_t
-        }, onlyData
+        }, onlyDataListEncoded
     );
     void scriptContextV4_t;
 

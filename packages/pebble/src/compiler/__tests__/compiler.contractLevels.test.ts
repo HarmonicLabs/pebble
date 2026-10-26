@@ -6,7 +6,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { Data, DataConstr, DataI, dataFromCbor } from "@harmoniclabs/plutus-data";
+import { Data, DataConstr, DataList, DataI, dataFromCbor } from "@harmoniclabs/plutus-data";
 
 // Execution levels for contract methods (Plutus V4 nested transactions):
 //   `top <purpose>`    — valid only in the top-level transaction (DEFAULT)
@@ -16,7 +16,7 @@ import { Data, DataConstr, DataI, dataFromCbor } from "@harmoniclabs/plutus-data
 // sub-transaction. Under the "v3" target `nested` is an error and `top` is
 // a no-op.
 //
-// Contexts are assembled from the real plutus-ledger-api 1.68 encodings in
+// Contexts are assembled from the real plutus-ledger-api 1.71 encodings in
 // fixtures/v4-data-encodings.json.
 
 const fixturesPath = path.resolve( __dirname, "fixtures/v4-data-encodings.json" );
@@ -53,7 +53,8 @@ async function compileContract(
 const fx = ( name: string ) => dataFromCbor( fromHex( fixtures[ name ] ) );
 
 /**
- * V4 ScriptContext = Constr 0 [ tx, redeemer, scriptInfo, scriptHash ],
+ * V4 ScriptContext = List [ tx, redeemer, scriptInfo, scriptHash ]
+ * (V4 product types are list-encoded),
  * TxInfo field 1 = subTxIx (None = top-level, Some i = sub-transaction i).
  */
 function ctx( opts: {
@@ -62,17 +63,17 @@ function ctx( opts: {
     redeemer: Data;
 }): Data
 {
-    const full = fx( "scriptcontext_full" ) as DataConstr;
-    const tx = full.fields[0] as DataConstr;
-    const txFields = tx.fields.slice();
+    const full = fx( "scriptcontext_full" ) as DataList;
+    const tx = full.list[0] as DataList;
+    const txFields = tx.list.slice();
     txFields[1] = opts.level === "top"
         ? new DataConstr( 1, [] )                   // None
         : new DataConstr( 0, [ new DataI( 3 ) ] );  // Some 3
-    return new DataConstr( 0, [
-        new DataConstr( 0, txFields ),
+    return new DataList([
+        new DataList( txFields ),
         opts.redeemer,
         opts.purpose,
-        full.fields[3],
+        full.list[3],
     ]);
 }
 

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- Dump the ACTUAL PlutusLedgerApi.V4 Data encodings (plutus-ledger-api
--- 1.68.0.0) as hex-encoded CBOR, one `name <hex>` line each. These become
+-- 1.71.0.0) as hex-encoded CBOR, one `name <hex>` line each. These become
 -- the golden fixtures pebble's V4 prelude types are validated against.
 module Main where
 
@@ -15,6 +15,7 @@ import PlutusLedgerApi.V2 qualified as V2
 import PlutusLedgerApi.V3 qualified as V3
 import PlutusLedgerApi.V3.MintValue qualified as MV
 import PlutusLedgerApi.V4 qualified as V4
+import PlutusLedgerApi.V4.Ratio qualified as V4Ratio
 import PlutusLedgerApi.V4.Time qualified as V4T
 import PlutusLedgerApi.V4.Tx qualified as V4Tx
 import PlutusTx qualified
@@ -54,8 +55,8 @@ addrNoStake = V4.Address credS Nothing
 val :: V2.Value
 val = V1V.singleton V1V.adaSymbol V1V.adaToken 75000000
 
-ref :: V3.TxOutRef
-ref = V3.TxOutRef txId3 5
+ref :: V4.TxOutRef
+ref = V4.TxOutRef txId3 5
 
 outPk :: V4Tx.TxOut
 outPk =
@@ -81,11 +82,14 @@ certReg = V4.TxCertRegAccount accA 2000000
 purposeSpend :: V4.ScriptPurpose
 purposeSpend = V4.Spending sh1 ref
 
-govActionId :: V3.GovernanceActionId
-govActionId = V3.GovernanceActionId txId3 7
+govActionId :: V4.GovernanceActionId
+govActionId = V4.GovernanceActionId txId3 7
 
-proposal :: V3.ProposalProcedure
-proposal = V3.ProposalProcedure 1000000 credA V3.InfoAction
+proposal :: V4.ProposalProcedure
+proposal = V4.ProposalProcedure 1000000 credA V4.InfoAction
+
+committeeMembers :: AMap.Map V3.ColdCommitteeCredential Integer
+committeeMembers = AMap.unsafeFromList [(V3.ColdCommitteeCredential credA, 500)]
 
 txInfo :: V4.TxInfo
 txInfo =
@@ -134,6 +138,24 @@ main = do
   dump "timerange_open" (V4T.POSIXTimeRange Nothing Nothing)
   dump "txout" outPk
   dump "txin" txIn
+  -- single-constructor wrappers introduced in 1.69 (list-encoded)
+  dump "txoutref" ref
+  dump "gov_action_id" govActionId
+  dump "protocol_version" (V4.ProtocolVersion 12 1)
+  dump "constitution_some" (V4.Constitution (Just sh1))
+  dump "constitution_none" (V4.Constitution Nothing)
+  dump "committee" (V4.Committee committeeMembers (V4Ratio.unsafeRatio 2 3))
+  dump "rational" (V4Ratio.unsafeRatio 2 3)
+  dump "asset_class" (V4.AssetClass (V1V.currencySymbol "\204\204", V1V.tokenName "\221\221"))
+  dump "proposal_info" proposal
+  -- governance actions (all 7 constructors)
+  dump "govaction_parameter_change" (V4.ParameterChange (Just govActionId) (V3.ChangedParameters (PlutusTx.toBuiltinData (AMap.unsafeFromList [(0 :: Integer, 44 :: Integer)]))) (Just sh1))
+  dump "govaction_hard_fork" (V4.HardForkInitiation Nothing (V4.ProtocolVersion 12 0))
+  dump "govaction_treasury_withdrawals" (V4.TreasuryWithdrawals (AMap.unsafeFromList [(credA, 1000000)]) Nothing)
+  dump "govaction_no_confidence" (V4.NoConfidence (Just govActionId))
+  dump "govaction_update_committee" (V4.UpdateCommittee Nothing [V3.ColdCommitteeCredential credS] committeeMembers (V4Ratio.unsafeRatio 2 3))
+  dump "govaction_new_constitution" (V4.NewConstitution Nothing (V4.Constitution (Just sh1)))
+  dump "govaction_info" V4.InfoAction
   -- account balance intervals (all 4 constructors)
   dump "abi_lower" (V4.AccountBalanceLowerBound 1)
   dump "abi_upper" (V4.AccountBalanceUpperBound 2)
@@ -190,7 +212,7 @@ main = do
                       , V4.ttisValidRange = rng
                       , V4.ttisGuards = [credS]
                       , V4.ttisRequiredTopLevelGuards = [credS]
-                      , V4.ttisScriptPurposes = [purposeSpend]
+                      , V4.ttisRedeemerHashes = [sh1]
                       , V4.ttisData = AMap.unsafeFromList []
                       , V4.ttisVotes = AMap.unsafeFromList []
                       , V4.ttisProposalProcedures = []

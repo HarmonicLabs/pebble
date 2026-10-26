@@ -157,7 +157,7 @@ export interface CompilerOptions {
      * - `"v3"` (default): the stable Conway-era types — today's on-chain
      *   reality (protocol version 11 runs PlutusV3 scripts).
      * - `"experimental-v4"`: the Dijkstra-era types (mirroring
-     *   plutus-ledger-api 1.69.0.0). EXPERIMENTAL until Plutus V4 is live
+     *   plutus-ledger-api 1.71.0.0). EXPERIMENTAL until Plutus V4 is live
      *   on mainnet — the shapes track a still-Proposed CIP and may change;
      *   the plain `"v4"` spelling is reserved for when the fork lands and
      *   is rejected with guidance until then. Exactly one family exists

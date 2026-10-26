@@ -13,6 +13,6 @@ executable v4dump
     , bytestring
     , base16-bytestring
     , serialise
-    , plutus-core ^>=1.68
-    , plutus-tx ^>=1.68
-    , plutus-ledger-api ^>=1.68
+    , plutus-core ^>=1.71
+    , plutus-tx ^>=1.71
+    , plutus-ledger-api ^>=1.71
