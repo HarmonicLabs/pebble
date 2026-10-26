@@ -5,7 +5,7 @@
 // in as required by the scenario:
 //
 //   buyer  = #aa.. (32 bytes)     seller = #bb.. (32 bytes)
-//   price  = 75_000_000 lovelace  deadline = 1800 s after depositTime
+//   price  = 75_000_000 lovelace  deadline = 1_800_000 ms (30 min) after depositTime
 //   script = #3131.. (58 bytes)   (the harness' dummy script hash "1"*58, ASCII)
 //
 // Redeemers are RAW integers (I 0 = Deposit, I 1 = Accept, I 2 = Refund);
@@ -40,7 +40,8 @@ struct EscrowDatum {
 }
 
 const PRICE: int = 75000000;
-const DEADLINE: int = 1800;
+// POSIXTime counts milliseconds: 30 minutes
+const DEADLINE: int = 1800000;
 
 /** true iff `pkh` is among the tx's required signers (byte comparison) */
 function signedBy( tx: Tx, pkh: bytes ): boolean {
