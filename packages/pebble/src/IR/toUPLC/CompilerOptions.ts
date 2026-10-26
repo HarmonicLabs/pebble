@@ -130,17 +130,25 @@ export interface CompilerOptions {
      **/
     addMarker: boolean;
     /**
-     * Controls the default Data encoding for single-constructor shortcut
-     * struct declarations (`struct Foo { x: int }`).
+     * Controls the Data encoding of single-constructor SHORTCUT struct
+     * declarations (`struct Foo { x: int }`).
      *
-     * - `"default"`: shortcut single-constructor structs are encoded as
-     *   `constrData(0, fields)` (backwards-compatible). Use the explicit
-     *   `untagged` keyword to opt a specific struct in to the minimal form.
-     * - `"minimal"`: shortcut single-constructor structs are encoded as
-     *   `listData(fields)` (smaller / cheaper). The explicit `untagged`
-     *   keyword still forces minimal regardless.
+     * - `"minimal"` (the default since 0.5.0): shortcut structs are
+     *   list-encoded, `listData(fields)` — the same encoding Plutus V4
+     *   uses for the product types of the ledger API.
+     * - `"legacy"`: shortcut structs are encoded as `constrData(0, fields)`,
+     *   as every compiler up to 0.4.x did. Set this to recompile an
+     *   already-deployed contract to the same bytes.
+     *
+     * Either way the encoding can be picked per struct, in the source:
+     * the explicit single-constructor form
+     * (`struct Foo { Foo { x: int } }`) is ALWAYS `constrData(0, fields)`,
+     * and the `untagged` keyword ALWAYS forces `listData(fields)`.
+     *
+     * `"default"` is the pre-0.5.0 spelling of `"legacy"` and is still
+     * accepted, so a config that pinned it keeps its encoding.
      */
-    encodingStrategy: "default" | "minimal";
+    encodingStrategy: EncodingStrategy;
     /**
      * Which Plutus ledger-API family the UNSUFFIXED prelude type names
      * (`ScriptContext`, `Tx`, `TxIn`, `TxOut`, `Address`, `ScriptInfo`,
@@ -149,20 +157,25 @@ export interface CompilerOptions {
      * - `"v3"` (default): the stable Conway-era types — today's on-chain
      *   reality (protocol version 11 runs PlutusV3 scripts).
      * - `"experimental-v4"`: the Dijkstra-era types (mirroring
-     *   plutus-ledger-api 1.68.0.0). EXPERIMENTAL until Plutus V4 is live
+     *   plutus-ledger-api 1.69.0.0). EXPERIMENTAL until Plutus V4 is live
      *   on mainnet — the shapes track a still-Proposed CIP and may change;
      *   the plain `"v4"` spelling is reserved for when the fork lands and
-     *   is rejected with guidance until then. The suffixed names
-     *   (`ScriptContextV4`, `ScriptContextV3`, ...) are ALWAYS available
-     *   regardless of this option, so mixed code can be explicit.
-     *   `contract` declarations currently derive their entry from the V3
-     *   context and are rejected under `"experimental-v4"` — write plain
-     *   exported validators (`( ctx: data ) => void`) instead.
+     *   is rejected with guidance until then. Exactly one family exists
+     *   per compilation (no suffixed names, no mixing); `contract`
+     *   declarations derive against whichever family is selected.
      */
     targetPlutusVersion: TargetPlutusVersion;
 }
 
 export type TargetPlutusVersion = "v3" | "experimental-v4";
+
+export type EncodingStrategy = "minimal" | "legacy" | /** @deprecated use `"legacy"` */ "default";
+
+/** `true` if shortcut single-constructor structs keep the `constrData(0, fields)` encoding */
+export function isLegacyEncodingStrategy( strategy: unknown ): boolean
+{
+    return strategy === "legacy" || strategy === "default";
+}
 
 /**
  * Case-insensitive normalization for `targetPlutusVersion` (config files
@@ -220,7 +233,7 @@ export const productionOptions: CompilerDefaults = Object.freeze({
     delayHoists: true,
     uplcOptimizations: productionUplcOptimizations,
     addMarker: true,
-    encodingStrategy: "default"
+    encodingStrategy: "minimal"
 });
 
 export const debugOptions: CompilerDefaults = Object.freeze({
@@ -234,7 +247,7 @@ export const debugOptions: CompilerDefaults = Object.freeze({
     delayHoists: false,
     uplcOptimizations: debugUplcOptimizations,
     addMarker: false,
-    encodingStrategy: "default"
+    encodingStrategy: "minimal"
 });
 
 export const defaultOptions: CompilerDefaults = Object.freeze({
@@ -287,7 +300,7 @@ export function completeCompilerOptions(
         delayHoists: options.delayHoists ?? complete.delayHoists!,
         uplcOptimizations: completeUplcOptimizations( uplcOptimizations ),
         addMarker: options.addMarker ?? complete.addMarker!,
-        encodingStrategy: options.encodingStrategy ?? complete.encodingStrategy ?? "default",
+        encodingStrategy: options.encodingStrategy ?? complete.encodingStrategy ?? "minimal",
         targetPlutusVersion: normalizeTargetPlutusVersion(
             options.targetPlutusVersion ?? complete.targetPlutusVersion
         )

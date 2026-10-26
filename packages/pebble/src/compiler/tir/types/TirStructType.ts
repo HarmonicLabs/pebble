@@ -250,6 +250,13 @@ export class TirSoPStructType
 
     /** see `TirDataStructType.constructors` — mutable only via `fillConstructors` */
     constructors: TirStructConstr[];
+    /**
+     * how a value of this type crosses the DATA boundary: `true` for
+     * `listData( fields )`, `false` for `constrData( idx, fields )`.
+     * Always agrees with the data-encoded twin of the same declaration.
+     * (the in-memory form is SoP either way)
+     */
+    untagged: boolean = false;
 
     private _filled: boolean = true;
     /** `false` while this is a forward-declared placeholder whose
@@ -284,9 +291,16 @@ export class TirSoPStructType
         return t;
     }
 
-    fillConstructors( constructors: TirStructConstr[] ): void
+    fillConstructors( constructors: TirStructConstr[], untagged: boolean = false ): void
     {
+        if( untagged && constructors.length !== 1 ) {
+            throw new Error(
+                "untagged struct must have exactly one constructor; got "
+                + constructors.length
+            );
+        }
         this.constructors = constructors;
+        this.untagged = untagged;
         this._filled = true;
         this._isConcrete = undefined; // reset memo computed while unfilled
     }
@@ -326,7 +340,7 @@ export class TirSoPStructType
                 filteredCtors.push( this.constructors[i] );
             }
         }
-        return new TirSoPStructType(
+        const narrowed = new TirSoPStructType(
             this.name,
             this.fileUid,
             filteredCtors,
@@ -334,6 +348,8 @@ export class TirSoPStructType
             filtered,
             this.appliedGeneric
         );
+        narrowed.untagged = this.untagged;
+        return narrowed;
     }
 
     toString(): string {

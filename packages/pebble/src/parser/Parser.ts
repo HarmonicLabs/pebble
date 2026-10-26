@@ -925,12 +925,34 @@ export class Parser extends DiagnosticEmitter
             }
             case Token.Data: {
                 tn.next();
+                let extraFlags = StructDeclAstFlags.onlyDataEncoding;
+                // accept `data untagged struct ...`
+                if( tn.peek() === Token.Untagged ) {
+                    tn.next();
+                    extraFlags |= StructDeclAstFlags.untagged;
+                }
                 if( tn.peek() !== Token.Struct ) return this.error(
                     DiagnosticCode._0_expected,
                     tn.range(), "struct"
                 );
                 tn.next();
-                return this.parseStruct( StructDeclAstFlags.onlyDataEncoding, flags, startPos );
+                return this.parseStruct( extraFlags, flags, startPos );
+            }
+            case Token.Untagged: {
+                // same forms as at the top level:
+                // `untagged struct ...` or `untagged data struct ...`
+                tn.next();
+                let extraFlags = StructDeclAstFlags.untagged;
+                if( tn.peek() === Token.Data ) {
+                    tn.next();
+                    extraFlags |= StructDeclAstFlags.onlyDataEncoding;
+                }
+                if( tn.peek() !== Token.Struct ) return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "struct"
+                );
+                tn.next();
+                return this.parseStruct( extraFlags, flags, startPos );
             }
             case Token.Runtime: {
                 tn.next();

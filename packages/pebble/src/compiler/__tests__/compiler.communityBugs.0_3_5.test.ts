@@ -4,7 +4,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { Application, UPLCConst, parseUPLC } from "@harmoniclabs/uplc";
 import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { DataConstr, DataI, Data } from "@harmoniclabs/plutus-data";
+import { DataConstr, DataList, DataI, Data } from "@harmoniclabs/plutus-data";
 
 // Community bug reports (the-cardano-masterpiece, against 0.3.4).
 
@@ -69,7 +69,7 @@ describe("L4 — spend redeemer is a method-tagged ADT (intended)", () => {
         const v = await spendValidator(
             `struct R { a: int } contract L4 { spend edit(redeemer: data) { const { tx } = context; let r = redeemer as R; assert r.a >= 0; } }`
         );
-        const innerR = new DataConstr( 0, [ new DataI( 7 ) ] ); // R{ a: 7 }
+        const innerR = new DataList([ new DataI( 7 ) ] ); // R{ a: 7 } (shortcut form: list-encoded)
         expect( run( v, new DataConstr( 0, [ innerR ] ) ) ).toBe( "ACCEPT" ); // Constr 0 [ R ]  (edit selector)
         expect( run( v, innerR ) ).toBe( "REJECT" );                          // raw R, no selector
     });

@@ -4,7 +4,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { DataConstr, DataI, DataB, DataMap, DataPair, Data } from "@harmoniclabs/plutus-data";
+import { DataConstr, DataList, DataI, DataB, DataMap, DataPair, Data } from "@harmoniclabs/plutus-data";
 
 // Bug 15 from `the-cardano-masterpiece` (PEBBLE_BUGS.md, against 0.3.6):
 // `lookup` on a TYPED `LinearMap<bytes, bytes>` (struct fields etc.) passed
@@ -43,7 +43,8 @@ async function evalContract( src: string, redeemer: Data ): Promise<string> {
 const md = new DataMap([
     new DataPair( new DataB( fromHex("6d6564696154797065") ), new DataB( fromHex("696d6167652f626d70") ) ),
 ]);
-const dStruct = new DataConstr( 0, [ md, new DataI( 1 ) ] );
+// the struct is declared in shortcut form, so it is list-encoded
+const dStruct = new DataList([ md, new DataI( 1 ) ]);
 const redeemerOf = ( d: Data ) => new DataConstr( 0, [ d ] );
 
 describe("masterpiece bug 15 — typed LinearMap.lookup encodes the key", () => {

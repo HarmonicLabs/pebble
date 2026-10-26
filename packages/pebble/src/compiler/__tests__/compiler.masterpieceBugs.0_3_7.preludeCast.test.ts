@@ -4,7 +4,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { DataConstr, DataI, DataB, Data } from "@harmoniclabs/plutus-data";
+import { DataConstr, DataList, DataI, DataB, Data } from "@harmoniclabs/plutus-data";
 
 // masterpiece BUG 21: prelude struct types (TxOutRef, Address, ...) resolved
 // fine in TYPE position but NOT in cast position — `tagData as TxOutRef`
@@ -46,6 +46,9 @@ const redeemerOf = ( d: Data ) => new DataConstr( 0, [ d ] );
 
 // TxOutRef data encoding: Constr 0 [ B txHash, I index ]
 const refData = new DataConstr( 0, [ new DataB( fromHex( "aa".repeat( 32 ) ) ), new DataI( 7 ) ] );
+// `RefTag` is declared in shortcut form, so it is list-encoded
+// (the V3 prelude `TxOutRef` above is `Constr 0`, as the ledger provides it)
+const refTagData = new DataList([ new DataB( fromHex( "aa".repeat( 32 ) ) ), new DataI( 7 ) ]);
 
 jest.setTimeout( 300_000 );
 
@@ -88,7 +91,7 @@ contract T {
         const RefTag{ id, index } = d as RefTag;
         assert index == 7;
     }
-}`, redeemerOf( refData ) ) ).toBe( "ACCEPT" );
+}`, redeemerOf( refTagData ) ) ).toBe( "ACCEPT" );
     });
 
     test("casting to an unknown type still errors", async () => {

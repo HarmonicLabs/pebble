@@ -1740,7 +1740,8 @@ function _buildSpendCaseBlock(
                         stateDecl.range
                     )
                 ],
-                StructDeclAstFlags.onlyDataEncoding | StructDeclAstFlags.shortcutSingleConstructor,
+                // tagged, like the contract datum this is a view of
+                StructDeclAstFlags.onlyDataEncoding,
                 stateDecl.range
             );
             compiler.registerInternalTypeDecl( perStateStructDecl );

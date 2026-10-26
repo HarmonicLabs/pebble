@@ -11,9 +11,13 @@ describe("parseMain", () => {
 
         const fileName = "test.pebble";
         const srcText = `
+// explicit constructor form: the recorded context below carries the datum
+// as Constr 0 [ beneficiary, deadline ] (the shortcut form is list-encoded)
 struct VestingDatum {
-    beneficiary: PubKeyHash,
-    deadline: int
+    VestingDatum {
+        beneficiary: PubKeyHash,
+        deadline: int
+    }
 }
 
 contract Vesting
