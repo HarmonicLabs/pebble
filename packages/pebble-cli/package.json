@@ -52,7 +52,7 @@
         "@harmoniclabs/crypto": "^0.3.1",
         "@harmoniclabs/obj-utils": "^1.0.0",
         "@harmoniclabs/pebble": "0.5.0",
-        "@harmoniclabs/plutus-machine": "^3.0.0",
+        "@harmoniclabs/plutus-machine": "^3.0.5",
         "@harmoniclabs/uint8array-utils": "^1.0.4",
         "@harmoniclabs/uplc": "^2.0.7",
         "@inquirer/prompts": "^7.9.0",
