@@ -17,7 +17,8 @@ scenario, and one shared harness measures them all. The live report is at
   the batch-6 builtins run on the production track.
 - **Competitor numbers** below are taken verbatim from the accepted
   submissions' `metrics.json` files in the UPLC-CAPE repository (best
-  entry per compiler, main track). Lower is better everywhere.
+  entry per compiler, main track, as of 2026-10-26). Lower is better
+  everywhere.
 - **Pebble artifacts** are compiled by Pebble **0.5.0** with default
   settings from [`examples/uplc-cape`](examples/uplc-cape); each submission
   pins the exact commit. The Pebble rows below are measured with the
@@ -33,16 +34,18 @@ Pebble's entry is a plain iterative pair accumulator — no lookup tables.
 
 | submission | CPU units | memory units | size (B) |
 | --- | ---: | ---: | ---: |
-| Scalus 0.18.2 ¹ | 14,567,412 | 23,874 | 113 |
+| Scalus 0.18.2 / 1.3.0 ¹ | 14,567,412 | 23,874 | 113 |
+| Plutarch 1.11.0 (prepacked) ¹ | 16,459,951 | 30,485 | 118 |
+| Aiken 1.1.19 / 1.1.24 (prepacked) ¹ | 22,530,209 | 49,432 | 124 |
 | **Pebble 0.5.0** | **55,846,226** | **222,119** | **75** |
-| Plinth 1.67.0.0 | 59,334,107 | 243,219 | 63 |
-| Aiken 1.1.19 (tailrec) | 67,838,022 | 256,986 | 77 |
-| OpShin 1.0.0 | 240,131,414 | 1,306,476 | 227 |
+| Plinth 1.61.0.0 | 59,206,243 | 243,219 | 63 |
+| OpShin 0.26.1 | 240,131,414 | 1,306,476 | 227 |
 
-¹ Scalus' entry answers from a byte-packed lookup table of all 26 expected
-values (`sliceByteString` + `byteStringToInteger`) — a legitimate use of the
-scenario's implementation freedom, but not an algorithmic computation.
-Among the entries that *compute* fibonacci, Pebble's loop is the fastest.
+¹ These entries answer from a prepacked lookup table of the 26 expected
+values (e.g. `sliceByteString` + `byteStringToInteger`) — a legitimate use
+of the scenario's implementation freedom, but not an algorithmic
+computation. Among the entries that *compute* fibonacci, Pebble's loop is
+the fastest.
 
 ## `factorial` (open optimization)
 
@@ -66,14 +69,17 @@ CAPE accounting:
 
 | submission | CPU units | memory units | size (B) |
 | --- | ---: | ---: | ---: |
-| **Pebble 0.5.0** | **163,663,780** | 574,564 | 1,355 |
-| Plinth 1.67.0.0 | 163,748,290 | 486,576 | 1,570 |
-| Plinth 1.65.0.0 | 168,065,744 | 536,464 | 1,310 |
-| Scalus 0.18.2 | 231,874,447 | 619,461 | 1,392 |
+| **Pebble 0.5.0** | **163,663,780** | 574,564 | 1,357 |
+| Plinth 1.67.0.0 | 163,913,498 | 486,978 | 1,572 |
+| Plinth 1.71.0.0 | 164,585,498 | 491,178 | 1,574 |
+| Plinth 1.65.0.0 | 168,230,952 | 536,866 | 1,312 |
+| Scalus 1.3.0 | 212,801,989 | 537,615 | 1,325 |
 
 Pebble takes the **lowest CPU of the suite** on its first
-real-world-contract entry — 29% ahead of Scalus and just past the best
-Plinth build — with the second-smallest script. The implementation
+real-world-contract entry — 23% below Scalus 1.3.0 and just below the best
+Plinth build — with a script within 4% of the smallest. (Figures use the
+scenario's 30-minute deadline in milliseconds and exclusive upper bounds,
+UPLC-CAPE #253 and #247.) The implementation
 validates each endpoint in a single traversal of the outputs, compares
 signatures and credentials as raw bytes, and reads lovelace through the
 compiler's raw-value-map `amountOf` fast path (skipping `unValueData`'s
@@ -82,18 +88,14 @@ which is why Plinth keeps the memory lead here.
 
 ## Fixed-algorithm scenarios (naive recursion)
 
-Pebble has had entries in the two naive-recursion scenarios since 0.1.2 —
-these constrain every compiler to the same textbook-recursive algorithm, so
-they compare backend code generation only:
+These constrain every compiler to the same textbook-recursive algorithm, so
+they compare backend code generation only. Pebble's entries were
+re-submitted with Pebble 0.4.4 (UPLC-CAPE #257, same sources as 0.1.2):
 
-| scenario | Pebble 0.1.2 | best other | notes |
+| scenario | Pebble 0.4.4 CPU | best other CPU | standing |
 | --- | ---: | ---: | --- |
-| `fibonacci_naive_recursion` CPU | 154,053,890,937 | 115,413,721,337 (Scalus 0.17+) | Pebble 2nd of 5 compilers at 0.1.2 |
-| `factorial_naive_recursion` CPU | 30,365,890 | 28,019,280 (Plinth 1.61+) | within 8% of the lead at 0.1.2 |
-
-The 0.1.2 entries predate the 0.4.x optimizer campaign (2–3× whole-program
-improvements, compute-once placement, case-over-constant lowering); the
-open-optimization entries above reflect the current compiler.
+| `factorial_naive_recursion` | **23,031,587** | 28,019,280 (Scalus 1.3.0, Plinth 1.61) | **1st of 5 compilers**, 18% below the next |
+| `fibonacci_naive_recursion` | 112,400,919,906 | 99,577,801,337 (Scalus 1.3.0) | 2nd of 5 compilers; 0.1.2 was at 154,053,890,937 |
 
 ## Real-world cross-check: the Cardano Masterpiece
 
