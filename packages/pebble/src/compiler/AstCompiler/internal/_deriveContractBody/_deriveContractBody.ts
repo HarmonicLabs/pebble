@@ -431,6 +431,9 @@ function _buildPurposeMatchStmt(
                 tx: txUniqueName,
                 purposeData: purposeUniqueName,
                 redeemerData: redeemerUniqueName,
+                credential: credentialUniqueName,
+                // the credential used to be exposed only under this name (a
+                // copy of the mint branch); kept so existing code compiles
                 policy: credentialUniqueName,
             }),
             derived.directRedeemerTypeDef!,
