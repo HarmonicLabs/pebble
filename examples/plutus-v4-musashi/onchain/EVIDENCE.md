@@ -10,7 +10,7 @@ untouched), and the spending transaction reached the chain through a
 
 | | |
 |---|---|
-| network | Musashi, the public Leios testnet (network magic 164) |
+| network | Musashi, the public Leios testnet (network magic 164), the spin started 2026-10-18T00:00:00Z (Shelley genesis hash `d1b19e006c1198fb7ac9d53073c1a9f77acb1a9474c92310006ae4418290cda3`) |
 | era / protocol version | Dijkstra, **12.0** (`cardano-cli query protocol-parameters`, and the block headers below) |
 | Plutus V4 | cost model with 251 parameters in the protocol parameters; the ledger build requires plutus-ledger-api >= 1.71 |
 | node used | cardano-node 11.2.0.164 from the `ouroboros-leios` release `rc-2026w43`, configuration from the [Cardano Book](https://book.play.dev.cardano.org/adv-musashi.html) |
@@ -42,6 +42,11 @@ transaction's validity interval out of the V4 script context.
 | lock | [`c4af6685095147d8e9f0a2447f602660d83bc50f91a60e8bece363a238bd0855`](https://kleioscan.com/#/musashi/tx/c4af6685095147d8e9f0a2447f602660d83bc50f91a60e8bece363a238bd0855) | 37049 (slot 834895, 15:54:55 UTC) | 20 ADA to the script with the inline datum [`tx/datum.json`](tx/datum.json) (`notBefore` = 1793116482000) |
 | unlock, wrong secret | not submitted | | rejected by the script during evaluation, see below |
 | **unlock** | [`e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c`](https://kleioscan.com/#/musashi/tx/e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c) | **37057** (slot 835036, 15:57:16 UTC) | **script ran and succeeded**: `valid_contract: true`, `plutusV4`, 31,996 memory / 9,258,110 CPU units |
+
+| block | hash | contents |
+|---|---|---|
+| 37049 | `8f3fd9249d995f5393dd8fd832d0bb479508c4c91201c0870629405a9ef9a00f` | ranking block, 395 transactions, including the lock |
+| 37057 | `2e0a241cca26a34e0fa53c42ed05ab52949817375e8eeb0287f020e3be81a1cf` | ranking block certifying endorser block `07fd04d010856055d292ab41c5a6e68227e3d41f6a19e2ea9733de821f213613`, 1,414 transactions, including the unlock |
 
 The signed transactions are in [`tx/`](tx/). After the unlock, the script output
 `c4af…#0` is spent, the unlock's output `e36e…#0` holds the 20 ADA minus the
@@ -95,6 +100,18 @@ its default cost model, not Musashi's V4 one.
 
 ## Verifying independently
 
+The transaction ids can be recomputed from the committed signed transactions,
+which also show the script, the datum, the redeemer and the execution units that
+went on chain:
+
+```bash
+cardano-cli dijkstra transaction txid --tx-file tx/lock.signed     # c4af6685…0855
+cardano-cli dijkstra transaction txid --tx-file tx/unlock.signed   # e36e3e7a…195c
+cardano-cli debug transaction view --tx-file tx/unlock.signed
+```
+
+On the live network:
+
 ```bash
 # KleioScan (db-sync based explorer), no account needed
 curl -s https://kleioscan.com/api/musashi/txs/e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c \
@@ -107,3 +124,14 @@ cardano-cli dijkstra query utxo --testnet-magic 164 \
 cardano-cli dijkstra query utxo --testnet-magic 164 \
   --tx-in e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c#0   # the unlock's output
 ```
+
+### If Musashi has been respun
+
+Musashi is restarted from a new genesis when a prototype release changes the
+chain format. KleioScan then keeps the previous chain under its own network id
+(earlier spins are listed as `musashi-w40` and `musashi-old` at
+<https://kleioscan.com/api/networks>), so the links above would need that id in
+place of `musashi`. This chain is identified by the network magic and Shelley
+genesis hash in the table at the top. The explorer's records of both
+transactions and both blocks, as served on 2026-10-27, are saved in
+[`tx/kleioscan/`](tx/kleioscan/).
