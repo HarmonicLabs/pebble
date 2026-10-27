@@ -1,5 +1,6 @@
 """Print the Plutus V4-era parts of a signed Dijkstra transaction and of its
-sub-transactions: the new body fields and every redeemer with its ledger tag.
+sub-transactions: the new body fields, the hash of every Plutus script it
+carries, and every redeemer with its ledger tag.
 
     python3 inspect-tx.py tx/nested.signed
 
@@ -132,6 +133,19 @@ def redeemers(witness_set):
                 yield tag, index, data, units
 
 
+LANGUAGES = {3: (1, "PlutusV1"), 6: (2, "PlutusV2"), 7: (3, "PlutusV3"), 8: (4, "PlutusV4")}
+
+
+def scripts(label, witness_set):
+    """script hash = blake2b-224 of the language tag byte and the script"""
+    for key, value in witness_set:
+        if key in LANGUAGES:
+            prefix, language = LANGUAGES[key]
+            for script in untag(value):
+                print("%-30s %s script, hash %s" % (
+                    label, language, hashlib.blake2b(bytes([prefix]) + script, digest_size=28).hexdigest()))
+
+
 def show(label, witness_set):
     for tag, index, data, units in redeemers(witness_set):
         print("%-30s tag %d (%s), index %d, redeemer %s, units %s" % (
@@ -167,11 +181,13 @@ def main(path):
     tx, _ = decode(raw)
     body, witness_set = tx[0], tx[1]
     fields("top-level transaction", body)
+    scripts("top-level transaction", witness_set)
     show("top-level transaction", witness_set)
     for key, value in body:
         if key == 23:                                       # sub_transactions
             for n, sub in enumerate(untag(value)):
                 fields("sub-transaction %d" % n, sub[0])
+                scripts("sub-transaction %d" % n, sub[1])
                 show("sub-transaction %d" % n, sub[1])
 
 

@@ -15,7 +15,7 @@ sub-transactions, before accepting it.
 | | |
 |---|---|
 | source | [`../src/index.pebble`](../src/index.pebble), `targetPlutusVersion: "experimental-v4"` |
-| compiler | Pebble at commit `cff5f0b0` (0.5.0 plus the withdraw `context.credential` fix); `pebble compile` reproduces [`../out/out.flat`](../out/out.flat) byte for byte |
+| compiler | Pebble at commit `cff5f0b0` (0.5.0 plus the withdraw `context.credential` fix; the 0.5.0 release rejects this source); building it from this repository reproduces [`../out/out.flat`](../out/out.flat) byte for byte ([how](../README.md#reproducing)) |
 | program | 965 bytes flat-encoded; [`../out/v4-features.plutus`](../out/v4-features.plutus) is the `PlutusScriptV4` envelope |
 | script hash | `067e368d715135fccf0d399f9d47ce9ec9b92dbc0d5e75ae44d17a14` (blake2b-224 of `0x04` ‖ script: the V4 language tag) |
 | spending address | `addr_test1wqr8ud5dw9gntlx0p5uel828e60vnwfdhsx4uadwgngh59qd6mr7n` |
@@ -134,8 +134,10 @@ least one rejected case per method: 16 of 16 pass.
 ## Verifying independently
 
 ```bash
-# transaction and sub-transaction ids, the new body fields and the redeemer tags,
-# straight from the committed signed transactions
+# transaction and sub-transaction ids, the new body fields, the hash of each Plutus
+# script carried (067e368d… in every step, guards included: the script built from
+# ../src/index.pebble) and the redeemer tags, straight from the committed signed
+# transactions
 python3 inspect-tx.py tx/batch.signed
 # KleioScan; records as served on 2026-10-27 are saved in tx/kleioscan/
 curl -s https://kleioscan.com/api/musashi/txs/cd1f02c217bcdeedbc5d45225d18326d6da9274e9bcf996d1e4be35e399ba448 \

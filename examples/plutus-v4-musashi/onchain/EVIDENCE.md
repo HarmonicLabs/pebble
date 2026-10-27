@@ -23,7 +23,7 @@ cannot execute Plutus V4 scripts until the Dijkstra hard fork.
 | | |
 |---|---|
 | source | [`../src/index.pebble`](../src/index.pebble), `targetPlutusVersion: "experimental-v4"` |
-| compiler | `@harmoniclabs/pebble` 0.5.0 (tag `v0.5.0`); `pebble compile` reproduces [`../out/out.flat`](../out/out.flat) byte for byte |
+| compiler | `@harmoniclabs/pebble` 0.5.0 (tag `v0.5.0`); `pebble compile` reproduces [`../out/out.flat`](../out/out.flat) byte for byte ([how](../README.md#reproducing)) |
 | program | 321 bytes flat-encoded, Plutus Core 1.1.0; [`../out/hash-lock-v4.plutus`](../out/hash-lock-v4.plutus) is the `PlutusScriptV4` envelope (324 bytes on chain) |
 | script hash | `c12677608f4872a8fad80dc61543c18ace733f2e2e8bac023e4f2f56` |
 | address | `addr_test1wrqjvamq3ay89286mqxuv92rcx9vuuel9chghtqz8e8j74st4fjza` |
@@ -108,6 +108,8 @@ went on chain:
 cardano-cli dijkstra transaction txid --tx-file tx/lock.signed     # c4af6685…0855
 cardano-cli dijkstra transaction txid --tx-file tx/unlock.signed   # e36e3e7a…195c
 cardano-cli debug transaction view --tx-file tx/unlock.signed
+# the script the unlock carries: PlutusV4, hash c1267760…2f56, the one built from ../src/index.pebble
+python3 ../../plutus-v4-features/onchain/inspect-tx.py tx/unlock.signed
 ```
 
 On the live network:

@@ -23,17 +23,26 @@ The transactions, and how to verify them, are in
 
 ## Reproducing
 
-The script was compiled by the Pebble compiler at commit `cff5f0b0` (0.5.0
-plus the `context.credential` fix for withdraw methods, which this contract
-uses). From a build of that commit:
+The script was compiled by the Pebble compiler at commit `cff5f0b0`: 0.5.0
+plus the fix that lets withdraw methods read `context.credential`, which this
+contract uses. The 0.5.0 release rejects this source (error 294, "`credential`
+is not available in this contract method `context`"), so build the compiler
+and the CLI from this repository. From the root of a checkout:
 
 ```bash
-pebble compile --config ./pebble.config.json        # -> out/out.flat (965 bytes)
-node onchain/evaluate-locally.mjs                   # 16 local cases, all PASS
+(cd packages/pebble && npm i && npm run build)                                 # the compiler
+(cd packages/pebble-cli && npm i --no-save ../pebble && npm run build:no-gen)  # the CLI, on that compiler
+cd examples/plutus-v4-features && rm out/out.flat
+node ../../packages/pebble-cli/dist/index.js compile --config ./pebble.config.json
+git status --short out              # prints nothing: out/out.flat is rebuilt byte for byte
+node onchain/evaluate-locally.mjs   # 16 local cases, all PASS
 ```
 
 `out/v4-features.plutus` wraps `out/out.flat` in a `PlutusScriptV4` text
-envelope. On a Musashi node (see [`../plutus-v4-musashi`](../plutus-v4-musashi)
+envelope; its script hash, `067e368d715135fccf0d399f9d47ce9ec9b92dbc0d5e75ae44d17a14`,
+is the hash of the script that every transaction in the evidence carries
+(`python3 onchain/inspect-tx.py onchain/tx/<step>.signed` prints it). On a
+Musashi node (see [`../plutus-v4-musashi`](../plutus-v4-musashi)
 for the setup), with a funded payment key and a stake key:
 
 ```bash
@@ -57,5 +66,5 @@ script edits the transaction `cardano-cli` built, before it is signed:
   copied over; they are exactly the inputs of that hash.
 
 [`inspect-tx.py`](./onchain/inspect-tx.py) prints, from any of the signed
-transactions, the transaction and sub-transaction ids, the new V4 body fields
-and every redeemer with its ledger tag.
+transactions, the transaction and sub-transaction ids, the new V4 body fields,
+the hash of every Plutus script carried and every redeemer with its ledger tag.
