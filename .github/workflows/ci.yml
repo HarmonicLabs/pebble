@@ -5,6 +5,8 @@ on: push
 jobs:
   CI:
     strategy:
+      # a failure on one OS must not cancel (and hide) the result on the others
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
