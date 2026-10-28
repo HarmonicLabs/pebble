@@ -5,9 +5,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 async function main() {
-	const cliRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+	const cliRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	const cliPkgPath = path.join(cliRoot, "package.json");
 	const outPath = path.join(cliRoot, "src", "version.generated.ts");
 
