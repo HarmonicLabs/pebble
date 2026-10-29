@@ -17,7 +17,7 @@ scenario, and one shared harness measures them all. The live report is at
   the batch-6 builtins run on the production track.
 - **Competitor numbers** below are taken verbatim from the accepted
   submissions' `metrics.json` files in the UPLC-CAPE repository (best
-  entry per compiler, main track, as of 2026-10-26). Lower is better
+  entry per compiler, main track, as of 2026-10-29). Lower is better
   everywhere.
 - **Pebble artifacts** are compiled by Pebble **0.5.0** with default
   settings from [`examples/uplc-cape`](examples/uplc-cape); each submission
@@ -89,13 +89,17 @@ which is why Plinth keeps the memory lead here.
 ## Fixed-algorithm scenarios (naive recursion)
 
 These constrain every compiler to the same textbook-recursive algorithm, so
-they compare backend code generation only. Pebble's entries were
-re-submitted with Pebble 0.4.4 (UPLC-CAPE #257, same sources as 0.1.2):
+they compare backend code generation only. The UPLC-CAPE maintainers
+re-submitted Pebble's entries with Pebble 0.4.4 (UPLC-CAPE #257) and 0.5.0
+(#268), which compile the same sources to the same programs. The figures
+below follow #264 and #266, which brought the sources to the prescribed base
+cases: Pebble's factorial now stops at `n <= 0` instead of `n <= 1`, and the
+Scalus fibonacci entries no longer add an extra base case.
 
-| scenario | Pebble 0.4.4 CPU | best other CPU | standing |
+| scenario | Pebble 0.5.0 CPU | best other CPU | standing |
 | --- | ---: | ---: | --- |
-| `factorial_naive_recursion` | **23,031,587** | 28,019,280 (Scalus 1.3.0, Plinth 1.61) | **1st of 5 compilers**, 18% below the next |
-| `fibonacci_naive_recursion` | 112,400,919,906 | 99,577,801,337 (Scalus 1.3.0) | 2nd of 5 compilers; 0.1.2 was at 154,053,890,937 |
+| `factorial_naive_recursion` | **26,979,195** | 28,019,280 (Scalus 1.3.0, Plinth 1.61–1.71) | **1st of 5 compilers**, 4% below the next |
+| `fibonacci_naive_recursion` | **112,400,919,906** | 129,093,086,599 (Scalus 1.3.0, Plinth 1.61–1.71) | **1st of 5 compilers**, 13% below the next; 0.1.2 was at 154,053,890,937 |
 
 ## Real-world cross-check: the Cardano Masterpiece
 
