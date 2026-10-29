@@ -60,6 +60,9 @@ export function directMethodsInOrder( contractDecl: ContractDecl ): FuncDecl[]
         ...contractDecl.certifyMethods,
         ...contractDecl.proposeMethods,
         ...contractDecl.voteMethods,
+        // guard methods come LAST so the tags of every pre-existing purpose
+        // keep their encoding when a contract adds a guard
+        ...contractDecl.guardMethods,
     ];
 }
 
@@ -157,8 +160,10 @@ export function _deriveContractDatumTypeDef(
     contractRange: SourceRange,
 ): StructDecl
 {
-    let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( stateDecls.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
+    // NOT flagged `shortcutSingleConstructor`: a contract's datum and
+    // redeemer are its on-chain interface, and stay `constrData(0, fields)`
+    // whatever encoding user-declared shortcut structs get.
+    const defFlags = StructDeclAstFlags.onlyDataEncoding;
 
     return new StructDecl(
         new Identifier( contractName, contractRange ),
@@ -181,8 +186,10 @@ export function _deriveRedeemerTypeDef(
     contractRange: SourceRange,
 ): StructDecl
 {
-    let defFlags = StructDeclAstFlags.onlyDataEncoding;
-    if( methods.length <= 1 ) defFlags |= StructDeclAstFlags.shortcutSingleConstructor;
+    // NOT flagged `shortcutSingleConstructor`: a contract's datum and
+    // redeemer are its on-chain interface, and stay `constrData(0, fields)`
+    // whatever encoding user-declared shortcut structs get.
+    const defFlags = StructDeclAstFlags.onlyDataEncoding;
 
     const uniqueName = getUniqueInternalName( redeemerName );
     return new StructDecl(

@@ -1,0 +1,6 @@
+Estimated transaction fee: 193051 Lovelace
+Transaction successfully submitted. Transaction hash is:
+{"txhash":"e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c"}
+unlock txid: {
+    "txhash": "e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c"
+}

@@ -328,11 +328,7 @@ export function _inilneSingeSopConstrFromData(
     // the pair via a 2-arg branch and we only consume the fields list.
     const idxSym = Symbol("singleCtorIdx_unused");
     const fieldsListSym = Symbol("fieldsList");
-    return new IRCase(
-        _ir_apps( IRNative.unConstrData, dataExprIR ),
-        [
-            new IRFunc(
-                [ idxSym, fieldsListSym ],
+    const mkSop = (): IRTerm =>
                 new IRConstr(
                     0,
                     constr.fields.map( (field, i) => {
@@ -354,7 +350,21 @@ export function _inilneSingeSopConstrFromData(
                             _visitedSops
                         );
                     } )
-                )
+                );
+
+    // untagged: the data is `listData( fields )`, no constructor pair
+    if( sop_t.untagged )
+    return _ir_apps(
+        new IRFunc( [ fieldsListSym ], mkSop() ),
+        _ir_apps( IRNative.unListData, dataExprIR )
+    );
+
+    return new IRCase(
+        _ir_apps( IRNative.unConstrData, dataExprIR ),
+        [
+            new IRFunc(
+                [ idxSym, fieldsListSym ],
+                mkSop()
             )
         ]
     );

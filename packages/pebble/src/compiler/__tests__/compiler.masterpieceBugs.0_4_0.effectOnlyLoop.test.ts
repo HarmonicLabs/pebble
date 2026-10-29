@@ -206,7 +206,8 @@ contract T {
 
     // ---- the reported symptom: refutable destructure of a `find` miss -----
 
-    const box = ( v: number ) => new DataConstr( 0, [ new DataI( v ) ] );
+    // `Box` is declared in shortcut form, so it is list-encoded
+    const box = ( v: number ) => new DataList([ new DataI( v ) ]);
 
     test("`const Some{…} = xs.find(…)` traps on a miss", async () => {
         const flat = await compileIt(`

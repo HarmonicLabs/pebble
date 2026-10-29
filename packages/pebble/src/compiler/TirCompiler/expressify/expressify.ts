@@ -375,7 +375,10 @@ export function expressifyFuncBody(
                     )
                 );
             }
-            else if( stmt.type instanceof TirDataStructType ) {
+            // check the UNALIASED type: destructuring through an alias of
+            // a data struct (e.g. the V4 prelude's `AccountId` = Credential)
+            // must behave like destructuring the struct itself
+            else if( stmtUnaliasedType instanceof TirDataStructType ) {
                 const { implicitAssertions, nestedDeconstructs } = ctx.introduceDeconstrDataLettedFields( stmt, lettedExpr );
                 assertions.push( ...implicitAssertions );
                 bodyStmts.unshift( ...nestedDeconstructs );

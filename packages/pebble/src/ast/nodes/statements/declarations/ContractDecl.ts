@@ -17,6 +17,8 @@ export class ContractDecl
         readonly withdrawMethods: FuncDecl[],
         readonly proposeMethods: FuncDecl[],
         readonly voteMethods: FuncDecl[],
+        /** Plutus V4 guarding purpose (`guard name() {}`); requires targetPlutusVersion >= v4 */
+        readonly guardMethods: FuncDecl[],
         readonly stateDecls: StateDecl[],
         readonly range: SourceRange
     ) {}

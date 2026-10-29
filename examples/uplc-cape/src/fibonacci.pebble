@@ -1,0 +1,21 @@
+// UPLC-CAPE `fibonacci` scenario (open optimization).
+//
+// Contract per scenarios/fibonacci/fibonacci.md:
+//   fibonacci(0) = 0, fibonacci(1) = 1,
+//   fibonacci(n) = fibonacci(n-1) + fibonacci(n-2) for n > 1,
+//   fibonacci(n) = n for n < 0 (the harness expects fib(-1) == -1).
+//
+// Implementation: iterative pair-accumulator loop (the compiler lowers the
+// `for` to a single tail-recursive UPLC function), O(n) additions.
+
+export function fibonacci( n: int ): int {
+    if( n <= 1 ) return n;
+    let prev = 0;
+    let curr = 1;
+    for( let i = 2; i <= n; i++ ) {
+        const next = prev + curr;
+        prev = curr;
+        curr = next;
+    }
+    return curr;
+}

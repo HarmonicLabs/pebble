@@ -11,7 +11,7 @@ import { SourceRange } from "../../ast/Source/SourceRange";
 import { DiagnosticEmitter } from "../../diagnostics/DiagnosticEmitter";
 import { DiagnosticMessage } from "../../diagnostics/DiagnosticMessage";
 import { DiagnosticCode } from "../../diagnostics/diagnosticMessages.generated";
-import { CompilerOptions } from "../../IR/toUPLC/CompilerOptions";
+import { CompilerOptions, isLegacyEncodingStrategy, normalizeTargetPlutusVersion } from "../../IR/toUPLC/CompilerOptions";
 import { Parser } from "../../parser/Parser";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol } from "./scope/AstScope";
@@ -158,7 +158,10 @@ export class AstCompiler extends DiagnosticEmitter
     )
     {
         super( diagnostics );
-        this.program = new TypedProgram( this.diagnostics );
+        this.program = new TypedProgram(
+            this.diagnostics,
+            normalizeTargetPlutusVersion( (cfg as Partial<CompilerOptions>)?.targetPlutusVersion )
+        );
         // normalize entry to absolute path so import resolution works correctly
         if( typeof cfg.entry === "string" && typeof cfg.root === "string" )
         {
@@ -1751,6 +1754,28 @@ export class AstCompiler extends DiagnosticEmitter
             }
         }
 
+        // Untagged Data encoding (`listData(...)`) instead of
+        // `constrData(0, ...)`. Requires exactly one constructor and is
+        // what the shortcut-form syntax (`struct Foo { x: int }`) means,
+        // unless `encodingStrategy` is "legacy"; the explicit `untagged`
+        // keyword forces it. The explicit single-constructor form
+        // (`struct Foo { Foo { x: int } }`) is always tagged.
+        const isUntagged =
+            stmt.constrs.length === 1 && (
+                stmt.hasFlag( StructDeclAstFlags.untagged )
+                || (
+                    stmt.hasFlag( StructDeclAstFlags.shortcutSingleConstructor )
+                    && !isLegacyEncodingStrategy( this.cfg.encodingStrategy )
+                )
+            );
+        if( stmt.hasFlag( StructDeclAstFlags.untagged ) && stmt.constrs.length !== 1 ) {
+            this.error(
+                DiagnosticCode.Not_implemented_0,
+                stmt.name.range,
+                "`untagged` struct must have exactly one constructor"
+            );
+        }
+
         // sop encoded type
         if( sop )
         {
@@ -1777,7 +1802,8 @@ export class AstCompiler extends DiagnosticEmitter
                         })
                         .filter( f => f instanceof TirStructField ) as TirStructField[]
                     )
-                )
+                ),
+                isUntagged
             );
         }
 
@@ -1785,25 +1811,6 @@ export class AstCompiler extends DiagnosticEmitter
         if( data )
         {
             let canEncodeToData = true;
-            // Untagged Data encoding (`listData(...)`) instead of
-            // `constrData(0, ...)`. Requires exactly one constructor and is
-            // enabled by either the explicit `untagged` keyword or the
-            // shortcut-form syntax when `encodingStrategy === "minimal"`.
-            const isUntagged =
-                stmt.constrs.length === 1 && (
-                    stmt.hasFlag( StructDeclAstFlags.untagged )
-                    || (
-                        stmt.hasFlag( StructDeclAstFlags.shortcutSingleConstructor )
-                        && this.cfg.encodingStrategy === "minimal"
-                    )
-                );
-            if( stmt.hasFlag( StructDeclAstFlags.untagged ) && stmt.constrs.length !== 1 ) {
-                this.error(
-                    DiagnosticCode.Not_implemented_0,
-                    stmt.name.range,
-                    "`untagged` struct must have exactly one constructor"
-                );
-            }
             const dataCtors = stmt.constrs.map( ctor =>
                 new TirStructConstr(
                     ctor.name.text,

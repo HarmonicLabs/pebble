@@ -11,6 +11,7 @@ import { TirTestStmt } from "../statements/TirTestStmt";
 import { TirTypeParam } from "../types/TirTypeParam";
 import { isTirType, TirType } from "../types/TirType";
 import { populatePreludeScope, populateStdScope } from "./stdScope/stdScope";
+import { TargetPlutusVersion } from "../../../IR/toUPLC/CompilerOptions";
 import { populateStdNamespace } from "./stdScope/populateStdNamespace";
 import { populateBuiltinInterfaces } from "./stdScope/populateBuiltinInterfaces";
 import { getAppliedTirTypeName } from "./getAppliedTirTypeName";
@@ -182,7 +183,9 @@ export class TypedProgram extends DiagnosticEmitter
     readonly preludeScope: AstScope;
 
     constructor(
-        diagnostics: DiagnosticMessage[] = []
+        diagnostics: DiagnosticMessage[] = [],
+        /** which family the unsuffixed prelude type names resolve to */
+        readonly targetPlutusVersion: TargetPlutusVersion = "v3"
     )
     {
         super( diagnostics );
@@ -206,7 +209,7 @@ export class TypedProgram extends DiagnosticEmitter
         this.stdTypes = new StdTypes( this );
 
         this.preludeScope = new AstScope( this.stdScope, this, { isFunctionDeclScope: false, isMethodScope: false } );
-        populatePreludeScope( this );
+        populatePreludeScope( this, this.targetPlutusVersion );
 
         // Register built-in interfaces (currently: `ToData`) and their
         // compiler-supplied impl factories. Must precede `populateStdNamespace`

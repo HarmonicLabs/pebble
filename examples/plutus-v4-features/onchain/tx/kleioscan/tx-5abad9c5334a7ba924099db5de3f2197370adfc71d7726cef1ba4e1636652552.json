@@ -1,0 +1,113 @@
+{
+  "hash": "5abad9c5334a7ba924099db5de3f2197370adfc71d7726cef1ba4e1636652552",
+  "block_no": 37310,
+  "block_hash": "d8a7455d3c0bc6c72a170ceac3d996afe5a34cbc9aa3d89771c397e588050e49",
+  "block_index": 295,
+  "time": "2026-10-27T17:44:23Z",
+  "out_sum": "10000000",
+  "fee": "0",
+  "deposit": null,
+  "size": 1347,
+  "script_size": 968,
+  "valid_contract": true,
+  "invalid_before": null,
+  "invalid_hereafter": null,
+  "inputs": [
+    {
+      "address": "addr_test1wqr8ud5dw9gntlx0p5uel828e60vnwfdhsx4uadwgngh59qd6mr7n",
+      "value": "10000000",
+      "src_tx_hash": "7e16948c216c58d6d77a798f87adf1481ef62f62a39f82428d04b7db7dd9b2ef",
+      "src_index": 0,
+      "has_inline_datum": true,
+      "has_datum_hash": true,
+      "has_ref_script": false,
+      "datum_hash": "923918e403bf43c34b4ef6b48eb2ee04babed17320d8d1b9ff9ad086e86f44ec",
+      "datum_json": {
+        "fields": [],
+        "constructor": 0
+      },
+      "datum_cbor": "d87980",
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": "plutusV4",
+      "assets": []
+    }
+  ],
+  "outputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "10000000",
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "spent_by_tx": "d3374a0dbe9604e54247fbe06dd8839bdd045350e1a01253d2a2dd352dd9f607",
+      "assets": []
+    }
+  ],
+  "metadata": [],
+  "trade": null,
+  "scripts": [
+    {
+      "purpose": "spend",
+      "index": 0,
+      "script_hash": "067e368d715135fccf0d399f9d47ce9ec9b92dbc0d5e75ae44d17a14",
+      "script_type": "plutusV4",
+      "script_size": 968,
+      "unit_mem": "2000000",
+      "unit_steps": "1000000000",
+      "redeemer_json": {
+        "fields": [
+          {
+            "fields": [
+              {
+                "bytes": "5f4f2c92cad820eeab9e21c7aa197c6678353da4a2b2fc5450713ec8"
+              }
+            ],
+            "constructor": 0
+          }
+        ],
+        "constructor": 0
+      },
+      "datum_json": null,
+      "script_cbor": "5903c50101009800660026e012002aba29b87482024bd0066e1d20049b8f488102763400aab9daab9e9b894800122222222980091804180418041804000cc8c0040048a4006446018660080080034800091191191949baa3001300d375860020059800918071807000cc004c03400a6e1d2000488a6002600800b370e900148a400a942002488a6002600e600c011232300100122900191499baf301400200599802002000e0026026004600448888ca400f26ea80164520056c9baa00c99191911480164cc034cc03664cc02cc04c004dd59809980c180b002c928d282660106e65220118726571756972656420746f702d6c6576656c206775617264004a14a23010301b00493019003998041b994881157375622d7472616e73616374696f6e20696e646578004a14a2b5260dd69808180b8009baa300f301b0013758014b5ad6c9baa00c9148015ad6b5b32601660306ea8c040c07000e6600a6e65221287375622d7472616e73616374696f6e2067756172647320676574206e6f2062617463682076696577004a14a2b526064dd518061805806c8a400b26ea80324520056cc980599194c0040066eacc048c078c05cdd6007406d001114800c8a4c014dd7180e8014cc010010006464660020026eacc0780108a4006452600a6eb8c08800a66008008003375a6042004a40004920001b8f375c6020007330053732911106d696e742065786163746c79206f6e65004a14a2b52616c9baa00c9148015ad933008301000337566020603860386038602a6eb0032532601c6eb40066600c6e6522010f7a65726f207769746864726177616c004a14a2b52626526601260220046eacc044c0500066453266e1cdd68008014cc020dcca450e646972656374206465706f736974004a14a2b64cc02cc04c018dd59809980f980b001c8c8c8ca4cc044cc0464cdc40009bad30173023002998061b9948810b757070657220626f756e64004a14a23021301f00393014001998061b9948810b6c6f77657220626f756e64004a14a2b5261bad3016001301c00137540021bad3011301d0021bac00c326ea80324520056b5ad323293300c3300c9300d301a375460240033300737329110e736372697074206163636f756e74004a14a2300f301a0029301d375a6024603c00333007373291010f6163636f756e74206465706f736974004a14a2b526180c0009baa3010301c0032d6c9baa00c9148015ad6b5ad329993370e602a6eb0c044dd61808980c0009bad3011002998031b994890a62617463682073697a65004a14a2a509807180c800ad4986ea8c040c07000c0ae7015d09bac0012300330030012902a1",
+      "script_json": null,
+      "withdrawal_amount": null
+    },
+    {
+      "purpose": "propose",
+      "index": 0,
+      "script_hash": null,
+      "script_type": null,
+      "script_size": null,
+      "unit_mem": "2000000",
+      "unit_steps": "1000000000",
+      "redeemer_json": {
+        "fields": [],
+        "constructor": 5
+      },
+      "datum_json": null,
+      "script_cbor": null,
+      "script_json": null,
+      "withdrawal_amount": null
+    }
+  ],
+  "parent_tx": "22b4675dc685a79c79a42e705989c878ed46feb6b680387cd079b709145d5f36",
+  "sub_txs": [],
+  "proposals": [],
+  "reference_inputs": [],
+  "collateral_inputs": [],
+  "collateral_return": null,
+  "certificates": [],
+  "withdrawals": [],
+  "mint": [],
+  "votes": [],
+  "required_signers": []
+}

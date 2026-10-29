@@ -25,10 +25,15 @@ import { TirReturnStmt } from "../../statements/TirReturnStmt";
 import { TirInlineClosedIR } from "../../expressions/TirInlineClosedIR";
 import { TirFuncT } from "../../types/TirNativeType";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
+import { IRNativeTag } from "../../../../IR/IRNodes/IRNative/IRNativeTag";
 import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRVar } from "../../../../IR/IRNodes/IRVar";
+import { IRConstr } from "../../../../IR/IRNodes/IRConstr";
 import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { IRConst } from "../../../../IR/IRNodes/IRConst";
+import { IRTerm } from "../../../../IR/IRTerm";
+import { _ir_lazyIfThenElse } from "../../../../IR/tree_utils/_ir_lazyIfThenElse";
+import { TargetPlutusVersion } from "../../../../IR/toUPLC/CompilerOptions";
 
 export const void_t = new TirVoidT();
 export const int_t = new TirIntT();
@@ -50,6 +55,30 @@ export const valueToDataName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueToData"
 /** the `std.value.zero` program constant (the empty native Value) */
 export const valueZeroConstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueZero";
 export const getCredentialHashFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "getCredentialHash";
+// Value arithmetic (milestone 2 stdlib expansion)
+export const valueNegateName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueNegate";
+export const valueEqualsName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueEquals";
+export const valueSubtractName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueSubtract";
+export const valueIsZeroName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueIsZero";
+export const valueGeqName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueGeq";
+export const valueLeqName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueLeq";
+export const valueSingletonName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueSingleton";
+export const valueAmountOfAssetName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "valueAmountOfAsset";
+export const assetClassConstructorName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "assetClassConstructor";
+// script-context helpers (milestone 2 stdlib expansion)
+export const txSignedByName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txSignedBy";
+export const txFindInputName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txFindInput";
+export const txOutputsToCredentialName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txOutputsToCredential";
+export const txInputsFromCredentialName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txInputsFromCredential";
+export const txValuePaidToName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txValuePaidTo";
+export const txOutInlineDatumName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "txOutInlineDatum";
+export const intervalLowerBoundFiniteName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "intervalLowerBoundFinite";
+export const intervalUpperBoundFiniteName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "intervalUpperBoundFinite";
+export const intervalContainsName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "intervalContains";
+export const intervalIsEntirelyAfterName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "intervalIsEntirelyAfter";
+export const intervalIsEntirelyBeforeName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "intervalIsEntirelyBefore";
+// list helpers registered as program functions (milestone 2 stdlib expansion)
+export const listSumName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + "listSum";
 
 export function populateStdScope( program: TypedProgram ): void
 {
@@ -180,9 +209,23 @@ export function populateStdScope( program: TypedProgram ): void
     stdScope.readonly();
 }
 
-export function populatePreludeScope( program: TypedProgram ): void
+export function populatePreludeScope(
+    program: TypedProgram,
+    /** which family the UNSUFFIXED context type names resolve to */
+    targetPlutusVersion: TargetPlutusVersion = "v3"
+): void
 {
     const preludeScope = program.preludeScope;
+    // The context-type family is SINGLE per program: the same names
+    // (`ScriptContext`, `Tx`, ...) always exist, and `targetPlutusVersion`
+    // decides which DEFINITION they carry. Under "experimental-v4" the V3
+    // versions of these names are still constructed (internal scaffolding
+    // for the V3-only helpers) but NOT registered — the V4 definitions
+    // below take the names instead.
+    const v4TakesOver = targetPlutusVersion === "experimental-v4";
+    const suppressedV3Names = v4TakesOver
+        ? new Set([ "ScriptPurpose", "ScriptInfo", "Address", "TxOut", "TxIn", "Tx", "ScriptContext" ])
+        : new Set<string>();
     // empty string will be never generated as uid,
     // so it is fine to use it for prelude
     const preludeFileUid = "";
@@ -240,7 +283,9 @@ export function populatePreludeScope( program: TypedProgram ): void
     function mkSingleConstructorStruct(
         name: string,
         fields: { [x: string]: TirType },
-        methodNames: Map<AstFuncName, TirFuncName> = new Map()
+        methodNames: Map<AstFuncName, TirFuncName> = new Map(),
+        /** `listData(fields)` instead of `constrData(0, fields)` */
+        untagged: boolean = false
     ): { sop: TirSoPStructType, data: TirDataStructType }
     {
         const sop = new TirSoPStructType(
@@ -249,7 +294,7 @@ export function populatePreludeScope( program: TypedProgram ): void
             [
                 new TirStructConstr(
                     name,
-                    Object.keys( fields ).map( name => 
+                    Object.keys( fields ).map( name =>
                         new TirStructField(name, fields[name])
                     )
                 )
@@ -267,13 +312,16 @@ export function populatePreludeScope( program: TypedProgram ): void
                     )
                 )
             ],
-            methodNames
+            methodNames,
+            untagged
         );
         return { sop, data };
     }
     interface DefineStructOpts {
         data: boolean;
         sop: boolean;
+        /** data encoding is `listData(fields)` (single constructor only) */
+        untagged?: boolean;
     }
     function defineSingleConstructorStruct(
         name: string,
@@ -282,7 +330,15 @@ export function populatePreludeScope( program: TypedProgram ): void
         methodsNames: Map<AstFuncName, TirFuncName> = new Map()
     ): { sop: TirSoPStructType, data: TirDataStructType }
     {
-        const { sop, data } = mkSingleConstructorStruct( name, fields );
+        // forward methodsNames into the TYPE constructors too: method-call
+        // dispatch reads `TirStructType.methodNamesPtr` (expressifyVars),
+        // not only the scope-level table
+        // the suppressed family is not part of this compilation target at
+        // all — skip construction; the callers that would consume the
+        // result are gated on the same condition
+        if( suppressedV3Names.has( name ) )
+        return { sop: undefined as any, data: undefined as any };
+        const { sop, data } = mkSingleConstructorStruct( name, fields, methodsNames, opts.untagged === true );
         const sop_key = sop.toTirTypeKey();
         const data_key = data.toTirTypeKey();
         if( opts.sop ) program.types.set( sop_key, sop );
@@ -344,6 +400,8 @@ export function populatePreludeScope( program: TypedProgram ): void
         methodsNames: Map<AstFuncName, TirFuncName> = new Map()
     ): { sop: TirSoPStructType, data: TirDataStructType }
     {
+        if( suppressedV3Names.has( name ) )
+        return { sop: undefined as any, data: undefined as any };
         const { sop, data } = mkMultiConstructorStruct( name, constrs, methodsNames );
         const sop_key = sop.toTirTypeKey();
         const data_key = data.toTirTypeKey();
@@ -365,16 +423,27 @@ export function populatePreludeScope( program: TypedProgram ): void
         return { sop, data };
     }
 
-    const onlyData = {
+    const onlyData: DefineStructOpts = {
         sop: false,
         data: true
     };
+    // Plutus V4 encodes every PRODUCT type of the ledger API as a plain
+    // `List` of fields rather than `Constr 0 fields` (plutus-ledger-api
+    // >= 1.69). `v4Product` is for the types SHARED by both families
+    // (`TxOutRef`, `Rational`, ...): tagged under "v3", list-encoded under
+    // "experimental-v4". Sum types keep their constructor indices.
+    const onlyDataListEncoded: DefineStructOpts = {
+        sop: false,
+        data: true,
+        untagged: true
+    };
+    const v4Product: DefineStructOpts = v4TakesOver ? onlyDataListEncoded : onlyData;
 
     const { data: txOutRef_t } = defineSingleConstructorStruct(
         "TxOutRef", {
             id: txHash_t,
             index: int_t
-        }, onlyData
+        }, v4Product
     );
     const { data: credential_t } = defineMultiConstructorStruct(
         "Credential", {
@@ -407,13 +476,13 @@ export function populatePreludeScope( program: TypedProgram ): void
         "Rational", {
             numerator: int_t,
             denominator: int_t
-        }, onlyData
+        }, v4Product
     );
     const { data: protocolVersion_t } = defineSingleConstructorStruct(
         "ProtocolVersion", {
             major: int_t,
             minor: int_t
-        }, onlyData
+        }, v4Product
     );
     // struct ConstitutionInfo {
     //     consitutionScriptHash: Optional<ScriptHash>
@@ -427,7 +496,7 @@ export function populatePreludeScope( program: TypedProgram ): void
     const { data: constitutionInfo_t } = defineSingleConstructorStruct(
         "ConstitutionInfo", {
             consitutionScriptHash: opt_scriptHash_t
-        }, onlyData
+        }, v4Product
     );
     // struct GovAction {
     //     ParameterChange {
@@ -514,7 +583,7 @@ export function populatePreludeScope( program: TypedProgram ): void
             deposit: int_t,
             credential: credential_t,
             action: govAction_t
-        }, onlyData
+        }, v4Product
     );
     // struct Voter {
     //     Committee {
@@ -888,6 +957,13 @@ export function populatePreludeScope( program: TypedProgram ): void
             [ "contains",  valueContainsName ],
             [ "scale",     valueScaleName    ],
             [ "toData",    valueToDataName   ],
+            [ "negate",    valueNegateName   ],
+            [ "equals",    valueEqualsName   ],
+            [ "subtract",  valueSubtractName ],
+            [ "isZero",    valueIsZeroName   ],
+            [ "geq",       valueGeqName      ],
+            [ "leq",       valueLeqName      ],
+            [ "amountOfAsset", valueAmountOfAssetName ],
         ])
     );
 
@@ -1044,7 +1120,213 @@ export function populatePreludeScope( program: TypedProgram ): void
             SourceRange.unknown
         )
     );
-    
+
+    // ------------------------------------------------------------------
+    // Value arithmetic (milestone 2 stdlib expansion)
+    // ------------------------------------------------------------------
+    /** the empty native Value, built at runtime (no UPLC Value constant exists) */
+    const mkZeroValueIR = (): IRTerm => _ir_apps(
+        IRNative.unValueData,
+        _ir_apps(
+            IRNative.mapData,
+            _ir_apps( IRNative.mkNilPairData, IRConst.unit )
+        )
+    );
+
+    // Value.negate(): Value -- scaleValue -1 self
+    preludeScope.program.functions.set(
+        valueNegateName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t ], value_t ),
+            ( ctx ) => IRNative._negateValue,
+            SourceRange.unknown
+        )
+    );
+    // Value.equals( other ): bool -- structural equality via valueData
+    preludeScope.program.functions.set(
+        valueEqualsName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], bool_t ),
+            ( ctx ) => IRNative._valueEq,
+            SourceRange.unknown
+        )
+    );
+    // Value.subtract( other ): Value -- unionValue self (negate other)
+    preludeScope.program.functions.set(
+        valueSubtractName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], value_t ),
+            ( ctx ) => {
+                const self = Symbol("value_subtract_self");
+                const other = Symbol("value_subtract_other");
+                return new IRFunc(
+                    [ self, other ],
+                    _ir_apps(
+                        IRNative.unionValue,
+                        new IRVar( self ),
+                        _ir_apps( IRNative._negateValue, new IRVar( other ) )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.isZero(): bool -- equals the empty Value
+    preludeScope.program.functions.set(
+        valueIsZeroName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t ], bool_t ),
+            ( ctx ) => {
+                const self = Symbol("value_isZero_self");
+                return new IRFunc(
+                    [ self ],
+                    _ir_apps(
+                        IRNative._valueEq,
+                        new IRVar( self ),
+                        mkZeroValueIR()
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // Value.geq( other ): bool -- self contains at least `other`
+    // (alias of `valueContains self other`; with negative amounts in play
+    // prefer explicit subtraction)
+    preludeScope.program.functions.set(
+        valueGeqName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], bool_t ),
+            ( ctx ) => IRNative.valueContains,
+            SourceRange.unknown
+        )
+    );
+    // Value.leq( other ): bool -- `other` contains at least self
+    preludeScope.program.functions.set(
+        valueLeqName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, value_t ], bool_t ),
+            ( ctx ) => {
+                const self = Symbol("value_leq_self");
+                const other = Symbol("value_leq_other");
+                return new IRFunc(
+                    [ self, other ],
+                    _ir_apps(
+                        IRNative.valueContains,
+                        new IRVar( other ),
+                        new IRVar( self )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+    // std.value.singleton( policy, name, amount ): Value
+    // (namespace-level constructor, no `self`)
+    preludeScope.program.functions.set(
+        valueSingletonName,
+        new TirInlineClosedIR(
+            new TirFuncT([ policyId_t, tokenName_t, int_t ], value_t ),
+            ( ctx ) => {
+                const policy = Symbol("value_singleton_policy");
+                const name = Symbol("value_singleton_name");
+                const amount = Symbol("value_singleton_amount");
+                return new IRFunc(
+                    [ policy, name, amount ],
+                    _ir_apps(
+                        IRNative.insertCoin,
+                        new IRVar( policy ),
+                        new IRVar( name ),
+                        new IRVar( amount ),
+                        mkZeroValueIR()
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+    // ------------------------------------------------------------------
+    // POSIXTime alias + AssetClass (common datum/redeemer shapes)
+    // ------------------------------------------------------------------
+    _defineUnambigousAlias( "POSIXTime", int_t );
+
+    // struct AssetClass { policy: PolicyId, name: TokenName }
+    const { data: assetClass_t } = defineSingleConstructorStruct(
+        "AssetClass", {
+            policy: policyId_t,
+            name: tokenName_t
+        }, v4Product
+    );
+
+    // std.value.assetClass( policy, name ): AssetClass
+    // -- constructor function (bare `AssetClass{ ... }` literals of prelude
+    //    structs are not constructible from user code)
+    preludeScope.program.functions.set(
+        assetClassConstructorName,
+        new TirInlineClosedIR(
+            new TirFuncT([ policyId_t, tokenName_t ], assetClass_t ),
+            ( ctx ) => {
+                const policy = Symbol("assetClass_policy");
+                const name = Symbol("assetClass_name");
+                const fieldsIR = _ir_apps(
+                    IRNative.mkCons,
+                    _ir_apps( IRNative.bData, new IRVar( policy ) ),
+                    _ir_apps(
+                        IRNative.mkCons,
+                        _ir_apps( IRNative.bData, new IRVar( name ) ),
+                        IRConst.listOf( data_t )([])
+                    )
+                );
+                return new IRFunc(
+                    [ policy, name ],
+                    // must track the encoding `AssetClass` is declared with
+                    assetClass_t.untagged
+                        ? _ir_apps( IRNative.listData, fieldsIR )
+                        : _ir_apps( IRNative.constrData, IRConst.int( 0 ), fieldsIR )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+    // Value.amountOfAsset( ac: AssetClass ): int
+    // -- lookupCoin (unB policy) (unB name) self; AssetClass is a data
+    //    struct so its fields are data-encoded bytes
+    preludeScope.program.functions.set(
+        valueAmountOfAssetName,
+        new TirInlineClosedIR(
+            new TirFuncT([ value_t, assetClass_t ], int_t ),
+            ( ctx ) => {
+                const self = Symbol("value_amountOfAsset_self");
+                const ac = Symbol("value_amountOfAsset_ac");
+                const acFields = Symbol("value_amountOfAsset_fields");
+                return new IRFunc(
+                    [ self, ac ],
+                    _ir_apps(
+                        new IRFunc(
+                            [ acFields ],
+                            _ir_apps(
+                                IRNative.lookupCoin,
+                                _ir_apps( IRNative.unBData, _ir_apps( IRNative.headList, new IRVar( acFields ) ) ),
+                                _ir_apps( IRNative.unBData, _ir_apps( IRNative.headList, _ir_apps( IRNative.tailList, new IRVar( acFields ) ) ) ),
+                                new IRVar( self )
+                            )
+                        ),
+                        assetClass_t.untagged
+                            ? _ir_apps( IRNative.unListData, new IRVar( ac ) )
+                            : _ir_apps(
+                                IRNative.sndPair,
+                                _ir_apps( IRNative.unConstrData, new IRVar( ac ) )
+                            )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+
     // struct OutputDatum {
     //     NoDatum {}
     //     DatumHash { hash: Hash32 }
@@ -1068,7 +1350,10 @@ export function populatePreludeScope( program: TypedProgram ): void
             value: value_t,
             datum: outputDatum_t,
             referenceScript: opt_scriptHash_t
-        }, onlyData
+        }, onlyData,
+        new Map([
+            [ "inlineDatum", txOutInlineDatumName ],
+        ])
     );
     // struct TxIn {
     //     txOutRef: TxOutRef,
@@ -1112,7 +1397,14 @@ export function populatePreludeScope( program: TypedProgram ): void
         "Interval", {
             from: intervalBoundary_t,
             to: intervalBoundary_t
-        }, onlyData
+        }, onlyData,
+        new Map([
+            [ "lowerBoundFinite",  intervalLowerBoundFiniteName ],
+            [ "upperBoundFinite",  intervalUpperBoundFiniteName ],
+            [ "contains",          intervalContainsName ],
+            [ "isEntirelyAfter",   intervalIsEntirelyAfterName ],
+            [ "isEntirelyBefore",  intervalIsEntirelyBeforeName ],
+        ])
     );
     // struct Tx {
     //     inputs: List<TxIn>,
@@ -1132,16 +1424,16 @@ export function populatePreludeScope( program: TypedProgram ): void
     //     currentTreasury: Optional<int>,
     //     treasuryDonation: Optional<int>
     // }
-    const list_txIn_t = program.getAppliedGeneric(
+    const list_txIn_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ txIn_t ]
     );
-    if(!list_txIn_t) throw new Error("expected list_txIn_t");
-    const list_txOut_t = program.getAppliedGeneric(
+    if( !v4TakesOver && !list_txIn_t ) throw new Error("expected list_txIn_t");
+    const list_txOut_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ txOut_t ]
     );
-    if(!list_txOut_t) throw new Error("expected list_txOut_t");
+    if( !v4TakesOver && !list_txOut_t ) throw new Error("expected list_txOut_t");
     const list_certificate_t = program.getAppliedGeneric(
         TirListT.toTirTypeKey(),
         [ certificate_t ]
@@ -1152,11 +1444,11 @@ export function populatePreludeScope( program: TypedProgram ): void
         [ pubKeyHash_t ]
     );
     if(!list_pubKeyHash_t) throw new Error("expected list_pubKeyHash_t");
-    const map_scriptPurpose_data_t = program.getAppliedGeneric(
+    const map_scriptPurpose_data_t = v4TakesOver ? undefined : program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(),
         [ scriptPurpose_t, data_t ]
     );
-    if(!map_scriptPurpose_data_t) throw new Error("expected map_scriptPurpose_data_t");
+    if( !v4TakesOver && !map_scriptPurpose_data_t ) throw new Error("expected map_scriptPurpose_data_t");
     const map_hash32_data_t = program.getAppliedGeneric(
         TirLinearMapT.toTirTypeKey(),
         [ hash32_t, data_t ]
@@ -1177,25 +1469,34 @@ export function populatePreludeScope( program: TypedProgram ): void
         [ proposalProcedure_t ]
     );
     if(!list_proposalProcedure_t) throw new Error("expected list_proposalProcedure_t");
+    // the `!` assertions are safe: under "experimental-v4" this whole
+    // definition is suppressed (early return) before the fields are read
     const { data: tx_t } = defineSingleConstructorStruct(
         "Tx", {
-            inputs: list_txIn_t,
-            refInputs: list_txIn_t,
-            outputs: list_txOut_t,
+            inputs: list_txIn_t!,
+            refInputs: list_txIn_t!,
+            outputs: list_txOut_t!,
             fee: int_t,
             mint: value_t,
             certificates: list_certificate_t,
             withdrawals: map_cred_int_t,
             validityInterval: interval_t,
             requiredSigners: list_pubKeyHash_t,
-            redeemers: map_scriptPurpose_data_t,
+            redeemers: map_scriptPurpose_data_t!,
             datums: map_hash32_data_t,
             hash: txHash_t,
             votes: map_voter_map_txOutRef_vote_t,
             proposals: list_proposalProcedure_t,
             currentTreasury: opt_int_t,
             treasuryDonation: opt_int_t
-        }, onlyData
+        }, onlyData,
+        new Map([
+            [ "signedBy",             txSignedByName ],
+            [ "findInput",            txFindInputName ],
+            [ "outputsToCredential",  txOutputsToCredentialName ],
+            [ "inputsFromCredential", txInputsFromCredentialName ],
+            [ "valuePaidTo",          txValuePaidToName ],
+        ])
     );
     // tagged data struct ScriptContext {
     //     tx: Tx,
@@ -1208,6 +1509,783 @@ export function populatePreludeScope( program: TypedProgram ): void
             redeemer: data_t,
             purpose: scriptInfo_t
         }, onlyData
+    );
+
+    // ==================================================================
+    // Plutus V4 (Dijkstra era) script-context types — defined ONLY when
+    // `targetPlutusVersion` is "experimental-v4", and under the SAME
+    // names as the V3 family (`ScriptContext`, `Tx`, `TxOut`, ...): the
+    // config decides which definition the names carry, there are no
+    // suffixed variants.
+    //
+    // Mirrors `PlutusLedgerApi.V4` as released in plutus-ledger-api
+    // 1.71.0.0 (2026-09-29): constructor order and field order below
+    // track `V4/Contexts.hs`, `V4/Address.hs`, `V4/Time.hs`, `V4/Tx.hs`
+    // exactly — `makeIsDataSchemaIndexed` indices for the sum types,
+    // `makeIsDataSchemaAsList` (a plain list of fields, no constructor)
+    // for the product types.
+    //
+    // NOTE the Dijkstra hard fork (protocol version 12) has not happened
+    // yet and CIP-0118 is still Proposed, so these shapes may move with
+    // upstream until the fork — hence the `experimental-` prefix on the
+    // config value.
+    // ==================================================================
+
+    if( v4TakesOver )
+    {
+    // the V3 versions of these names were constructed but not registered;
+    // from here on the V4 definitions take the names
+    suppressedV3Names.clear();
+
+    // newtype AccountId = AccountId Credential (identical data encoding)
+    const accountId_t = _defineUnambigousAlias( "AccountId", credential_t );
+
+    // struct Address (V4) { payment: Credential, stakingAccount: Optional<AccountId> }
+    const opt_accountId_t = program.getAppliedGeneric(
+        TirDataOptT.toTirTypeKey(),
+        [ accountId_t ]
+    );
+    if(!opt_accountId_t) throw new Error("expected opt_accountId_t");
+    const { data: addressV4_t } = defineSingleConstructorStruct(
+        "Address", {
+            payment: credential_t,
+            stakingAccount: opt_accountId_t
+        }, onlyDataListEncoded
+    );
+
+    // struct POSIXTimeRange { fromInclusive: Optional<int>, untilExclusive: Optional<int> }
+    // (V4 replaces the V3 Interval/boundary machinery with this pair;
+    //  `None` means -inf / +inf respectively)
+    const { data: posixTimeRange_t } = defineSingleConstructorStruct(
+        "POSIXTimeRange", {
+            fromInclusive: opt_int_t,
+            untilExclusive: opt_int_t
+        }, onlyDataListEncoded
+    );
+
+    // struct TxOut (V4) { address, value, datum, referenceScript }
+    const { data: txOutV4_t } = defineSingleConstructorStruct(
+        "TxOut", {
+            address: addressV4_t,
+            value: value_t,
+            datum: outputDatum_t,
+            referenceScript: opt_scriptHash_t
+        }, onlyDataListEncoded
+    );
+    // struct TxIn (V4) { ref, resolved }
+    const { data: txInV4_t } = defineSingleConstructorStruct(
+        "TxIn", {
+            ref: txOutRef_t,
+            resolved: txOutV4_t
+        }, onlyDataListEncoded
+    );
+
+    // struct AccountBalanceInterval (4 constructors)
+    const { data: accountBalanceInterval_t } = defineMultiConstructorStruct(
+        "AccountBalanceInterval", {
+            LowerBound: { lovelaces: int_t },
+            UpperBound: { lovelaces: int_t },
+            BothBounds: { from: int_t, to: int_t },
+            Exact: { lovelaces: int_t }
+        }, onlyData
+    );
+    // type AccountBalanceIntervals = LinearMap<AccountId, AccountBalanceInterval>
+    const map_accountId_abi_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(),
+        [ accountId_t, accountBalanceInterval_t ]
+    );
+    if(!map_accountId_abi_t) throw new Error("expected map_accountId_abi_t");
+    const accountBalanceIntervals_t = _defineUnambigousAlias(
+        "AccountBalanceIntervals",
+        map_accountId_abi_t
+    );
+
+    // struct TxCert (V4; 11 constructors, account-based)
+    const { data: txCertV4_t } = defineMultiConstructorStruct(
+        "TxCert", {
+            RegAccount: { account: accountId_t, deposit: int_t },
+            UnRegAccount: { account: accountId_t, refund: int_t },
+            DelegAccount: { account: accountId_t, delegatee: delegatee_t },
+            RegAccountDeleg: { account: accountId_t, delegatee: delegatee_t, deposit: int_t },
+            RegDRep: { drep: credential_t, deposit: int_t },
+            UpdateDRep: { drep: credential_t },
+            UnRegDRep: { drep: credential_t, refund: int_t },
+            PoolRegister: { poolId: pubKeyHash_t, poolVrf: pubKeyHash_t },
+            PoolRetire: { poolId: pubKeyHash_t, epoch: int_t },
+            AuthHotCommittee: { cold: credential_t, hot: credential_t },
+            ResignColdCommittee: { cold: credential_t }
+        }, onlyData
+    );
+
+    // struct ScriptPurpose (V4; every constructor leads with the script hash)
+    const { data: scriptPurposeV4_t } = defineMultiConstructorStruct(
+        "ScriptPurpose", {
+            Minting: { scriptHash: scriptHash_t, policy: policyId_t },
+            Spending: { scriptHash: scriptHash_t, ref: txOutRef_t },
+            Withdrawing: { scriptHash: scriptHash_t, credential: credential_t },
+            Certifying: { scriptHash: scriptHash_t, certificateIndex: int_t, certificate: txCertV4_t },
+            Voting: { scriptHash: scriptHash_t, voter: voter_t },
+            Proposing: { scriptHash: scriptHash_t, proposalIndex: int_t, proposal: proposalProcedure_t },
+            Guarding: { scriptHash: scriptHash_t, guardIndex: int_t }
+        }, onlyData
+    );
+
+    // applied generics for the V4 aggregate fields
+    const list_txInV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txInV4_t ] );
+    const list_txOutV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txOutV4_t ] );
+    const list_txCertV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txCertV4_t ] );
+    const list_credential_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ credential_t ] );
+    const list_txHash_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txHash_t ] );
+    const list_scriptHashV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ scriptHash_t ] );
+    const opt_data_v4_t = program.getAppliedGeneric( TirDataOptT.toTirTypeKey(), [ data_t ] );
+    const map_cred_optData_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ credential_t, opt_data_v4_t! ] );
+    const map_purposeV4_data_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ scriptPurposeV4_t, data_t ] );
+    const map_txHash_data_t = program.getAppliedGeneric(
+        TirLinearMapT.toTirTypeKey(), [ txHash_t, data_t ] );
+    if(!(
+        list_txInV4_t && list_txOutV4_t && list_txCertV4_t && list_credential_t
+        && list_txHash_t && list_scriptHashV4_t && opt_data_v4_t
+        && map_cred_optData_t && map_purposeV4_data_t && map_txHash_data_t
+    )) throw new Error("expected V4 applied generics");
+
+    // struct Tx (V4) — `PlutusLedgerApi.V4.Contexts.TxInfo` (19 fields;
+    // note: NO fee, NO requiredSigners — both are gone in V4)
+    const { data: txV4_t } = defineSingleConstructorStruct(
+        "Tx", {
+            id: txHash_t,
+            subTxIx: opt_int_t,
+            inputs: list_txInV4_t,
+            refInputs: list_txInV4_t,
+            outputs: list_txOutV4_t,
+            mint: value_t,
+            certificates: list_txCertV4_t,
+            withdrawals: map_cred_int_t,
+            directDeposits: map_cred_int_t,
+            accountBalanceIntervals: accountBalanceIntervals_t,
+            validityInterval: posixTimeRange_t,
+            guards: list_credential_t,
+            requiredTopLevelGuards: map_cred_optData_t,
+            redeemers: map_purposeV4_data_t,
+            datums: map_hash32_data_t,
+            votes: map_voter_map_txOutRef_vote_t,
+            proposals: list_proposalProcedure_t,
+            currentTreasury: opt_int_t,
+            treasuryDonation: int_t
+        }, onlyDataListEncoded
+    );
+
+    // struct TopTxInfoSimplified — aggregated whole-batch view (18 fields)
+    const { data: topTxInfoSimplified_t } = defineSingleConstructorStruct(
+        "TopTxInfoSimplified", {
+            ids: list_txHash_t,
+            inputs: list_txInV4_t,
+            refInputs: list_txInV4_t,
+            outputs: list_txOutV4_t,
+            mints: value_t,
+            burns: value_t,
+            certificates: list_txCertV4_t,
+            withdrawals: map_cred_int_t,
+            directDeposits: map_cred_int_t,
+            validityInterval: posixTimeRange_t,
+            guards: list_credential_t,
+            requiredTopLevelGuards: list_credential_t,
+            // plutus-ledger-api >= 1.71: the script hashes of all the
+            // redeemers (was `ttisScriptPurposes :: [ScriptPurpose]`)
+            redeemerHashes: list_scriptHashV4_t,
+            datums: map_hash32_data_t,
+            votes: map_voter_map_txOutRef_vote_t,
+            proposals: list_proposalProcedure_t,
+            currentTreasury: opt_int_t,
+            treasuryDonations: int_t
+        }, onlyDataListEncoded
+    );
+
+    // struct TopTxInfo — top-level view over the sub-transactions
+    const list_txV4_t = program.getAppliedGeneric( TirListT.toTirTypeKey(), [ txV4_t ] );
+    if(!list_txV4_t) throw new Error("expected list_txV4_t");
+    const { data: topTxInfo_t } = defineSingleConstructorStruct(
+        "TopTxInfo", {
+            subTransactions: list_txV4_t,
+            datums: map_txHash_data_t,
+            startingAccountBalanceIntervals: accountBalanceIntervals_t,
+            simplified: topTxInfoSimplified_t
+        }, onlyDataListEncoded
+    );
+    const opt_topTxInfo_t = program.getAppliedGeneric(
+        TirDataOptT.toTirTypeKey(), [ topTxInfo_t ] );
+    if(!opt_topTxInfo_t) throw new Error("expected opt_topTxInfo_t");
+
+    // struct ScriptInfo (V4; the `Guard` info carries the whole-batch view
+    // when executed at the top level)
+    const { data: scriptInfoV4_t } = defineMultiConstructorStruct(
+        "ScriptInfo", {
+            Mint: { policy: policyId_t },
+            Spend: { ref: txOutRef_t, optionalDatum: opt_data_t },
+            // the field keeps the V3 name `credential` (an AccountId IS a
+            // credential) so the contract sugar's Withdraw arm derives
+            // identically under both targets
+            Withdraw: { credential: accountId_t },
+            Certificate: { certificateIndex: int_t, certificate: txCertV4_t },
+            Vote: { voter: voter_t },
+            Propose: { proposalIndex: int_t, proposal: proposalProcedure_t },
+            Guard: { guardIndex: int_t, topTxInfo: opt_topTxInfo_t }
+        }, onlyData
+    );
+
+    // struct ScriptContext (V4) { tx, redeemer, purpose, scriptHash }
+    // (V4 adds the executing script's own hash as a 4th field)
+    const { data: scriptContextV4_t } = defineSingleConstructorStruct(
+        "ScriptContext", {
+            tx: txV4_t,
+            redeemer: data_t,
+            purpose: scriptInfoV4_t,
+            scriptHash: scriptHash_t
+        }, onlyDataListEncoded
+    );
+    void scriptContextV4_t;
+
+    } // if( v4TakesOver ) — end of the V4 family
+
+    // ------------------------------------------------------------------
+    // Script-context helper methods (milestone 2 stdlib expansion).
+    //
+    // All of the receivers are data structs, so `self` arrives as a raw
+    // `Data` value; fields are read with unConstrData/sndPair/dropList/
+    // headList by POSITION. The field indices below MUST track the struct
+    // definitions above.
+    // ------------------------------------------------------------------
+
+    /** `headList( dropList( idx, sndPair( unConstrData( structIR ) ) ) )` */
+    function irStructField( structIR: IRTerm, idx: number ): IRTerm
+    {
+        const fieldsIR = _ir_apps(
+            IRNative.sndPair,
+            _ir_apps( IRNative.unConstrData, structIR )
+        );
+        return _ir_apps(
+            IRNative.headList,
+            idx === 0
+                ? fieldsIR
+                : _ir_apps( IRNative.dropList, IRConst.int( idx ), fieldsIR )
+        );
+    }
+
+    // Tx field indices (struct definition above)
+    const TX_FIELD_INPUTS = 0;
+    const TX_FIELD_OUTPUTS = 2;
+    const TX_FIELD_VALIDITY_INTERVAL = 7;
+    const TX_FIELD_REQUIRED_SIGNERS = 8;
+    // TxOut: address = 0, value = 1, datum = 2
+    // TxIn: ref = 0, resolved = 1
+    // Address: payment = 0
+    // Interval: from = 0, to = 1; IntervalBoundary: boundary = 0, isInclusive = 1
+    // ExtendedInteger ctor tags: NegInf = 0, Finite = 1, PosInf = 2
+    // OutputDatum ctor tags: NoDatum = 0, DatumHash = 1, InlineDatum = 2
+
+    // The Tx / TxOut helpers below read fields by the V3 LAYOUT and are
+    // typed against the V3 structs, so they exist only under the "v3"
+    // target — under "experimental-v4" the V3 family is unregistered
+    // scaffolding, and registering V3-typed functions would let V4 values
+    // flow into them through same-name struct identity.
+    if( !v4TakesOver ) {
+
+    // Tx.signedBy( pkh: PubKeyHash ): bool
+    // -- some( \d -> equalsData( d, bData pkh ), unListData( tx.requiredSigners ) )
+    preludeScope.program.functions.set(
+        txSignedByName,
+        new TirInlineClosedIR(
+            new TirFuncT([ tx_t, pubKeyHash_t ], bool_t ),
+            ( ctx ) => {
+                const self = Symbol("tx_signedBy_self");
+                const pkh = Symbol("tx_signedBy_pkh");
+                const signer = Symbol("tx_signedBy_signer");
+                return new IRFunc(
+                    [ self, pkh ],
+                    _ir_apps(
+                        IRNative._some,
+                        new IRFunc(
+                            [ signer ],
+                            _ir_apps(
+                                IRNative.equalsData,
+                                new IRVar( signer ),
+                                _ir_apps( IRNative.bData, new IRVar( pkh ) )
+                            )
+                        ),
+                        _ir_apps(
+                            IRNative.unListData,
+                            irStructField( new IRVar( self ), TX_FIELD_REQUIRED_SIGNERS )
+                        )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+    // Tx.findInput( ref: TxOutRef ): Optional<TxIn>
+    // -- findSopOptional( \i -> equalsData( i.ref, ref ), unListData( tx.inputs ) )
+    //    the SoP-Some payload stays the raw TxIn data (decode on extraction)
+    {
+        const sopOptTxIn_t = new TirSopOptT( txIn_t );
+        preludeScope.program.functions.set(
+            txFindInputName,
+            new TirInlineClosedIR(
+                new TirFuncT([ tx_t, txOutRef_t ], sopOptTxIn_t ),
+                ( ctx ) => {
+                    const self = Symbol("tx_findInput_self");
+                    const ref = Symbol("tx_findInput_ref");
+                    const txIn = Symbol("tx_findInput_txIn");
+                    return new IRFunc(
+                        [ self, ref ],
+                        _ir_apps(
+                            new IRNative( IRNativeTag._findSopOptional ),
+                            new IRFunc(
+                                [ txIn ],
+                                _ir_apps(
+                                    IRNative.equalsData,
+                                    irStructField( new IRVar( txIn ), 0 ), // TxIn.ref
+                                    new IRVar( ref ) // TxOutRef is a data struct: already raw data
+                                )
+                            ),
+                            _ir_apps(
+                                IRNative.unListData,
+                                irStructField( new IRVar( self ), TX_FIELD_INPUTS )
+                            )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+
+    // Tx.outputsToCredential( c: Credential ): List<TxOut>
+    // -- filter( \o -> equalsData( o.address.payment, c ), unListData( tx.outputs ) )
+    {
+        const list_txOut_ret_t = new TirListT( txOut_t );
+        preludeScope.program.functions.set(
+            txOutputsToCredentialName,
+            new TirInlineClosedIR(
+                new TirFuncT([ tx_t, credential_t ], list_txOut_ret_t ),
+                ( ctx ) => {
+                    const self = Symbol("tx_outputsToCredential_self");
+                    const cred = Symbol("tx_outputsToCredential_cred");
+                    const out = Symbol("tx_outputsToCredential_out");
+                    return new IRFunc(
+                        [ self, cred ],
+                        _ir_apps(
+                            IRNative._filter,
+                            new IRFunc(
+                                [ out ],
+                                _ir_apps(
+                                    IRNative.equalsData,
+                                    // TxOut.address (0) -> Address.payment (0)
+                                    irStructField( irStructField( new IRVar( out ), 0 ), 0 ),
+                                    new IRVar( cred )
+                                )
+                            ),
+                            _ir_apps(
+                                IRNative.unListData,
+                                irStructField( new IRVar( self ), TX_FIELD_OUTPUTS )
+                            )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+
+    // Tx.inputsFromCredential( c: Credential ): List<TxIn>
+    // -- filter( \i -> equalsData( i.resolved.address.payment, c ), unListData( tx.inputs ) )
+    {
+        const list_txIn_ret_t = new TirListT( txIn_t );
+        preludeScope.program.functions.set(
+            txInputsFromCredentialName,
+            new TirInlineClosedIR(
+                new TirFuncT([ tx_t, credential_t ], list_txIn_ret_t ),
+                ( ctx ) => {
+                    const self = Symbol("tx_inputsFromCredential_self");
+                    const cred = Symbol("tx_inputsFromCredential_cred");
+                    const txIn = Symbol("tx_inputsFromCredential_txIn");
+                    return new IRFunc(
+                        [ self, cred ],
+                        _ir_apps(
+                            IRNative._filter,
+                            new IRFunc(
+                                [ txIn ],
+                                _ir_apps(
+                                    IRNative.equalsData,
+                                    // TxIn.resolved (1) -> TxOut.address (0) -> Address.payment (0)
+                                    irStructField( irStructField( irStructField( new IRVar( txIn ), 1 ), 0 ), 0 ),
+                                    new IRVar( cred )
+                                )
+                            ),
+                            _ir_apps(
+                                IRNative.unListData,
+                                irStructField( new IRVar( self ), TX_FIELD_INPUTS )
+                            )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+
+    // Tx.valuePaidTo( addr: Address ): Value
+    // -- foldr( \o acc -> o.address == addr ? acc + o.value : acc, zero, outputs )
+    preludeScope.program.functions.set(
+        txValuePaidToName,
+        new TirInlineClosedIR(
+            new TirFuncT([ tx_t, address_t ], value_t ),
+            ( ctx ) => {
+                const self = Symbol("tx_valuePaidTo_self");
+                const addr = Symbol("tx_valuePaidTo_addr");
+                const out = Symbol("tx_valuePaidTo_out");
+                const acc = Symbol("tx_valuePaidTo_acc");
+                return new IRFunc(
+                    [ self, addr ],
+                    _ir_apps(
+                        IRNative._foldr,
+                        new IRFunc(
+                            [ out, acc ],
+                            _ir_lazyIfThenElse(
+                                _ir_apps(
+                                    IRNative.equalsData,
+                                    irStructField( new IRVar( out ), 0 ), // TxOut.address
+                                    new IRVar( addr )
+                                ),
+                                // then: acc + o.value
+                                _ir_apps(
+                                    IRNative.unionValue,
+                                    _ir_apps(
+                                        IRNative.unValueData,
+                                        irStructField( new IRVar( out ), 1 ) // TxOut.value
+                                    ),
+                                    new IRVar( acc )
+                                ),
+                                // else
+                                new IRVar( acc )
+                            )
+                        ),
+                        mkZeroValueIR(),
+                        _ir_apps(
+                            IRNative.unListData,
+                            irStructField( new IRVar( self ), TX_FIELD_OUTPUTS )
+                        )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+    // TxOut.inlineDatum(): Optional<data>
+    // -- InlineDatum{ datum } => Some( datum ); anything else => None
+    {
+        const sopOptData_t = new TirSopOptT( data_t );
+        preludeScope.program.functions.set(
+            txOutInlineDatumName,
+            new TirInlineClosedIR(
+                new TirFuncT([ txOut_t ], sopOptData_t ),
+                ( ctx ) => {
+                    const self = Symbol("txOut_inlineDatum_self");
+                    const odPair = Symbol("txOut_inlineDatum_odPair");
+                    return new IRFunc(
+                        [ self ],
+                        _ir_apps(
+                            new IRFunc(
+                                [ odPair ],
+                                _ir_lazyIfThenElse(
+                                    _ir_apps(
+                                        IRNative.equalsInteger,
+                                        _ir_apps( IRNative.fstPair, new IRVar( odPair ) ),
+                                        IRConst.int( 2 ) // OutputDatum.InlineDatum
+                                    ),
+                                    new IRConstr( 0, [ // Some{ datum } (raw data payload)
+                                        _ir_apps(
+                                            IRNative.headList,
+                                            _ir_apps( IRNative.sndPair, new IRVar( odPair ) )
+                                        )
+                                    ]),
+                                    new IRConstr( 1, [] ) // None
+                                )
+                            ),
+                            _ir_apps(
+                                IRNative.unConstrData,
+                                irStructField( new IRVar( self ), 2 ) // TxOut.datum
+                            )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+
+    } // if( !v4TakesOver ) — end of the V3-layout Tx/TxOut helpers
+
+    // ------------------------------------------------------------------
+    // Interval helpers.
+    //
+    // A boundary is IntervalBoundary{ boundary: ExtendedInteger, isInclusive }.
+    // `mkBoundCheck` builds `\boundaryData t -> bool` deciding the
+    // relation of the (possibly infinite) bound to the time `t`:
+    //   - onNegInf / onPosInf are constant results;
+    //   - the Finite case compares `n` to `t` with the strictness picked
+    //     by `isInclusive`.
+    // ------------------------------------------------------------------
+    function mkBoundCheckIR(
+        boundVar: symbol,
+        tVar: symbol,
+        onNegInf: boolean,
+        onPosInf: boolean,
+        /** (n, t, inclusive) -> bool, built from IR pieces */
+        finiteCase: ( n: IRTerm, t: IRTerm, inclusive: IRTerm ) => IRTerm
+    ): IRTerm
+    {
+        const extPair = Symbol("bound_extPair");
+        // isInclusive: bool data in the LEDGER encoding (PlutusTx `Bool`:
+        // False = Constr 0, True = Constr 1). NOTE this is the opposite of
+        // pebble's own bool data convention — these helpers read the
+        // ledger-provided ScriptContext, so the ledger convention applies.
+        const inclusiveIR = _ir_apps(
+            IRNative.equalsInteger,
+            _ir_apps(
+                IRNative.fstPair,
+                _ir_apps(
+                    IRNative.unConstrData,
+                    irStructField( new IRVar( boundVar ), 1 )
+                )
+            ),
+            IRConst.int( 1 )
+        );
+        return _ir_apps(
+            new IRFunc(
+                [ extPair ],
+                _ir_lazyIfThenElse(
+                    _ir_apps(
+                        IRNative.equalsInteger,
+                        _ir_apps( IRNative.fstPair, new IRVar( extPair ) ),
+                        IRConst.int( 1 ) // Finite
+                    ),
+                    finiteCase(
+                        _ir_apps(
+                            IRNative.unIData,
+                            _ir_apps(
+                                IRNative.headList,
+                                _ir_apps( IRNative.sndPair, new IRVar( extPair ) )
+                            )
+                        ),
+                        new IRVar( tVar ),
+                        inclusiveIR
+                    ),
+                    _ir_lazyIfThenElse(
+                        _ir_apps(
+                            IRNative.equalsInteger,
+                            _ir_apps( IRNative.fstPair, new IRVar( extPair ) ),
+                            IRConst.int( 0 ) // NegInf
+                        ),
+                        IRConst.bool( onNegInf ),
+                        IRConst.bool( onPosInf )
+                    )
+                )
+            ),
+            _ir_apps(
+                IRNative.unConstrData,
+                irStructField( new IRVar( boundVar ), 0 )
+            )
+        );
+    }
+
+    // the function-scoped `int_t`/`bool_t` are `TirType | undefined`
+    // (program.types lookups); narrowing does not reach nested function
+    // declarations, so bind definite references for the helpers below
+    const definite_int_t: TirType = int_t!;
+    const definite_bool_t: TirType = bool_t!;
+
+    /** extract a boundary sub-struct (`from` = 0 / `to` = 1) into a fresh IRFunc app */
+    function mkIntervalBoundHelper(
+        tirName: string,
+        boundIdx: number,
+        onNegInf: boolean,
+        onPosInf: boolean,
+        finiteCase: ( n: IRTerm, t: IRTerm, inclusive: IRTerm ) => IRTerm
+    ): void
+    {
+        preludeScope.program.functions.set(
+            tirName,
+            new TirInlineClosedIR(
+                new TirFuncT([ interval_t, definite_int_t ], definite_bool_t ),
+                ( ctx ) => {
+                    const self = Symbol("interval_self");
+                    const t = Symbol("interval_t");
+                    const bound = Symbol("interval_bound");
+                    return new IRFunc(
+                        [ self, t ],
+                        _ir_apps(
+                            new IRFunc(
+                                [ bound ],
+                                mkBoundCheckIR( bound, t, onNegInf, onPosInf, finiteCase )
+                            ),
+                            irStructField( new IRVar( self ), boundIdx )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+
+    // lazy inclusive/strict comparison: inclusive ? cmpIncl : cmpStrict
+    const inclPick = ( inclusive: IRTerm, cmpIncl: IRTerm, cmpStrict: IRTerm ): IRTerm =>
+        _ir_lazyIfThenElse( inclusive, cmpIncl, cmpStrict );
+
+    // Interval.isEntirelyAfter( t ): the whole interval lies after `t`
+    // -- reads the LOWER bound: Finite f => (inclusive ? f > t : f >= t)
+    mkIntervalBoundHelper(
+        intervalIsEntirelyAfterName, 0, /*NegInf*/ false, /*PosInf*/ true,
+        ( n, t, inclusive ) => inclPick(
+            inclusive,
+            _ir_apps( IRNative.lessThanInteger, t, n ),      // t < f  ==  f > t
+            _ir_apps( IRNative.lessThanEqualInteger, t, n )  // t <= f ==  f >= t
+        )
+    );
+    // Interval.isEntirelyBefore( t ): the whole interval lies before `t`
+    // -- reads the UPPER bound: Finite u => (inclusive ? u < t : u <= t)
+    mkIntervalBoundHelper(
+        intervalIsEntirelyBeforeName, 1, /*NegInf*/ true, /*PosInf*/ false,
+        ( n, t, inclusive ) => inclPick(
+            inclusive,
+            _ir_apps( IRNative.lessThanInteger, n, t ),      // u < t
+            _ir_apps( IRNative.lessThanEqualInteger, n, t )  // u <= t
+        )
+    );
+
+    // Interval.lowerBoundFinite() / upperBoundFinite(): Optional<int>
+    // -- Some( n ) when the bound is Finite{ n }, None on ±inf.
+    //    (the Some payload stays iData — SoP optionals carry raw data)
+    function mkBoundFiniteHelper( tirName: string, boundIdx: number ): void
+    {
+        const sopOptInt_t = new TirSopOptT( definite_int_t );
+        preludeScope.program.functions.set(
+            tirName,
+            new TirInlineClosedIR(
+                new TirFuncT([ interval_t ], sopOptInt_t ),
+                ( ctx ) => {
+                    const self = Symbol("interval_boundFinite_self");
+                    const extPair = Symbol("interval_boundFinite_extPair");
+                    return new IRFunc(
+                        [ self ],
+                        _ir_apps(
+                            new IRFunc(
+                                [ extPair ],
+                                _ir_lazyIfThenElse(
+                                    _ir_apps(
+                                        IRNative.equalsInteger,
+                                        _ir_apps( IRNative.fstPair, new IRVar( extPair ) ),
+                                        IRConst.int( 1 ) // Finite
+                                    ),
+                                    new IRConstr( 0, [ // Some{ n } (iData payload)
+                                        _ir_apps(
+                                            IRNative.headList,
+                                            _ir_apps( IRNative.sndPair, new IRVar( extPair ) )
+                                        )
+                                    ]),
+                                    new IRConstr( 1, [] ) // None
+                                )
+                            ),
+                            _ir_apps(
+                                IRNative.unConstrData,
+                                irStructField(
+                                    irStructField( new IRVar( self ), boundIdx ),
+                                    0 // IntervalBoundary.boundary
+                                )
+                            )
+                        )
+                    );
+                },
+                SourceRange.unknown
+            )
+        );
+    }
+    mkBoundFiniteHelper( intervalLowerBoundFiniteName, 0 );
+    mkBoundFiniteHelper( intervalUpperBoundFiniteName, 1 );
+
+    // Interval.contains( t ): bool
+    // -- the lower bound admits `t` AND the upper bound admits `t`
+    preludeScope.program.functions.set(
+        intervalContainsName,
+        new TirInlineClosedIR(
+            new TirFuncT([ interval_t, int_t ], bool_t ),
+            ( ctx ) => {
+                const self = Symbol("interval_contains_self");
+                const t = Symbol("interval_contains_t");
+                const lowBound = Symbol("interval_contains_low");
+                const highBound = Symbol("interval_contains_high");
+                // lower admits t: NegInf => true; PosInf => false;
+                //   Finite f => inclusive ? f <= t : f < t
+                const lowOk = _ir_apps(
+                    new IRFunc(
+                        [ lowBound ],
+                        mkBoundCheckIR(
+                            lowBound, t, /*NegInf*/ true, /*PosInf*/ false,
+                            ( n, tv, inclusive ) => inclPick(
+                                inclusive,
+                                _ir_apps( IRNative.lessThanEqualInteger, n, tv ),
+                                _ir_apps( IRNative.lessThanInteger, n, tv )
+                            )
+                        )
+                    ),
+                    irStructField( new IRVar( self ), 0 )
+                );
+                // upper admits t: PosInf => true; NegInf => false;
+                //   Finite u => inclusive ? t <= u : t < u
+                const highOk = _ir_apps(
+                    new IRFunc(
+                        [ highBound ],
+                        mkBoundCheckIR(
+                            highBound, t, /*NegInf*/ false, /*PosInf*/ true,
+                            ( n, tv, inclusive ) => inclPick(
+                                inclusive,
+                                _ir_apps( IRNative.lessThanEqualInteger, tv, n ),
+                                _ir_apps( IRNative.lessThanInteger, tv, n )
+                            )
+                        )
+                    ),
+                    irStructField( new IRVar( self ), 1 )
+                );
+                return new IRFunc(
+                    [ self, t ],
+                    _ir_lazyIfThenElse( lowOk, highOk, IRConst.bool( false ) )
+                );
+            },
+            SourceRange.unknown
+        )
+    );
+
+    // std.list.sum( xs: List<int> ): int -- foldr addInteger 0 xs
+    preludeScope.program.functions.set(
+        listSumName,
+        new TirInlineClosedIR(
+            new TirFuncT([ new TirListT( int_t ) ], int_t ),
+            ( ctx ) => {
+                const xs = Symbol("list_sum_xs");
+                return new IRFunc(
+                    [ xs ],
+                    _ir_apps(
+                        IRNative._foldr,
+                        IRNative.addInteger,
+                        IRConst.int( 0 ),
+                        new IRVar( xs )
+                    )
+                );
+            },
+            SourceRange.unknown
+        )
     );
 
     // preludeScope.readonly();

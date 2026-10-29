@@ -231,7 +231,8 @@ export class TirCaseExpr
             const branch = this.cases.find(
                 c => c.pattern.constrName === memberName
             );
-            return branch ? branch.body.toIR( ctx ) : wildcardBodyIR;
+            // CLONE per slot: IR nodes are single-parent (in-place mutation)
+            return branch ? branch.body.toIR( ctx ) : wildcardBodyIR.clone();
         });
 
         while( branches.length > 0 && branches[ branches.length - 1 ] instanceof IRError )
@@ -264,11 +265,11 @@ export class TirCaseExpr
                 someBranchVarSym = someBranchCtx.defineVar( varDecl.name );
                 someValueType = varDecl.type;
             }
-            const someBranchIR = someBranch?.body.toIR( someBranchCtx ) ?? wildcardBodyIR;
+            const someBranchIR = someBranch?.body.toIR( someBranchCtx ) ?? wildcardBodyIR.clone();
 
             const noneBranchIR = this.cases.find(
                 c => c.pattern.constrName === "None"
-            )?.body.toIR( ctx ) ?? wildcardBodyIR;
+            )?.body.toIR( ctx ) ?? wildcardBodyIR.clone();
 
             // The SoP Optional wraps raw data values from lookups;
             // apply _inlineFromData to convert to the expected native type
@@ -314,10 +315,11 @@ export class TirCaseExpr
                 );
 
                 if( !branch ) {
-                    if( nFields <= 0 ) return wildcardBodyIR;
+                    // CLONE per slot: IR nodes are single-parent (in-place mutation)
+                    if( nFields <= 0 ) return wildcardBodyIR.clone();
 
                     const introducedVars = Array( nFields ).fill(0).map(() => branchCtx.pushUnusedVar() );
-                    return new IRFunc( introducedVars, wildcardBodyIR );
+                    return new IRFunc( introducedVars, wildcardBodyIR.clone() );
                 }
 
                 const pattern = branch.pattern;
@@ -352,7 +354,7 @@ export class TirCaseExpr
         {
             const maxParent = sopParentIdxs.reduce( ( m, x ) => x > m ? x : m, -1 );
             branches = new Array( maxParent + 1 );
-            for( let i = 0; i < branches.length; i++ ) branches[i] = wildcardBodyIR;
+            for( let i = 0; i < branches.length; i++ ) branches[i] = wildcardBodyIR.clone();
             for( let localIdx = 0; localIdx < localBranches.length; localIdx++ )
             {
                 branches[ sopParentIdxs[localIdx] ] = localBranches[localIdx];
@@ -480,7 +482,10 @@ export class TirCaseExpr
         // missing slots with the wildcard body
         const innerBranches: IRTerm[] = new Array( maxParentIdx + 1 );
         for( let i = 0; i < innerBranches.length; i++ ) {
-            innerBranches[i] = armsByParentIdx.get( i ) ?? wildcardBodyIR;
+            // CLONE per slot: IR nodes are single-parent (in-place mutation);
+            // sharing one wildcard node across slots corrupts the tree and
+            // collapsed every match-with-else on 3+-constructor structs
+            innerBranches[i] = armsByParentIdx.get( i ) ?? wildcardBodyIR.clone();
         }
 
         // trailing `IRError` branches can be omitted — the CEK machine

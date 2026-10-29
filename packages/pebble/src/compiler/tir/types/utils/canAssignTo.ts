@@ -371,6 +371,16 @@ function canAssignStruct(
         return CanAssign.Yes;
     }
 
+    // data structs of the same SHAPE but different ENCODING
+    // (`listData( fields )` vs `constrData( 0, fields )`) are different
+    // values on chain: a cast between them is the identity at runtime, so
+    // allowing it would only move the failure to the first field access.
+    if(
+        a instanceof TirDataStructType
+        && b instanceof TirDataStructType
+        && a.untagged !== b.untagged
+    ) return CanAssign.No;
+
     const aCtors = a.constructors;
     const bCtors = b.constructors;
 

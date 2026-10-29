@@ -12,6 +12,10 @@ export interface CliTestFlags {
     testNamePattern?: string;
     propertyRuns?: string;
     seed?: string;
+    /** emit machine-readable JSON results instead of the human report */
+    json?: boolean;
+    /** stop running after the first failing test file */
+    bail?: boolean;
 }
 
 export async function runTestsCommand(
@@ -62,6 +66,8 @@ export async function runTestsCommand(
 
     for( const file of files )
     {
+        if( flags.bail === true && process.exitCode === 1 ) break;
+
         const compiler = new Compiler( io, {
             ...baseConfig,
             root,
@@ -92,6 +98,11 @@ export async function runTestsCommand(
                 process.exitCode = 1;
             }
             if( results.length > 0 ) resultsByFile.set( file, results );
+            if( flags.bail === true && results.some( r => !r.passed ) )
+            {
+                process.exitCode = 1;
+                break;
+            }
         } catch ( err ) {
             process.stderr.write(
                 `error running tests in ${path.relative( root, file )}: ${err instanceof Error ? err.message : String( err )}\n`
@@ -100,8 +111,49 @@ export async function runTestsCommand(
         }
     }
 
+    if( flags.json === true )
+    {
+        const { summary } = formatTestResults( resultsByFile, root );
+        const payload = {
+            summary,
+            files: Array.from( resultsByFile.entries() ).map( ([ file, results ]) => ({
+                file: path.relative( root, file ),
+                tests: results.map( r => ({
+                    name: r.name,
+                    kind: r.kind,
+                    passed: r.passed,
+                    skippedReason: r.skippedReason,
+                    seed: r.seed,
+                    shrinkSteps: r.shrinkSteps,
+                    totalBudget: { cpu: r.totalBudget.cpu.toString(), mem: r.totalBudget.mem.toString() },
+                    iterations: r.iterations.map( it => ({
+                        passed: it.passed,
+                        budgetSpent: { cpu: it.budgetSpent.cpu.toString(), mem: it.budgetSpent.mem.toString() },
+                        logs: it.logs,
+                        error: it.error?.msg,
+                        inputs: it.inputs?.map( i => ({
+                            name: i.name,
+                            value: _jsonInputValue( i.value )
+                        }))
+                    }))
+                }))
+            }))
+        };
+        process.stdout.write( JSON.stringify( payload, undefined, 2 ) + "\n" );
+        if( summary.failed > 0 ) process.exitCode = 1;
+        return;
+    }
+
     const { text, summary } = formatTestResults( resultsByFile, root );
     process.stdout.write( text + "\n" );
 
     if( summary.failed > 0 ) process.exitCode = 1;
+}
+
+function _jsonInputValue( v: unknown ): string
+{
+    if( typeof v === "bigint" ) return v.toString();
+    if( typeof v === "boolean" ) return v ? "true" : "false";
+    if( v instanceof Uint8Array ) return "#" + Array.from( v ).map( b => b.toString( 16 ).padStart( 2, "0" ) ).join( "" );
+    return String( v );
 }

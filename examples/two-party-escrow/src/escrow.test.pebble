@@ -1,0 +1,48 @@
+// ===========================================================================
+//  Two-Party Escrow — property tests
+// ===========================================================================
+//
+//  Exercises the time-window logic from `index.pebble` with the built-in
+//  test framework (`pebble test`). The two predicates mirror the bounds the
+//  handlers read:
+//
+//    * `accept` requires the tx's UPPER bound at or before the deadline;
+//    * `refund` requires the tx's LOWER bound strictly after it.
+//
+//  The key safety property is that no single point in time satisfies both.
+
+function canAccept( txLatest: int, deadline: int ): boolean {
+    return txLatest <= deadline;
+}
+
+function canRefund( txEarliest: int, deadline: int ): boolean {
+    return txEarliest > deadline;
+}
+
+// ---- unit tests: the deadline itself -------------------------------------
+
+test deadline_belongs_to_accept() {
+    assert canAccept( 1800, 1800 ) else "the deadline itself must still accept";
+    assert !canRefund( 1800, 1800 ) else "the deadline itself must not refund";
+}
+
+test one_past_deadline_refunds() {
+    assert !canAccept( 1801, 1800 ) else "past the deadline must not accept";
+    assert canRefund( 1801, 1800 ) else "past the deadline must refund";
+}
+
+// ---- property tests ------------------------------------------------------
+
+test accept_and_refund_never_overlap( t: int, deadline: int ) {
+    // for a point-interval tx (lower == upper == t) the two endpoints are
+    // mutually exclusive at EVERY time and every deadline
+    assert !( canAccept( t, deadline ) && canRefund( t, deadline ) )
+        else "a single point in time satisfied both endpoints";
+}
+
+test every_moment_has_an_outcome( t: int, deadline: int ) {
+    // ... and at least one of the two always applies: no dead zone where
+    // the funds are stuck (settle aside)
+    assert canAccept( t, deadline ) || canRefund( t, deadline )
+        else "a point in time satisfied neither endpoint";
+}

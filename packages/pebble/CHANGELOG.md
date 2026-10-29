@@ -2,6 +2,232 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.5.0
+
+Milestone 2 release: the built-in test framework is complete, and the
+standard library grows the "common dApp patterns" layer.
+
+### ⚠ BREAKING: shortcut structs are list-encoded
+
+The FORM of a single-constructor struct declaration now picks its data
+encoding:
+
+```ts
+struct ListEncoded { a: int }                                 // List [ I a ]
+struct SingleConstrEncoded { SingleConstrEncoded { a: int } } // Constr 0 [ I a ]
+```
+
+- **The shortcut form is encoded as `listData( fields )`.** Up to 0.4.x it
+  was `constrData( 0, fields )`. The list is one constructor tag smaller
+  and cheaper to decode, and it is the encoding Plutus V4 uses for the
+  product types of the ledger API (plutus-ledger-api >= 1.69).
+- **The explicit single-constructor form is always `constrData( 0, fields )`**
+  — use it where the value must match a `Constr 0` that something else
+  produces or expects.
+- Multi-constructor structs are unchanged.
+- **A `contract`'s datum and redeemer are NOT affected**: the types derived
+  from its `state`s and methods stay constructor-encoded, so a contract's
+  on-chain interface only changes through the user-declared structs it
+  uses as field types.
+- **Migration.** Recompiling a contract that declares shortcut structs
+  changes its script bytes (hence its address) and the encoding of those
+  values. Set `"encodingStrategy": "legacy"` in `pebble.config.json` to
+  keep the 0.4.x encoding — verified on the four mainnet
+  `the-cardano-masterpiece` validators, which recompile byte-identically
+  under `"legacy"` — or rewrite the affected structs in the explicit form.
+- `encodingStrategy` is now `"minimal" | "legacy"`, default `"minimal"`
+  (was `"default" | "minimal"`, default `"default"`). `"default"` is still
+  accepted as the old spelling of `"legacy"`.
+- **The list encoding now works on every lowering path.** It existed since
+  0.4.x behind the `untagged` keyword, but only parameter field access,
+  `case` and `is` honoured it; a list-encoded struct bound to a `const`,
+  cast from `data`, destructured, used as a loop variable, nested in
+  another struct, or instantiated from a generic was still decoded with
+  `unConstrData` and failed at runtime
+  (`unConstrData :: not a data constructor`). All of these are fixed and
+  covered by `compiler.structEncodingForms.test.ts`, which asserts
+  evaluated results.
+- List-encoded structs get the same decode-once field extraction as
+  constructor-encoded ones.
+- A cast between two data structs of the same shape but different
+  encoding is now a compile error (it was the identity at runtime, so it
+  only moved the failure to the first field access).
+- `untagged` is accepted on structs declared inside a `namespace`.
+- Runtime (SoP) structs carry the encoding of their declaration for the
+  conversions to and from `data`.
+
+### Test framework (`pebble test`)
+
+- **Typed default fuzzers for every practical parameter type.** Property
+  tests now fuzz `bytes`, `string`, `data`, enums, `Optional<T>` (both
+  encodings — SoP optionals and runtime structs are passed as UPLC 1.2
+  `constr` terms), `List<T>`, `LinearMap<K,V>`, `Value`, data structs
+  (driven off the struct's constructors and field types, recursion-safe)
+  and runtime (SoP) structs, in addition to the existing `int`/`bool`.
+  Generators are seeded, deterministic, and edge-biased (zero/±1/int
+  bounds, empty/hash-length byte strings, empty/singleton collections).
+- **`via <expr>` fuzzers are now executable.** The compiler synthesizes a
+  `( seed: int ) => T` entry point from the `via` expression — either a
+  function of that shape or a plain `T` value (a degenerate constant
+  fuzzer, e.g. `via 42`) — and the runner CEK-evaluates it with a fresh
+  seed each iteration. Fuzzed values must be constant-representable
+  (SoP-typed fuzzer results are rejected with a located reason).
+- **Shrinking.** When a property test fails, the runner greedily minimizes
+  the failing input tuple (integers log-converge toward the smallest
+  counterexample; byte strings, strings, lists and maps shrink
+  structurally) and reports the minimal inputs alongside the original
+  failure. Shrink evaluations do not count toward the reported budget.
+- **CLI**: `pebble test --json` emits machine-readable results (budgets
+  included); `--bail` stops at the first failing file; failing property
+  reports show the minimal counterexample.
+
+### Standard library
+
+- **Value arithmetic**: `negate`, `equals`, `subtract`, `isZero`, `geq`,
+  `leq` as `Value` methods and under `std.value`, plus the
+  `std.value.singleton( policy, name, amount )` and
+  `std.value.assetClass( policy, name )` constructors,
+  `Value.amountOfAsset( ac )`, the `AssetClass` prelude struct and the
+  `POSIXTime` alias.
+- **Script-context helpers** (methods on the prelude types, mirrored under
+  `std.tx` / `std.interval`): `Tx.signedBy( pkh )`,
+  `Tx.findInput( ref )`, `Tx.outputsToCredential( c )`,
+  `Tx.inputsFromCredential( c )`, `Tx.valuePaidTo( addr )`,
+  `TxOut.inlineDatum()`, `Interval.lowerBoundFinite()`,
+  `Interval.upperBoundFinite()`, `Interval.contains( t )`,
+  `Interval.isEntirelyAfter( t )`, `Interval.isEntirelyBefore( t )`.
+  The interval helpers read `isInclusive` with the LEDGER bool encoding
+  (PlutusTx: `False = Constr 0`, `True = Constr 1`).
+- **Lists**: `std.list.at` (returns `Optional<T>`), `concat`, `reverse`,
+  `sum`, `count`.
+- **LinearMap**: `std.linearMap.has`, `insert` (replace-or-prepend),
+  `remove`.
+- Fix: single-constructor prelude structs now carry their method table on
+  the type itself (`methodNamesPtr`), enabling methods on `Tx`, `TxOut`
+  and `Interval`.
+
+### `targetPlutusVersion` compiler option
+
+- New `pebble.config.json` / `CompilerOptions` field
+  `targetPlutusVersion: "v3" | "experimental-v4"` (default `"v3"`,
+  case-insensitive). The context type NAMES are always the same —
+  `ScriptContext`, `Tx`, `TxIn`, `TxOut`, `Address`, `ScriptInfo`,
+  `ScriptPurpose` — and this option decides **which ledger-API family
+  defines them**. There are no suffixed variants and no mixing: exactly
+  one family exists per compilation, so flipping the target re-types the
+  same source against the other context shape.
+- The plain `"v4"` spelling is **reserved until Plutus V4 is active on
+  mainnet** (the Dijkstra hard fork) and rejected with guidance; the
+  `experimental-` prefix makes the pre-release nature of the Dijkstra
+  shapes explicit while CIP-0118 is still Proposed. When the fork lands,
+  `"v4"` becomes the name and `"experimental-v4"` will keep working as
+  an alias.
+- **`contract` declarations compile under `"experimental-v4"`**: the
+  purpose dispatch derives against whichever context family the target
+  selects (the V4 `Withdraw` arm keeps the `credential` field name — an
+  `AccountId` is a credential — so every pre-existing purpose keeps
+  working), and `context.tx` is the V4 `Tx`.
+- **New `guard` contract method keyword** for the Plutus V4 guarding
+  purpose (CIP-0112 / CIP-0118):
+
+  ```ts
+  contract Batch {
+      guard check() {
+          const { guardIndex, topTxInfo } = context;
+          match topTxInfo {
+              when Some{ value: top }: { /* top-level: whole batch visible */ }
+              when None{}: { /* executing inside a sub-transaction */ }
+          }
+      }
+  }
+  ```
+
+  `context.guardIndex` and `context.topTxInfo` (`Optional<TopTxInfo>`)
+  are available in guard methods. Guard methods are appended LAST in the
+  merged direct-redeemer union, so adding a guard to an existing contract
+  never changes the tags of its other methods. `guard` requires
+  `targetPlutusVersion` `"experimental-v4"` (or newer): under `"v3"` it
+  is rejected with a located diagnostic naming the option; inside a
+  `state` it is a parse error (states only have spend methods).
+- **New `top` / `nested` execution-level keywords for contract methods**
+  (Plutus V4 nested transactions, CIP-0118): `top <purpose>` declares a
+  method valid only in the top-level transaction, `nested <purpose>` one
+  valid only inside a sub-transaction — `nested spend`, `top guard`,
+  `nested mint`, ... A purpose keyword without a level keyword defaults
+  to `top`. The derived contract body matches `tx.subTxIx` **before**
+  the purpose (`None` → top-level methods, `Some` → nested methods), and
+  a level with no methods is unconditionally `fail` — so **a contract
+  written without any level keyword always fails when executed inside a
+  sub-transaction**. Levels apply to state spend methods too, and the
+  merged redeemer union / tag order is level-independent (a contract
+  compiled under `"v3"` with `top` keywords is byte-identical to one
+  without). Under `"v3"` `nested` is rejected with a located diagnostic
+  naming the option; `top`/`nested` remain usable as identifiers (a state
+  field named `top` still parses).
+
+### Plutus V4 (Dijkstra) prelude types
+
+- The full V4 script-context type family, mirroring
+  **plutus-ledger-api 1.71.0.0** (1.68 introduced `PlutusLedgerApi.V4`
+  and `dijkstraPV = 12`; 1.69 changed the encoding of its product types,
+  see below; 1.71 renamed a field of `TopTxInfoSimplified`), under the SAME names as
+  the V3 family: `ScriptContext` (4 fields, incl. the executing
+  script's own hash), `Tx` (19 fields — no fee, no requiredSigners;
+  adds `subTxIx`, `directDeposits`, `accountBalanceIntervals`,
+  `guards`, `requiredTopLevelGuards`), `TxOut`/`TxIn`/`Address`,
+  `POSIXTimeRange` (plain optional bounds), `AccountId`,
+  `AccountBalanceInterval(s)`, the account-based `TxCert`,
+  `ScriptPurpose` (script hash in every constructor, new `Guarding`),
+  `ScriptInfo` (incl. `Guard` with the CIP-0118 `TopTxInfo` whole-batch
+  view) and `TopTxInfo(Simplified)`.
+- **V4 product types are list-encoded.** plutus-ledger-api 1.69 encodes
+  every single-constructor type of the V4 ledger API as a plain `List` of
+  fields instead of `Constr 0 fields`: `ScriptContext`, `Tx`, `TxIn`,
+  `TxOut`, `Address`, `POSIXTimeRange`, `TopTxInfo`,
+  `TopTxInfoSimplified`, and the products V4 shares with V3 by name —
+  `TxOutRef` (also as governance action id), `Rational`,
+  `ProtocolVersion`, `ConstitutionInfo`, `ProposalProcedure`,
+  `AssetClass`. The shared ones are list-encoded under
+  `"experimental-v4"` and stay `Constr 0` under `"v3"`;
+  `std.value.assetClass` and `Value.amountOfAsset` follow the target.
+  Sum types keep their constructor indices.
+- **`TopTxInfoSimplified.redeemerHashes: List<ScriptHash>`** replaces
+  `scriptPurposes: List<ScriptPurpose>` (plutus-ledger-api 1.71: the
+  aggregated batch view keeps only the script hashes of the redeemers).
+- **Validated against the ACTUAL library encodings, not the source
+  reading**: `compiler.v4Prelude.test.ts` decodes golden fixtures
+  generated by running plutus-ledger-api 1.71's own `toData` on sample
+  values of every V4 type (55 fixtures, every constructor covered) back
+  through the pebble types on the CEK machine. The generator is vendored
+  at `scripts/v4-fixtures`.
+- The Dijkstra hard fork has not happened and CIP-0118 is still
+  Proposed, so these types may track upstream changes until the fork;
+  they exist only under `targetPlutusVersion: "experimental-v4"` and the
+  default V3 prelude is untouched.
+
+### Fixed
+
+- **⚠ `match` with an `else` arm on a data struct with 3+ constructors
+  sent EVERY value to the `else` branch.** The case lowering placed one
+  shared wildcard-body IR node into every unmatched branch slot; IR
+  nodes are single-parent, mutated-in-place trees, so the sharing
+  corrupted the dispatch and the whole `match` collapsed into the
+  wildcard body at compile time (2-constructor structs used the
+  wildcard once and were unaffected — which is why the escrow examples
+  never hit it). Every wildcard placement now clones
+  (`TirCaseExpr.ts`). Exhaustive matches were always correct, and the
+  deployed mainnet contracts recompile byte-identically.
+- Destructuring through an ALIAS of a data struct
+  (`const PubKey{ hash } = accountId;` where `AccountId` aliases
+  `Credential`) failed with "deconstruction of non-struct type"; the
+  deconstruct paths now unalias first.
+
+### UPLC-CAPE
+
+- New `examples/uplc-cape` project with the open-optimization `fibonacci`
+  and `factorial` submissions and the `two_party_escrow` real-world
+  contract submission (see `BENCHMARKS.md`).
+
 ## v0.4.5
 
 A single fix, but a consequential one: it removes the last known

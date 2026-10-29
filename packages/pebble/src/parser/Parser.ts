@@ -36,6 +36,7 @@ import { LitStrExpr } from "../ast/nodes/expr/litteral/LitStrExpr";
 import { TemplateStrExpr } from "../ast/nodes/expr/litteral/TemplateStrExpr";
 import { LitIntExpr } from "../ast/nodes/expr/litteral/LitIntExpr";
 import { LitHexBytesExpr } from "../ast/nodes/expr/litteral/LitHexBytesExpr";
+import { ContractExecLevel } from "../ast/nodes/statements/declarations/FuncDecl";
 import { CallExpr } from "../ast/nodes/expr/functions/CallExpr";
 import { BlockStmt } from "../ast/nodes/statements/BlockStmt";
 import { BreakStmt } from "../ast/nodes/statements/BreakStmt";
@@ -398,6 +399,7 @@ export class Parser extends DiagnosticEmitter
         const withdrawMethods: FuncDecl[] = [];
         const proposeMethods: FuncDecl[] = [];
         const voteMethods: FuncDecl[] = [];
+        const guardMethods: FuncDecl[] = [];
         const stateDecls: StateDecl[] = [];
         while( !tn.skip( Token.CloseBrace ) )
         {
@@ -406,7 +408,23 @@ export class Parser extends DiagnosticEmitter
             const thisStartPos = tn.tokenPos;
 
             const prevState = tn.mark();
-            const nextToken = tn.next();
+            let nextToken = tn.next();
+
+            // optional execution-level keyword: `top <purpose>` / `nested <purpose>`
+            let execLevel: ContractExecLevel = "top";
+            if( nextToken === Token.Top || nextToken === Token.Nested )
+            {
+                const levelToken = nextToken;
+                const afterLevel = tn.next();
+                if( !isContractPurposeToken( afterLevel ) )
+                return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "contract method purpose (spend, mint, certify, withdraw, propose, vote, guard)"
+                );
+                execLevel = levelToken === Token.Nested ? "nested" : "top";
+                nextToken = afterLevel;
+            }
+
             switch( nextToken ) {
                 case Token.State: {
                     const stateDecl = this.parseStateDecl( thisStartPos );
@@ -453,7 +471,8 @@ export class Parser extends DiagnosticEmitter
                 case Token.Certify: 
                 case Token.Withdraw: 
                 case Token.Propose:
-                case Token.Vote: {
+                case Token.Vote:
+                case Token.Guard: {
                     const funcDecl = this.parseFuncDecl(
                         CommonFlags.None,
                         thisStartPos,
@@ -465,6 +484,7 @@ export class Parser extends DiagnosticEmitter
                         DiagnosticCode.Contract_methods_must_return_void_or_fail,
                         funcDecl.expr.signature.returnType?.range ?? funcDecl.expr.signature.range
                     );
+                    funcDecl.execLevel = execLevel;
 
                     (
                         nextToken === Token.Spend ? spendMethods :
@@ -473,6 +493,7 @@ export class Parser extends DiagnosticEmitter
                         nextToken === Token.Withdraw ? withdrawMethods :
                         nextToken === Token.Propose ? proposeMethods :
                         nextToken === Token.Vote ? voteMethods :
+                        nextToken === Token.Guard ? guardMethods :
                         spendMethods // default to spendMethods, should never happen
                     ).push( funcDecl );
                     continue;
@@ -500,6 +521,7 @@ export class Parser extends DiagnosticEmitter
             withdrawMethods,
             proposeMethods,
             voteMethods,
+            guardMethods,
             stateDecls,
             tn.range( startPos, tn.pos )
         );
@@ -538,7 +560,23 @@ export class Parser extends DiagnosticEmitter
 
             const memberStartPos = tn.tokenPos;
             const prevState = tn.mark();
-            const nextToken = tn.next();
+            let nextToken = tn.next();
+
+            // optional execution-level keyword before a spend method; a field
+            // may legitimately be NAMED `top`/`nested`, so only treat the
+            // token as a level when a purpose keyword follows
+            let execLevel: ContractExecLevel = "top";
+            if( nextToken === Token.Top || nextToken === Token.Nested )
+            {
+                const levelState = tn.mark();
+                const afterLevel = tn.next();
+                if( isContractPurposeToken( afterLevel ) )
+                {
+                    execLevel = nextToken === Token.Nested ? "nested" : "top";
+                    nextToken = afterLevel;
+                }
+                else tn.reset( levelState );
+            }
 
             if( nextToken === Token.Spend ) {
                 const funcDecl = this.parseFuncDecl(
@@ -552,6 +590,7 @@ export class Parser extends DiagnosticEmitter
                     DiagnosticCode.Contract_methods_must_return_void_or_fail,
                     funcDecl.expr.signature.returnType?.range ?? funcDecl.expr.signature.range
                 );
+                funcDecl.execLevel = execLevel;
                 spendMethods.push( funcDecl );
                 continue;
             }
@@ -562,6 +601,7 @@ export class Parser extends DiagnosticEmitter
                 || nextToken === Token.Withdraw
                 || nextToken === Token.Propose
                 || nextToken === Token.Vote
+                || nextToken === Token.Guard
             ) {
                 return this.error(
                     DiagnosticCode._0_expected,
@@ -885,12 +925,34 @@ export class Parser extends DiagnosticEmitter
             }
             case Token.Data: {
                 tn.next();
+                let extraFlags = StructDeclAstFlags.onlyDataEncoding;
+                // accept `data untagged struct ...`
+                if( tn.peek() === Token.Untagged ) {
+                    tn.next();
+                    extraFlags |= StructDeclAstFlags.untagged;
+                }
                 if( tn.peek() !== Token.Struct ) return this.error(
                     DiagnosticCode._0_expected,
                     tn.range(), "struct"
                 );
                 tn.next();
-                return this.parseStruct( StructDeclAstFlags.onlyDataEncoding, flags, startPos );
+                return this.parseStruct( extraFlags, flags, startPos );
+            }
+            case Token.Untagged: {
+                // same forms as at the top level:
+                // `untagged struct ...` or `untagged data struct ...`
+                tn.next();
+                let extraFlags = StructDeclAstFlags.untagged;
+                if( tn.peek() === Token.Data ) {
+                    tn.next();
+                    extraFlags |= StructDeclAstFlags.onlyDataEncoding;
+                }
+                if( tn.peek() !== Token.Struct ) return this.error(
+                    DiagnosticCode._0_expected,
+                    tn.range(), "struct"
+                );
+                tn.next();
+                return this.parseStruct( extraFlags, flags, startPos );
             }
             case Token.Runtime: {
                 tn.next();
@@ -4802,4 +4864,18 @@ export interface ParseVarOpts {
     isFor: boolean;
     isForOf: boolean;
     isParam: boolean
+}
+
+/** the contract method purpose keywords (`top`/`nested` may precede any of them) */
+function isContractPurposeToken( tok: Token ): boolean
+{
+    return (
+        tok === Token.Spend
+        || tok === Token.Mint
+        || tok === Token.Certify
+        || tok === Token.Withdraw
+        || tok === Token.Propose
+        || tok === Token.Vote
+        || tok === Token.Guard
+    );
 }
