@@ -67,10 +67,11 @@ export function tokenFromKeyword(text: string): Token {
             if (text === "finally") return Token.Finally;
             break;
         }
-        // case CharCode.g: {
-        //     if (text === "get") return Token.Get;
-        //     break;
-        // }
+        case CharCode.g: {
+            // if (text === "get") return Token.Get;
+            if (text === "guard") return Token.Guard;
+            break;
+        }
         case CharCode.i: {
             if (len === 2) {
                 if (text === "if") return Token.If;
@@ -117,6 +118,7 @@ export function tokenFromKeyword(text: string): Token {
             // if (text === "new") return Token.New;
             // if (text === "undefined") return Token.Null;
             if (text === "namespace") return Token.Namespace;
+            if (text === "nested") return Token.Nested;
 
             // replaced by "int"
             // if (text === "number") return Token.Number;
@@ -167,6 +169,7 @@ export function tokenFromKeyword(text: string): Token {
                 break;
             }
             if (text === "trace") return Token.Trace;
+            if (text === "top") return Token.Top;
             // if (text === "try") return Token.Try;
             // if (text === "throw") return Token.Throw;
             // if (text === "typeof") return Token.TypeOf;

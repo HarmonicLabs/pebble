@@ -1,0 +1,70 @@
+// One Plutus V4 script for every purpose, so a single script hash is the
+// minting policy, the script account, the guard and the spending address.
+// Each method checks the part of the V4 script context that its feature
+// introduced; `onchain/EVIDENCE.md` lists the transaction that ran each one.
+//
+// Redeemer tags (the merged union: spend, mint, withdraw, certify, then guard):
+//   0 inSubTx  1 mintOne  2 observeWithdrawal  3 observeAccounts
+//   4 registerAccount  5 subTxGuard  6 batchGuard
+
+contract V4Features {
+
+    // CIP-0118: valid only inside a sub-transaction. The sub-transaction
+    // must require `topGuard` as a guard of the top-level transaction.
+    nested spend inSubTx( topGuard: data ) {
+        const { tx } = context;
+        const Some{ value: ix } = tx.subTxIx;
+        assert ix >= 0 else "sub-transaction index";
+        assert tx.requiredTopLevelGuards.lookup( topGuard as Credential ) is Some
+            else "required top-level guard";
+    }
+
+    // Minting: exactly one `v4` token of this policy.
+    mint mintOne() {
+        const { tx, policy } = context;
+        assert tx.mint.amountOf( policy, #7634 ) == 1 else "mint exactly one";
+    }
+
+    // Withdrawing purpose, keyed by the account (an `AccountId`):
+    // a zero withdrawal from this script's account.
+    withdraw observeWithdrawal() {
+        const { tx, credential } = context;
+        const Some{ value: amount } = tx.withdrawals.lookup( credential );
+        assert amount == 0 else "zero withdrawal";
+    }
+
+    // Direct deposits and account balance intervals: the transaction
+    // deposits `amount` into `depositTo`, and bounds this account's balance
+    // with an inclusive lower bound of 0.
+    withdraw observeAccounts( depositTo: data, amount: int ) {
+        const { tx, credential } = context;
+        const Some{ value: deposited } = tx.directDeposits.lookup( depositTo as Credential );
+        assert deposited == amount else "direct deposit";
+        const Some{ value: interval } = tx.accountBalanceIntervals.lookup( credential );
+        const BothBounds{ from, to } = interval;
+        assert from == 0 else "lower bound";
+        assert to > from else "upper bound";
+    }
+
+    // Account-based certificates: registering this script's account with
+    // the 2 ADA deposit.
+    certify registerAccount() {
+        const { certificate } = context;
+        const RegAccount{ account, deposit } = certificate;
+        assert deposit == 2000000 else "account deposit";
+        assert account is Script else "script account";
+    }
+
+    // CIP-0112 guard executed inside a sub-transaction: no batch view.
+    nested guard subTxGuard() {
+        const { topTxInfo } = context;
+        assert topTxInfo is None else "sub-transaction guards get no batch view";
+    }
+
+    // Guard of the top-level transaction: sees the whole batch.
+    guard batchGuard( expectedSubTxs: int ) {
+        const { topTxInfo } = context;
+        const Some{ value: top } = topTxInfo;
+        assert std.list.length( top.subTransactions ) == expectedSubTxs else "batch size";
+    }
+}

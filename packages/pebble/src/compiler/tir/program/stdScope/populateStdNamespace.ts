@@ -3,6 +3,7 @@ import { _ir_apps } from "../../../../IR/IRNodes/IRApp";
 import { IRDelayed } from "../../../../IR/IRNodes/IRDelayed";
 import { IRConst } from "../../../../IR/IRNodes/IRConst";
 import { IRCase } from "../../../../IR/IRNodes/IRCase";
+import { IRConstr } from "../../../../IR/IRNodes/IRConstr";
 import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import { IRNativeTag } from "../../../../IR/IRNodes/IRNative/IRNativeTag";
@@ -38,7 +39,18 @@ import {
     valueScaleName, valueToDataName,
     getCredentialHashFuncName,
     valueZeroConstName,
+    valueNegateName, valueEqualsName, valueSubtractName,
+    valueIsZeroName, valueGeqName, valueLeqName,
+    valueSingletonName, valueAmountOfAssetName, assetClassConstructorName,
+    txSignedByName, txFindInputName, txOutputsToCredentialName,
+    txInputsFromCredentialName, txValuePaidToName,
+    txOutInlineDatumName,
+    intervalLowerBoundFiniteName, intervalUpperBoundFiniteName,
+    intervalContainsName, intervalIsEntirelyAfterName, intervalIsEntirelyBeforeName,
+    listSumName,
 } from "./stdScope";
+import { _toDataUplcFunc } from "../../expressions/TirToDataExpr";
+import { _ir_lazyIfThenElse } from "../../../../IR/tree_utils/_ir_lazyIfThenElse";
 
 /**
  * Populate the top-level `std` namespace and its sub-namespaces:
@@ -715,6 +727,107 @@ export function populateStdNamespace( program: TypedProgram ): void
     // closed-IR thunk would need TIR-level composition which our current
     // namespace helpers don't provide. Users keep `xs.map(f)`.
 
+    // at<T>( i: int, xs: List<T> ): Optional<T>
+    // -- drop i, then None on nil / Some(head) on cons. The SoP-Some payload
+    //    must be DATA (consumers decode on extraction), so the head is
+    //    encoded with the type's toData at instantiation time.
+    defineGenericBuiltin( listNsScope, "at", 1,
+        ( [ T ] ) => new TirFuncT([ int_t, new TirListT( T ) ], new TirSopOptT( T )),
+        ( [ T ] ) => {
+            const i = Symbol("list_at_i");
+            const xs = Symbol("list_at_xs");
+            const rest = Symbol("list_at_rest");
+            return new IRFunc(
+                [ i, xs ],
+                _ir_apps(
+                    new IRFunc(
+                        [ rest ],
+                        _ir_lazyIfThenElse(
+                            _ir_apps( new IRNative( IRNativeTag.nullList ), new IRVar( rest ) ),
+                            new IRConstr( 1, [] ), // None
+                            new IRConstr( 0, [    // Some{ toData( head ) }
+                                _ir_apps(
+                                    _toDataUplcFunc( T ),
+                                    _ir_apps( new IRNative( IRNativeTag.headList ), new IRVar( rest ) )
+                                )
+                            ])
+                        )
+                    ),
+                    _ir_apps(
+                        new IRNative( IRNativeTag.dropList ),
+                        new IRVar( i ),
+                        new IRVar( xs )
+                    )
+                )
+            );
+        },
+        listNs
+    );
+    // concat<T>( xs: List<T>, ys: List<T> ): List<T> -- foldr mkCons ys xs
+    defineGenericBuiltin( listNsScope, "concat", 1,
+        ( [ T ] ) => new TirFuncT([ new TirListT( T ), new TirListT( T ) ], new TirListT( T )),
+        () => {
+            const xs = Symbol("list_concat_xs");
+            const ys = Symbol("list_concat_ys");
+            return new IRFunc(
+                [ xs, ys ],
+                _ir_apps(
+                    new IRNative( IRNativeTag._foldr ),
+                    new IRNative( IRNativeTag.mkCons ),
+                    new IRVar( ys ),
+                    new IRVar( xs )
+                )
+            );
+        },
+        listNs
+    );
+    // reverse<T>( xs: List<T> ): List<T> -- foldl (flip mkCons) nil xs
+    defineGenericBuiltin( listNsScope, "reverse", 1,
+        ( [ T ] ) => new TirFuncT([ new TirListT( T ) ], new TirListT( T )),
+        ( [ T ] ) => {
+            const xs = Symbol("list_reverse_xs");
+            const acc = Symbol("list_reverse_acc");
+            const x = Symbol("list_reverse_x");
+            return new IRFunc(
+                [ xs ],
+                _ir_apps(
+                    new IRNative( IRNativeTag._foldl ),
+                    new IRFunc(
+                        [ acc, x ],
+                        _ir_apps(
+                            new IRNative( IRNativeTag.mkCons ),
+                            new IRVar( x ),
+                            new IRVar( acc )
+                        )
+                    ),
+                    IRConst.listOf( T )([]),
+                    new IRVar( xs )
+                )
+            );
+        },
+        listNs
+    );
+    // count<T>( pred: (T) => bool, xs: List<T> ): int -- length( filter( pred, xs ) )
+    defineGenericBuiltin( listNsScope, "count", 1,
+        ( [ T ] ) => new TirFuncT([ new TirFuncT([ T ], bool_t), new TirListT( T ) ], int_t),
+        () => {
+            const pred = Symbol("list_count_pred");
+            const xs = Symbol("list_count_xs");
+            return new IRFunc(
+                [ pred, xs ],
+                _ir_apps(
+                    new IRNative( IRNativeTag._length ),
+                    _ir_apps(
+                        new IRNative( IRNativeTag._filter ),
+                        new IRVar( pred ),
+                        new IRVar( xs )
+                    )
+                )
+            );
+        },
+        listNs
+    );
+
     // ---------- std.linearMap (polymorphic) ----------
     const linearMapNs = "linearMap";
     defineGenericBuiltin( linearMapNsScope, "length", 2,
@@ -777,6 +890,122 @@ export function populateStdNamespace( program: TypedProgram ): void
                     ),
                     new IRVar( mSym ),
                 ),
+            );
+        },
+        linearMapNs
+    );
+    // has<K implements ToData, V>( k: K, m: LinearMap<K,V> ): bool
+    // -- some( \p -> equalsData( fstPair p, toDataK k ), m )
+    defineGenericBuiltinConstrained( linearMapNsScope, "has", 2,
+        [ "ToData", undefined ],
+        ( [ K, V ] ) => new TirFuncT([ K, new TirLinearMapT( K, V ) ], bool_t),
+        ( _typeArgs, dicts ) => {
+            const kSym = Symbol("has_k");
+            const mSym = Symbol("has_m");
+            const pSym = Symbol("has_p");
+            const toDataK = dicts[0]!;
+            return new IRFunc(
+                [ kSym, mSym ],
+                _ir_apps(
+                    new IRNative( IRNativeTag._some ),
+                    new IRFunc(
+                        [ pSym ],
+                        _ir_apps(
+                            IRNative.equalsData,
+                            _ir_apps( IRNative.fstPair, new IRVar( pSym ) ),
+                            _ir_apps( toDataK, new IRVar( kSym ) )
+                        )
+                    ),
+                    new IRVar( mSym )
+                )
+            );
+        },
+        linearMapNs
+    );
+    // remove<K implements ToData, V>( k: K, m: LinearMap<K,V> ): LinearMap<K,V>
+    // -- filter( \p -> not( equalsData( fstPair p, toDataK k ) ), m )
+    defineGenericBuiltinConstrained( linearMapNsScope, "remove", 2,
+        [ "ToData", undefined ],
+        ( [ K, V ] ) => new TirFuncT(
+            [ K, new TirLinearMapT( K, V ) ],
+            new TirLinearMapT( K, V )
+        ),
+        ( _typeArgs, dicts ) => {
+            const kSym = Symbol("remove_k");
+            const mSym = Symbol("remove_m");
+            const pSym = Symbol("remove_p");
+            const toDataK = dicts[0]!;
+            return new IRFunc(
+                [ kSym, mSym ],
+                _ir_apps(
+                    new IRNative( IRNativeTag._filter ),
+                    new IRFunc(
+                        [ pSym ],
+                        _ir_apps(
+                            new IRNative( IRNativeTag._not ),
+                            _ir_apps(
+                                IRNative.equalsData,
+                                _ir_apps( IRNative.fstPair, new IRVar( pSym ) ),
+                                _ir_apps( toDataK, new IRVar( kSym ) )
+                            )
+                        )
+                    ),
+                    new IRVar( mSym )
+                )
+            );
+        },
+        linearMapNs
+    );
+    // insert<K implements ToData, V implements ToData>
+    //     ( k: K, v: V, m: LinearMap<K,V> ): LinearMap<K,V>
+    // -- replace-or-prepend: remove any existing entry for `k`, then
+    //    prepend the new pair (the new entry moves to the front).
+    defineGenericBuiltinConstrained( linearMapNsScope, "insert", 2,
+        [ "ToData", "ToData" ],
+        ( [ K, V ] ) => new TirFuncT(
+            [ K, V, new TirLinearMapT( K, V ) ],
+            new TirLinearMapT( K, V )
+        ),
+        ( _typeArgs, dicts ) => {
+            const kSym = Symbol("insert_k");
+            const vSym = Symbol("insert_v");
+            const mSym = Symbol("insert_m");
+            const pSym = Symbol("insert_p");
+            const kDataSym = Symbol("insert_kData");
+            const toDataK = dicts[0]!;
+            const toDataV = dicts[1]!;
+            return new IRFunc(
+                [ kSym, vSym, mSym ],
+                // bind toDataK(k) once, reused by both the pair and the filter
+                _ir_apps(
+                    new IRFunc(
+                        [ kDataSym ],
+                        _ir_apps(
+                            IRNative.mkCons,
+                            _ir_apps(
+                                IRNative.mkPairData,
+                                new IRVar( kDataSym ),
+                                _ir_apps( toDataV, new IRVar( vSym ) )
+                            ),
+                            _ir_apps(
+                                new IRNative( IRNativeTag._filter ),
+                                new IRFunc(
+                                    [ pSym ],
+                                    _ir_apps(
+                                        new IRNative( IRNativeTag._not ),
+                                        _ir_apps(
+                                            IRNative.equalsData,
+                                            _ir_apps( IRNative.fstPair, new IRVar( pSym ) ),
+                                            new IRVar( kDataSym )
+                                        )
+                                    )
+                                ),
+                                new IRVar( mSym )
+                            )
+                        )
+                    ),
+                    _ir_apps( toDataK, new IRVar( kSym ) )
+                )
             );
         },
         linearMapNs
@@ -853,6 +1082,34 @@ export function populateStdNamespace( program: TypedProgram ): void
     defineAliasFromProgram( valueNsScope,      "contains",  valueContainsName );
     defineAliasFromProgram( valueNsScope,      "scale",     valueScaleName );
     defineAliasFromProgram( valueNsScope,      "toData",    valueToDataName );
+    defineAliasFromProgram( valueNsScope,      "negate",    valueNegateName );
+    defineAliasFromProgram( valueNsScope,      "equals",    valueEqualsName );
+    defineAliasFromProgram( valueNsScope,      "subtract",  valueSubtractName );
+    defineAliasFromProgram( valueNsScope,      "isZero",    valueIsZeroName );
+    defineAliasFromProgram( valueNsScope,      "geq",       valueGeqName );
+    defineAliasFromProgram( valueNsScope,      "leq",       valueLeqName );
+    defineAliasFromProgram( valueNsScope,      "singleton", valueSingletonName );
+    defineAliasFromProgram( valueNsScope,      "amountOfAsset", valueAmountOfAssetName );
+    defineAliasFromProgram( valueNsScope,      "assetClass",    assetClassConstructorName );
+
+    // std.list.sum — registered as a program function in stdScope
+    defineAliasFromProgram( listNsScope,       "sum",       listSumName );
+
+    // std.tx.* / std.interval.* — free-function forms of the Tx / TxOut /
+    // Interval methods (self as first argument)
+    const txNsScope       = new AstScope( stdNsScope, program, {} );
+    const intervalNsScope = new AstScope( stdNsScope, program, {} );
+    defineAliasFromProgram( txNsScope,        "signedBy",             txSignedByName );
+    defineAliasFromProgram( txNsScope,        "findInput",            txFindInputName );
+    defineAliasFromProgram( txNsScope,        "outputsToCredential",  txOutputsToCredentialName );
+    defineAliasFromProgram( txNsScope,        "inputsFromCredential", txInputsFromCredentialName );
+    defineAliasFromProgram( txNsScope,        "valuePaidTo",          txValuePaidToName );
+    defineAliasFromProgram( txNsScope,        "inlineDatum",          txOutInlineDatumName );
+    defineAliasFromProgram( intervalNsScope,  "lowerBoundFinite",     intervalLowerBoundFiniteName );
+    defineAliasFromProgram( intervalNsScope,  "upperBoundFinite",     intervalUpperBoundFiniteName );
+    defineAliasFromProgram( intervalNsScope,  "contains",             intervalContainsName );
+    defineAliasFromProgram( intervalNsScope,  "isEntirelyAfter",      intervalIsEntirelyAfterName );
+    defineAliasFromProgram( intervalNsScope,  "isEntirelyBefore",     intervalIsEntirelyBeforeName );
 
     // std.value.zero — the empty native Value. The constant itself (and the
     // IR that builds it) lives in `stdScope`, next to the `Value` alias whose
@@ -945,6 +1202,8 @@ export function populateStdNamespace( program: TypedProgram ): void
     valueNsScope.readonly();
     valueMapNsScope.readonly();
     credentialNsScope.readonly();
+    txNsScope.readonly();
+    intervalNsScope.readonly();
 
     stdNsScope.defineNamespace({ name: "crypto",     publicScope: cryptoNsScope }     as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "builtins",   publicScope: builtinsNsScope }   as NamespaceSymbol);
@@ -958,6 +1217,8 @@ export function populateStdNamespace( program: TypedProgram ): void
     stdNsScope.defineNamespace({ name: "value",      publicScope: valueNsScope }      as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "valueMap",   publicScope: valueMapNsScope }   as NamespaceSymbol);
     stdNsScope.defineNamespace({ name: "credential", publicScope: credentialNsScope } as NamespaceSymbol);
+    stdNsScope.defineNamespace({ name: "tx",         publicScope: txNsScope }         as NamespaceSymbol);
+    stdNsScope.defineNamespace({ name: "interval",   publicScope: intervalNsScope }   as NamespaceSymbol);
     stdNsScope.readonly();
 
     program.preludeScope.defineNamespace({ name: "std", publicScope: stdNsScope } as NamespaceSymbol);

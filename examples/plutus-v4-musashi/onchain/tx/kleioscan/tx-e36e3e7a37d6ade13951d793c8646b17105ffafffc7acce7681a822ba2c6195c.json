@@ -1,0 +1,132 @@
+{
+  "hash": "e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c",
+  "block_no": 37057,
+  "block_hash": "2e0a241cca26a34e0fa53c42ed05ab52949817375e8eeb0287f020e3be81a1cf",
+  "block_index": 1001,
+  "time": "2026-10-27T15:57:16Z",
+  "out_sum": "19806949",
+  "fee": "193051",
+  "deposit": null,
+  "size": 698,
+  "script_size": 324,
+  "valid_contract": true,
+  "invalid_before": "834911",
+  "invalid_hereafter": null,
+  "inputs": [
+    {
+      "address": "addr_test1wrqjvamq3ay89286mqxuv92rcx9vuuel9chghtqz8e8j74st4fjza",
+      "value": "20000000",
+      "src_tx_hash": "c4af6685095147d8e9f0a2447f602660d83bc50f91a60e8bece363a238bd0855",
+      "src_index": 0,
+      "has_inline_datum": true,
+      "has_datum_hash": true,
+      "has_ref_script": false,
+      "datum_hash": "7104815e55da3cc8a160cefce33cbd2dec472630914f7c2995d04f451ec41a2a",
+      "datum_json": {
+        "fields": [
+          {
+            "bytes": "4b857d3a2545a0982f2bec7e01117c0958fa08a3cb53300b5fff888d991874ac"
+          },
+          {
+            "int": 1793116482000
+          }
+        ],
+        "constructor": 0
+      },
+      "datum_cbor": "d8799f58204b857d3a2545a0982f2bec7e01117c0958fa08a3cb53300b5fff888d991874ac1b000001a17e1229d0ff",
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": "plutusV4",
+      "assets": []
+    }
+  ],
+  "outputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "19806949",
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "spent_by_tx": null,
+      "assets": []
+    }
+  ],
+  "metadata": [],
+  "trade": null,
+  "scripts": [
+    {
+      "purpose": "spend",
+      "index": 0,
+      "script_hash": "c12677608f4872a8fad80dc61543c18ace733f2e2e8bac023e4f2f56",
+      "script_type": "plutusV4",
+      "script_size": 324,
+      "unit_mem": "31996",
+      "unit_steps": "9258110",
+      "redeemer_json": {
+        "fields": [
+          {
+            "bytes": "706562626c652d76342d6f6e2d6d757361736869"
+          }
+        ],
+        "constructor": 0
+      },
+      "datum_json": null,
+      "script_cbor": "590141010100980066002ae8a6e1d20009b89480092223223232937546002600e6eb0c00400a64644520056c9baa0039148015b26ea8c01cc03400664452005998009805000d28d285285285282006b4ca6002aae7aea122323232323298009809004d55cea452603060026ea800b26ea800a4520053232329800914801528400557389149980119801499b89375a60366042006015330013732910109746f6f206561726c79004a14a293300b300c00d375c60360073300137329110c77726f6e6720736563726574004a14a230203008011b5260cc004c02cdd7180c00199800980600125eb815d01bad3016301c0010375a6022600c00ee3dc91bae300e30033754601c602801eea46ea8c028dd618051806cc004dd6004c8c044c044c044c04400522300130010020ae900c008c01400cc004008ae84dd6000918021802000a902a1",
+      "script_json": null,
+      "withdrawal_amount": null
+    }
+  ],
+  "parent_tx": null,
+  "sub_txs": [],
+  "proposals": [],
+  "reference_inputs": [],
+  "collateral_inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9979827283",
+      "src_tx_hash": "c4af6685095147d8e9f0a2447f602660d83bc50f91a60e8bece363a238bd0855",
+      "src_index": 1,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "collateral_return": {
+    "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+    "value": "9979537706",
+    "has_inline_datum": false,
+    "has_datum_hash": false,
+    "has_ref_script": false,
+    "datum_hash": null,
+    "datum_json": null,
+    "datum_cbor": null,
+    "ref_script_hash": null,
+    "ref_script_type": null,
+    "ref_script_cbor": null,
+    "pay_script_type": null,
+    "spent_by_tx": null,
+    "assets": [],
+    "assets_descr": "fromList []"
+  },
+  "certificates": [],
+  "withdrawals": [],
+  "mint": [],
+  "votes": [],
+  "required_signers": []
+}

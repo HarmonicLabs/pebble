@@ -145,10 +145,7 @@ export function substituteTypeParams(
             return t;
         }
 
-        if( shell instanceof TirDataStructType )
-            shell.fillConstructors( newCtors, t instanceof TirDataStructType ? t.untagged : false );
-        else
-            shell.fillConstructors( newCtors );
+        shell.fillConstructors( newCtors, t.untagged );
         return shell;
     }
     return t;

@@ -1,5 +1,5 @@
-import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, UPLCConst, UPLCProgram, UPLCTerm } from "@harmoniclabs/uplc";
-import { CEKError, Machine } from "@harmoniclabs/plutus-machine";
+import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, showUPLCConstValue, UPLCConst, UPLCProgram, UPLCTerm } from "@harmoniclabs/uplc";
+import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
 import { DiagnosticCategory } from "../diagnostics/DiagnosticCategory";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
@@ -27,6 +27,8 @@ import {
 } from "./test/TestResult";
 import { FuzzerInfo } from "./tir/statements/TirTestStmt";
 import { PRNG } from "./test/fuzz/PRNG";
+import { sampleForType, TypedSample } from "./test/fuzz/typedFuzzers";
+import { TirType } from "./tir/types/TirType";
 
 export { CheckResult, SourceTypeMap, TypeEntry, MemberInfo } from "./SourceTypeMap";
 export {
@@ -287,15 +289,9 @@ export class Compiler
         }
 
         // ── Property test ──────────────────────────────────────────────
-        // Check that every parameter has an executable fuzzer in v1 (Phase 1).
-        const unsupported = desc.fuzzerInfos.find( fi =>
-            fi.kind === "unsupported" || fi.kind === "via_not_implemented"
-        );
+        const unsupported = desc.fuzzerInfos.find( fi => fi.kind === "unsupported" );
         if( unsupported )
         {
-            const reason = unsupported.kind === "via_not_implemented"
-                ? "user-defined fuzzers via the 'via' keyword are not yet executable (Phase 2)"
-                : (unsupported as { kind: "unsupported"; reason: string }).reason;
             return {
                 name: desc.name,
                 sourceFile: desc.sourceFile,
@@ -304,63 +300,188 @@ export class Compiler
                 passed: false,
                 iterations: [],
                 totalBudget: zeroBudget(),
-                skippedReason: reason,
+                skippedReason: ( unsupported as { kind: "unsupported"; reason: string } ).reason,
                 seed,
             };
         }
 
-        // Run N iterations with TS-side sampling.
+        // Compile each `via` fuzzer entry point once per test (fresh
+        // front-end pass per entry: the expressify/backend passes mutate
+        // TIR in place, so a program object cannot compile twice).
+        const viaBodies = new Map<string, UPLCTerm>();
+        for( const fi of desc.fuzzerInfos )
+        {
+            if( fi.kind !== "via" || viaBodies.has( fi.tirFuncName ) ) continue;
+            try {
+                const viaDiagnostics: DiagnosticMessage[] = [];
+                const viaCompiler = new AstCompiler( cfg, this.io, viaDiagnostics );
+                await viaCompiler.compileFile( cfg.entry, true );
+                const err = viaDiagnostics.find( d => d.category === DiagnosticCategory.Error );
+                if( err ) return _failedTestResult(
+                    desc, "fuzzer compile error: " + err.toString(), "property"
+                );
+                if(!( viaCompiler.program.functions.get( fi.tirFuncName ) instanceof TirFuncExpr ))
+                return _failedTestResult(
+                    desc, `fuzzer entry '${fi.tirFuncName}' not found after re-parse`, "property"
+                );
+                viaCompiler.program.contractTirFuncName = fi.tirFuncName;
+                const viaSerialized = this._compileBackend( cfg, viaCompiler.program, true );
+                viaBodies.set( fi.tirFuncName, parseUPLC( viaSerialized ).body );
+            } catch ( err ) {
+                return _failedTestResult(
+                    desc,
+                    "fuzzer backend error: " + ( err instanceof Error ? err.message : String( err ) ),
+                    "property"
+                );
+            }
+        }
+
+        // Run N iterations with TS-side sampling (+ CEK-side `via` fuzzers).
         const prng = new PRNG( seed );
         const iterations: TestIterationResult[] = [];
         let totalBudget = zeroBudget();
         let passedAll = true;
+        let shrinkSteps: number | undefined = undefined;
 
-        for( let i = 0; i < propertyIterations; i++ )
+        const evalWithArgs = ( args: UPLCTerm[] ): { iter: TestIterationResult } =>
         {
-            const inputs: TestInput[] = [];
-            const args: UPLCTerm[] = [];
-            for( let p = 0; p < desc.fuzzerInfos.length; p++ )
-            {
-                const fi = desc.fuzzerInfos[p];
-                if( fi.kind !== "primitive" ) throw new Error("unreachable: non-primitive after unsupported check");
-                const paramName = desc.paramNames[p] ?? `param${p}`;
-                if( fi.primitive === "int" )
-                {
-                    const v = prng.nextIntBiased();
-                    inputs.push({ name: paramName, value: v });
-                    args.push( UPLCConst.int( v ) );
-                }
-                else // bool
-                {
-                    const v = prng.nextBool();
-                    inputs.push({ name: paramName, value: v });
-                    args.push( UPLCConst.bool( v ) );
-                }
-            }
-
             let app: UPLCTerm = uplcProgram.body;
             for( const arg of args ) app = new Application( app, arg );
-
             const evalResult = Machine.eval( app );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
                 cpu: BigInt( evalResult.budgetSpent.cpu ),
                 mem: BigInt( evalResult.budgetSpent.mem ),
             };
-            const iter: TestIterationResult = {
-                passed: !isErr,
-                budgetSpent: budget,
-                logs: evalResult.logs.slice(),
-                error: isErr ? { msg: ( evalResult.result as CEKError ).msg } : undefined,
-                inputs,
+            return {
+                iter: {
+                    passed: !isErr,
+                    budgetSpent: budget,
+                    logs: evalResult.logs.slice(),
+                    error: isErr ? { msg: ( evalResult.result as CEKError ).msg } : undefined,
+                }
             };
-            iterations.push( iter );
-            totalBudget = addBudget( totalBudget, budget );
+        };
 
-            if( isErr )
+        for( let i = 0; i < propertyIterations; i++ )
+        {
+            const inputs: TestInput[] = [];
+            const args: UPLCTerm[] = [];
+            // parallel to fuzzerInfos; only "typed" entries participate in shrinking
+            const samples: ( TypedSample | undefined )[] = new Array( desc.fuzzerInfos.length );
+            let fuzzerFailure: TestIterationResult | undefined = undefined;
+
+            for( let p = 0; p < desc.fuzzerInfos.length; p++ )
+            {
+                const fi = desc.fuzzerInfos[p];
+                const paramName = desc.paramNames[p] ?? `param${p}`;
+                if( fi.kind === "typed" )
+                {
+                    const sample = sampleForType( fi.type, prng );
+                    samples[p] = sample;
+                    inputs.push({ name: paramName, value: _sampleInputValue( sample ) });
+                    args.push( sample.term() );
+                }
+                else if( fi.kind === "via" )
+                {
+                    const fuzzSeed = BigInt( prng.next32() );
+                    const fuzzResult = Machine.eval(
+                        new Application( viaBodies.get( fi.tirFuncName )!, UPLCConst.int( fuzzSeed ) )
+                    );
+                    if( fuzzResult.result instanceof CEKError )
+                    {
+                        fuzzerFailure = {
+                            passed: false,
+                            budgetSpent: zeroBudget(),
+                            logs: fuzzResult.logs.slice(),
+                            error: { msg: `'via' fuzzer for parameter '${paramName}' errored (fuzzer seed=${fuzzSeed}): ` + ( fuzzResult.result.msg ?? "" ) },
+                            inputs,
+                        };
+                        break;
+                    }
+                    if(!( fuzzResult.result instanceof CEKConst ))
+                    {
+                        fuzzerFailure = {
+                            passed: false,
+                            budgetSpent: zeroBudget(),
+                            logs: [],
+                            error: { msg: `'via' fuzzer for parameter '${paramName}' returned a non-constant value; fuzzers must produce plain (constant-representable) values` },
+                            inputs,
+                        };
+                        break;
+                    }
+                    const fuzzedConst = new UPLCConst( fuzzResult.result.type, fuzzResult.result.value as any );
+                    inputs.push({ name: paramName, value: showUPLCConstValue( fuzzResult.result.value ) });
+                    args.push( fuzzedConst );
+                }
+                else throw new Error("unreachable: unsupported fuzzer after skip check");
+            }
+
+            if( fuzzerFailure )
+            {
+                iterations.push( fuzzerFailure );
+                passedAll = false;
+                break;
+            }
+
+            const { iter } = evalWithArgs( args );
+            iter.inputs = inputs;
+            iterations.push( iter );
+            totalBudget = addBudget( totalBudget, iter.budgetSpent );
+
+            if( !iter.passed )
             {
                 passedAll = false;
-                break; // early exit on first failure (Phase 1; shrinking is Phase 2)
+
+                // ── Shrinking ──────────────────────────────────────────
+                // Greedy minimization, only when every parameter is a
+                // TS-side "typed" sample (a `via` value cannot be shrunk;
+                // its seed is reported instead). Shrink evaluations do NOT
+                // count toward `totalBudget`.
+                if( desc.fuzzerInfos.every( fi => fi.kind === "typed" ) )
+                {
+                    const MAX_SHRINK_EVALS = 200;
+                    let evals = 0;
+                    let best = samples as TypedSample[];
+                    let bestIter = iter;
+                    let steps = 0;
+                    let improved = true;
+                    while( improved && evals < MAX_SHRINK_EVALS )
+                    {
+                        improved = false;
+                        outer:
+                        for( let p = 0; p < best.length; p++ )
+                        {
+                            for( const cand of best[p].shrinks() )
+                            {
+                                if( evals >= MAX_SHRINK_EVALS ) break outer;
+                                evals++;
+                                const candSamples = best.slice();
+                                candSamples[p] = cand;
+                                const candArgs = candSamples.map( s => s.term() );
+                                const { iter: candIter } = evalWithArgs( candArgs );
+                                if( !candIter.passed )
+                                {
+                                    best = candSamples;
+                                    bestIter = candIter;
+                                    steps++;
+                                    improved = true;
+                                    break outer;
+                                }
+                            }
+                        }
+                    }
+                    if( steps > 0 )
+                    {
+                        bestIter.inputs = best.map( ( s, k ) => ({
+                            name: desc.paramNames[k] ?? `param${k}`,
+                            value: _sampleInputValue( s )
+                        }));
+                        iterations.push( bestIter );
+                        shrinkSteps = steps;
+                    }
+                }
+                break;
             }
         }
 
@@ -373,6 +494,7 @@ export class Compiler
             iterations,
             totalBudget,
             seed,
+            shrinkSteps,
         };
     }
 
@@ -438,6 +560,21 @@ export class Compiler
             return serialized;
         });
     }
+}
+
+/**
+ * Raw scalar values render natively in reports (bigint, boolean, bytes);
+ * aggregates use the sample's own pebble-ish `show` string. SoP-encoded
+ * samples have no constant view at all, so `show` is the only option.
+ */
+function _sampleInputValue( sample: TypedSample ): unknown
+{
+    try {
+        const rt = sample.runtime();
+        if( typeof rt === "bigint" || typeof rt === "boolean" || rt instanceof Uint8Array )
+        return rt;
+    } catch {}
+    return sample.show;
 }
 
 interface HasFuncitonName {

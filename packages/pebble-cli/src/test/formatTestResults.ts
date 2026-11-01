@@ -51,8 +51,14 @@ export function formatTestResults(
                 }
                 else
                 {
-                    const failedIter = r.iterations[ r.iterations.length - 1 ];
-                    lines.push( `  ${tag}  ${r.name}  (failed at iteration ${ran}, ${seedStr})` );
+                    // when the runner shrank the failing tuple, the LAST
+                    // iteration entry holds the minimal inputs and the
+                    // second-to-last the original failure
+                    const shrunk = typeof r.shrinkSteps === "number" && r.shrinkSteps > 0;
+                    const failedIter = r.iterations[ r.iterations.length - ( shrunk ? 2 : 1 ) ];
+                    const minimalIter = shrunk ? r.iterations[ r.iterations.length - 1 ] : undefined;
+                    const failedAt = shrunk ? ran - 1 : ran;
+                    lines.push( `  ${tag}  ${r.name}  (failed at iteration ${failedAt}, ${seedStr})` );
                     if( failedIter?.inputs && failedIter.inputs.length > 0 )
                     {
                         const inp = failedIter.inputs
@@ -60,10 +66,18 @@ export function formatTestResults(
                             .join( ", " );
                         lines.push( `        inputs: ${inp}` );
                     }
-                    if( failedIter?.error?.msg ) lines.push( `        error:  ${failedIter.error.msg}` );
-                    if( failedIter?.logs && failedIter.logs.length > 0 )
+                    if( minimalIter?.inputs && minimalIter.inputs.length > 0 )
                     {
-                        for( const log of failedIter.logs ) lines.push( `        trace:  ${log}` );
+                        const inp = minimalIter.inputs
+                            .map( i => `${i.name}=${_renderValue( i.value )}` )
+                            .join( ", " );
+                        lines.push( `        minimal inputs (after ${r.shrinkSteps} shrink steps): ${inp}` );
+                    }
+                    const reportIter = minimalIter ?? failedIter;
+                    if( reportIter?.error?.msg ) lines.push( `        error:  ${reportIter.error.msg}` );
+                    if( reportIter?.logs && reportIter.logs.length > 0 )
+                    {
+                        for( const log of reportIter.logs ) lines.push( `        trace:  ${log}` );
                     }
                 }
                 continue;

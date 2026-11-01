@@ -1,3 +1,4 @@
+import { getUnaliased } from "../../tir/types/utils/getUnaliased";
 import { isObject } from "@harmoniclabs/obj-utils";
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { getUniqueInternalName } from "../../internalVar";
@@ -347,7 +348,15 @@ export class ExpressifyCtx
         const lettedRawFieldsName = getUniqueInternalName(`${varName}_fields`);
         const lettedFields = this.introduceLettedConstant(
             lettedRawFieldsName,
-            new TirCallExpr(
+            // untagged structs are `listData( fields )`: no constructor to unwrap
+            structType.untagged
+            ? new TirCallExpr(
+                TirNativeFunc.unListData,
+                [ structExpr ],
+                new TirListT( data_t ),
+                structExpr.range
+            )
+            : new TirCallExpr(
                 TirNativeFunc.unConstrDataResultFields,
                 [new TirCallExpr(
                     TirNativeFunc.unConstrData,
@@ -425,7 +434,9 @@ export class ExpressifyCtx
         implicitAssertions: TirAssertStmt[],
         nestedDeconstructs: TirVarDecl[]
     } {
-        const structType = stmt.type;
+        // aliases of data structs (e.g. `AccountId` = Credential) deconstruct
+        // exactly like the struct they alias
+        const structType = getUnaliased( stmt.type );
         if(!( stmt.initExpr )) throw new Error("expected init expr in deconstruct data statement");
         if(!( structType instanceof TirDataStructType )) throw new Error("expected data struct type in deconstruct data statement");
 
@@ -440,9 +451,13 @@ export class ExpressifyCtx
 
         const structExpr = lettedInitExpr ?? stmt.initExpr;
 
-        const lettedUnconstrName = getUniqueInternalName(`${varName}_unconstrPair`);
-        const lettedUnconstr = this.introduceLettedConstant(
-            lettedUnconstrName,
+        const assertions: TirAssertStmt[] = [];
+        const nestedDeconstructs: TirVarDecl[] = [];
+
+        // untagged structs are `listData( fields )`: there is no
+        // constructor pair to unwrap and no tag to check
+        const lettedUnconstr = structType.untagged ? undefined : this.introduceLettedConstant(
+            getUniqueInternalName(`${varName}_unconstrPair`),
             new TirCallExpr(
                 TirNativeFunc.unConstrData,
                 [ structExpr ],
@@ -452,14 +467,11 @@ export class ExpressifyCtx
             stmt.range
         );
 
-        const assertions: TirAssertStmt[] = [];
-        const nestedDeconstructs: TirVarDecl[] = [];
-
         // the runtime tag is the constructor's index in the ORIGINAL
         // (un-narrowed) type — for narrowed types (e.g. `Contract.State`,
         // `Struct.Constructor`) the local index would be wrong, and the
         // tag must be checked even when only one LOCAL constructor exists.
-        if( structType.constructors.length > 1 || structType.isNarrowed() )
+        if( lettedUnconstr && ( structType.constructors.length > 1 || structType.isNarrowed() ) )
         assertions.push(
             new TirAssertStmt(
                 new TirEqualExpr(
@@ -483,9 +495,16 @@ export class ExpressifyCtx
         const lettedRawFieldsName = getUniqueInternalName(`${varName}_fields`);
         const lettedFields = this.introduceLettedConstant(
             lettedRawFieldsName,
-            new TirCallExpr(
+            lettedUnconstr
+            ? new TirCallExpr(
                 TirNativeFunc.unConstrDataResultFields,
                 [ lettedUnconstr ],
+                new TirListT( data_t ),
+                stmt.range
+            )
+            : new TirCallExpr(
+                TirNativeFunc.unListData,
+                [ structExpr ],
                 new TirListT( data_t ),
                 stmt.range
             ),

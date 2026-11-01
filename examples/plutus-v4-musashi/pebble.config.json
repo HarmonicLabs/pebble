@@ -1,0 +1,7 @@
+{
+  "compilerVersion": ">=0.5.0",
+  "entry": "./src/index.pebble",
+  "outDir": "./out",
+  "removeTraces": false,
+  "targetPlutusVersion": "experimental-v4"
+}

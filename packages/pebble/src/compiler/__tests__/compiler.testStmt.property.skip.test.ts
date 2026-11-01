@@ -5,12 +5,11 @@ import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
 import { TestResult } from "../test/TestResult";
 
 /**
- * Coverage for property tests the Phase-1 runner cannot execute: parameters
- * whose type has no built-in fuzzer, and parameters annotated with a
- * user-defined fuzzer via `via <expr>` (parsed and type-checked, but not yet
- * executable).
+ * Coverage for property tests the runner cannot execute: parameters whose
+ * type has no built-in fuzzer (runtime/SoP-encoded types, function types)
+ * and no usable `via` expression.
  *
- * In both cases `Compiler.test()` returns a `property` `TestResult` with
+ * In those cases `Compiler.test()` returns a `property` `TestResult` with
  * `passed: false`, an empty `iterations` array, and a populated
  * `skippedReason`. See `_runOneTest` in src/compiler/Compiler.ts and
  * `FuzzerInfo` in src/compiler/tir/statements/TirTestStmt.ts.
@@ -29,12 +28,15 @@ async function runTestSuite(
     return { compiler, results };
 }
 
-describe("test feature — unsupported / deferred fuzzers are skipped, not crashed", () => {
+describe("test feature — unsupported fuzzers are skipped, not crashed", () => {
 
-    test("a parameter type with no built-in fuzzer is skipped with a reason", async () => {
+    test("a list of runtime (SoP) structs has no built-in fuzzer and is skipped", async () => {
         const { compiler, results } = await runTestSuite(`
-test needs_a_fuzzer( b: bytes ) {
-    assert std.bytes.length( b ) >= 0 else "x";
+runtime struct Point {
+    Point { x: int, y: int }
+}
+test needs_a_fuzzer( ps: List<Point> ) {
+    assert true else "x";
 }`);
         // the program itself is well-typed — skipping is a runner decision,
         // not a compile error
@@ -46,48 +48,49 @@ test needs_a_fuzzer( b: bytes ) {
         expect( r.iterations ).toEqual( [] );
         expect( r.totalBudget ).toEqual( { cpu: 0n, mem: 0n } );
         expect( r.skippedReason ).toBeDefined();
-        // the message names the offending parameter and points at `via`
-        expect( r.skippedReason ).toContain( "b" );
+        // the message names the offending parameter and points at the fix
+        expect( r.skippedReason ).toContain( "ps" );
         expect( r.skippedReason ).toContain( "no default fuzzer" );
-        expect( r.skippedReason ).toContain( "via" );
     });
 
-    test("`via <expr>` is parsed and type-checked but reported as not-yet-executable", async () => {
-        const { compiler, results } = await runTestSuite(`
-test custom_fuzzer( a: int via 0 ) {
+    test("a 'via' expression whose type matches neither fuzzer shape is skipped", async () => {
+        const { results } = await runTestSuite(`
+test bad_via( a: int via ( x: bytes ) => 0 ) {
     assert a == a else "x";
 }`);
-        // `via 0` type-checks, so no diagnostics
-        expect( compiler.diagnostics ).toEqual( [] );
-
         const r = results[0];
         expect( r.kind ).toBe( "property" );
         expect( r.passed ).toBe( false );
         expect( r.iterations ).toEqual( [] );
         expect( r.skippedReason ).toBeDefined();
         expect( r.skippedReason!.toLowerCase() ).toContain( "via" );
-        expect( r.skippedReason ).toContain( "Phase 2" );
     });
 
     test("if any one parameter is unsupported the whole property test is skipped", async () => {
         // first param has a built-in fuzzer, second does not
         const { results } = await runTestSuite(`
-test mixed_support( n: int, b: bytes ) {
+runtime struct Wrap {
+    Wrap { v: int }
+}
+test mixed_support( n: int, w: List<Wrap> ) {
     assert n == n else "x";
 }`);
         const r = results[0];
         expect( r.passed ).toBe( false );
         expect( r.iterations ).toEqual( [] );
-        expect( r.skippedReason ).toContain( "b" );
+        expect( r.skippedReason ).toContain( "w" );
     });
 
     test("a skipped test does not prevent sibling tests from running", async () => {
         const { results } = await runTestSuite(`
+runtime struct Wrap {
+    Wrap { v: int }
+}
 test unit_ok() {
     assert 1 + 1 == 2 else "x";
 }
-test prop_skipped( b: bytes ) {
-    assert std.bytes.length( b ) >= 0 else "x";
+test prop_skipped( w: List<Wrap> ) {
+    assert true else "x";
 }
 test prop_ok( n: int ) {
     assert n == n else "x";

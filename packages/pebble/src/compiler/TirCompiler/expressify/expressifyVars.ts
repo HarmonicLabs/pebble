@@ -424,9 +424,8 @@ function expressifyPropAccess(
             // LCA with the usual case-branch barriers.
             //
             // Mutable subjects are excluded (a reassignment would make the
-            // cached extraction stale); multi-constructor and untagged
-            // structs keep the inline lowering below (they need a tag
-            // match / a different decode shape).
+            // cached extraction stale); multi-constructor structs keep
+            // the inline lowering below (they need a tag match).
             if( varName === undefined && resolution.definingCtx !== undefined )
             {
                 const subjType = getUnaliased( expr.type );
@@ -442,7 +441,6 @@ function expressifyPropAccess(
                     isConstSubject
                     && subjType instanceof TirDataStructType
                     && subjType.constructors.length === 1
-                    && !subjType.untagged
                     && subjType.constructors[0].fields.some( f => f.name === prop )
                 ) {
                     resolution.definingCtx.introduceSingleConstrDataLettedFields(

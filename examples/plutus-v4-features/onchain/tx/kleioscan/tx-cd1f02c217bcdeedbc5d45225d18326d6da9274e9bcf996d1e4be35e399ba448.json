@@ -1,0 +1,124 @@
+{
+  "hash": "cd1f02c217bcdeedbc5d45225d18326d6da9274e9bcf996d1e4be35e399ba448",
+  "block_no": 37362,
+  "block_hash": "5e04c962db11dc45a41e8141b37351c8ce46b549598bc6c989cfe33f5a675d3c",
+  "block_index": 169,
+  "time": "2026-10-27T18:03:08Z",
+  "out_sum": "9957465545",
+  "fee": "2000000",
+  "deposit": "0",
+  "size": 1585,
+  "script_size": 968,
+  "valid_contract": true,
+  "invalid_before": null,
+  "invalid_hereafter": null,
+  "inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9959465545",
+      "src_tx_hash": "048dfd10e2879820e77416093528e88f80201168ff98357e9a17f3418821565b",
+      "src_index": 0,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "outputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9957465545",
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "spent_by_tx": null,
+      "assets": []
+    }
+  ],
+  "metadata": [],
+  "trade": null,
+  "scripts": [
+    {
+      "purpose": "propose",
+      "index": 0,
+      "script_hash": null,
+      "script_type": null,
+      "script_size": null,
+      "unit_mem": "2000000",
+      "unit_steps": "1000000000",
+      "redeemer_json": {
+        "fields": [
+          {
+            "int": 1
+          }
+        ],
+        "constructor": 6
+      },
+      "datum_json": null,
+      "script_cbor": null,
+      "script_json": null,
+      "withdrawal_amount": null
+    }
+  ],
+  "parent_tx": null,
+  "sub_txs": [
+    "d3374a0dbe9604e54247fbe06dd8839bdd045350e1a01253d2a2dd352dd9f607"
+  ],
+  "proposals": [],
+  "reference_inputs": [],
+  "collateral_inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "19806949",
+      "src_tx_hash": "e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c",
+      "src_index": 0,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "collateral_return": {
+    "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+    "value": "16806949",
+    "has_inline_datum": false,
+    "has_datum_hash": false,
+    "has_ref_script": false,
+    "datum_hash": null,
+    "datum_json": null,
+    "datum_cbor": null,
+    "ref_script_hash": null,
+    "ref_script_type": null,
+    "ref_script_cbor": null,
+    "pay_script_type": null,
+    "spent_by_tx": null,
+    "assets": [],
+    "assets_descr": "fromList []"
+  },
+  "certificates": [],
+  "withdrawals": [],
+  "mint": [],
+  "votes": [],
+  "required_signers": []
+}

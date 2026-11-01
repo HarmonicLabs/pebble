@@ -1,0 +1,104 @@
+{
+  "hash": "22b4675dc685a79c79a42e705989c878ed46feb6b680387cd079b709145d5f36",
+  "block_no": 37310,
+  "block_hash": "d8a7455d3c0bc6c72a170ceac3d996afe5a34cbc9aa3d89771c397e588050e49",
+  "block_index": 295,
+  "time": "2026-10-27T17:44:23Z",
+  "out_sum": "9961465545",
+  "fee": "1500000",
+  "deposit": "0",
+  "size": 1671,
+  "script_size": 0,
+  "valid_contract": true,
+  "invalid_before": null,
+  "invalid_hereafter": null,
+  "inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9962965545",
+      "src_tx_hash": "7e16948c216c58d6d77a798f87adf1481ef62f62a39f82428d04b7db7dd9b2ef",
+      "src_index": 1,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "outputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9961465545",
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "spent_by_tx": "048dfd10e2879820e77416093528e88f80201168ff98357e9a17f3418821565b",
+      "assets": []
+    }
+  ],
+  "metadata": [],
+  "trade": null,
+  "scripts": [],
+  "parent_tx": null,
+  "sub_txs": [
+    "5abad9c5334a7ba924099db5de3f2197370adfc71d7726cef1ba4e1636652552"
+  ],
+  "proposals": [],
+  "reference_inputs": [],
+  "collateral_inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "19806949",
+      "src_tx_hash": "e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c",
+      "src_index": 0,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "collateral_return": {
+    "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+    "value": "16806949",
+    "has_inline_datum": false,
+    "has_datum_hash": false,
+    "has_ref_script": false,
+    "datum_hash": null,
+    "datum_json": null,
+    "datum_cbor": null,
+    "ref_script_hash": null,
+    "ref_script_type": null,
+    "ref_script_cbor": null,
+    "pay_script_type": null,
+    "spent_by_tx": null,
+    "assets": [],
+    "assets_descr": "fromList []"
+  },
+  "certificates": [],
+  "withdrawals": [],
+  "mint": [],
+  "votes": [],
+  "required_signers": [
+    "5f4f2c92cad820eeab9e21c7aa197c6678353da4a2b2fc5450713ec8"
+  ]
+}

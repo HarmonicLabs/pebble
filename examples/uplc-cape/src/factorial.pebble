@@ -1,0 +1,16 @@
+// UPLC-CAPE `factorial` scenario (open optimization).
+//
+// Contract per scenarios/factorial/factorial.md:
+//   factorial(n) = n * factorial(n-1) for n > 0,
+//   factorial(n) = 1 for n <= 0 (handles zero and negative inputs).
+//
+// Implementation: iterative accumulator loop (lowered to one tail-recursive
+// UPLC function), O(n) multiplications.
+
+export function factorial( n: int ): int {
+    let acc = 1;
+    for( let i = 2; i <= n; i++ ) {
+        acc = acc * i;
+    }
+    return acc;
+}

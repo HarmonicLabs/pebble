@@ -1,4 +1,4 @@
-import { DataConstr } from "@harmoniclabs/plutus-data";
+import { DataConstr, DataList } from "@harmoniclabs/plutus-data";
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { IRCase } from "../../../IR/IRNodes/IRCase";
 import { IRConst } from "../../../IR/IRNodes/IRConst";
@@ -289,16 +289,21 @@ export function _inlineSingleSopConstrToData(
 
     const constr = sop_t.constructors[0];
 
+    // untagged: `listData( fields )` instead of `constrData( 0, fields )`
+    const wrapFields = ( fieldsIR: IRTerm ): IRTerm => sop_t.untagged
+        ? _ir_apps( IRNative.listData, fieldsIR )
+        : _ir_apps( IRNative.constrData, IRConst.int( 0 ), fieldsIR );
+
     if( constr.fields.length === 0 )
-    return new IRHoisted( IRConst.data( new DataConstr( 0, [] ) ) );
+    return new IRHoisted( IRConst.data(
+        sop_t.untagged ? new DataList( [] ) : new DataConstr( 0, [] )
+    ) );
 
     if( constr.fields.length === 1 ) {
         const value_t = getUnaliased( constr.fields[0].type );
         if( !isTirType( value_t ) ) throw new Error("TirFromDataExpr: unreachable");
 
-        return _ir_apps(
-            IRNative.constrData,
-            IRConst.int( 0 ),
+        return wrapFields(
             _ir_apps(
                 IRNative.mkCons,
                 _inlineToData(
@@ -329,9 +334,7 @@ export function _inlineSingleSopConstrToData(
         );
     }
 
-    return _ir_apps(
-        IRNative.constrData,
-        IRConst.int( 0 ),
+    return wrapFields(
         new IRCase(
             exprIR, [
                 new IRFunc(

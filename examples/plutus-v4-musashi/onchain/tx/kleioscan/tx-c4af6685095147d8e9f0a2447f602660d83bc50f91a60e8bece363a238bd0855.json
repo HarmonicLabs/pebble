@@ -1,0 +1,92 @@
+{
+  "hash": "c4af6685095147d8e9f0a2447f602660d83bc50f91a60e8bece363a238bd0855",
+  "block_no": 37049,
+  "block_hash": "8f3fd9249d995f5393dd8fd832d0bb479508c4c91201c0870629405a9ef9a00f",
+  "block_index": 237,
+  "time": "2026-10-27T15:54:55Z",
+  "out_sum": "9999827283",
+  "fee": "172717",
+  "deposit": "0",
+  "size": 293,
+  "script_size": 0,
+  "valid_contract": true,
+  "invalid_before": null,
+  "invalid_hereafter": null,
+  "inputs": [
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "10000000000",
+      "src_tx_hash": "6c9274f73b17f30d7c6084c7812374d175d8a1cedd893c1f1a5d5b519184c18f",
+      "src_index": 0,
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "assets": []
+    }
+  ],
+  "outputs": [
+    {
+      "address": "addr_test1wrqjvamq3ay89286mqxuv92rcx9vuuel9chghtqz8e8j74st4fjza",
+      "value": "20000000",
+      "has_inline_datum": true,
+      "has_datum_hash": true,
+      "has_ref_script": false,
+      "datum_hash": "7104815e55da3cc8a160cefce33cbd2dec472630914f7c2995d04f451ec41a2a",
+      "datum_json": {
+        "fields": [
+          {
+            "bytes": "4b857d3a2545a0982f2bec7e01117c0958fa08a3cb53300b5fff888d991874ac"
+          },
+          {
+            "int": 1793116482000
+          }
+        ],
+        "constructor": 0
+      },
+      "datum_cbor": "d8799f58204b857d3a2545a0982f2bec7e01117c0958fa08a3cb53300b5fff888d991874ac1b000001a17e1229d0ff",
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": "plutusV4",
+      "spent_by_tx": "e36e3e7a37d6ade13951d793c8646b17105ffafffc7acce7681a822ba2c6195c",
+      "assets": []
+    },
+    {
+      "address": "addr_test1vp057tyjetvzpm4tncsu02se03n8sdfa5j3t9lz52pcnajqfsxtga",
+      "value": "9979827283",
+      "has_inline_datum": false,
+      "has_datum_hash": false,
+      "has_ref_script": false,
+      "datum_hash": null,
+      "datum_json": null,
+      "datum_cbor": null,
+      "ref_script_hash": null,
+      "ref_script_type": null,
+      "ref_script_cbor": null,
+      "pay_script_type": null,
+      "spent_by_tx": null,
+      "assets": []
+    }
+  ],
+  "metadata": [],
+  "trade": null,
+  "scripts": [],
+  "parent_tx": null,
+  "sub_txs": [],
+  "proposals": [],
+  "reference_inputs": [],
+  "collateral_inputs": [],
+  "collateral_return": null,
+  "certificates": [],
+  "withdrawals": [],
+  "mint": [],
+  "votes": [],
+  "required_signers": []
+}

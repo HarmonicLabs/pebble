@@ -3,9 +3,10 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 async function main() {
-    const pkgRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+    const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const pkgPath = path.join(pkgRoot, "package.json");
     const outPath = path.join(pkgRoot, "src", "version.generated.ts");
 

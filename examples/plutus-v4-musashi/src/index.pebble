@@ -1,0 +1,26 @@
+// A hash lock compiled for Plutus V4 (`targetPlutusVersion: "experimental-v4"`).
+//
+// Spending reads three different parts of the V4 script context, so a
+// successful execution on chain shows that the V4 context (list-encoded
+// `ScriptContext`, `Tx` and `POSIXTimeRange`, plutus-ledger-api >= 1.69)
+// decodes correctly:
+//   - the datum (`state`): the hash to match and the earliest unlock time;
+//   - the redeemer: the secret;
+//   - the transaction's validity interval: its lower bound must be set
+//     and not earlier than `notBefore`.
+// Being level-less, the method is top-level only: it fails inside a
+// sub-transaction (CIP-0118).
+
+contract HashLockV4 {
+    state Locked {
+        secretHash: bytes;
+        notBefore: int;
+
+        spend unlock( secret: bytes ) {
+            const { tx, state } = context;
+            assert std.crypto.sha2_256( secret ) == state.secretHash else "wrong secret";
+            const Some{ value: from } = tx.validityInterval.fromInclusive;
+            assert from >= state.notBefore else "too early";
+        }
+    }
+}

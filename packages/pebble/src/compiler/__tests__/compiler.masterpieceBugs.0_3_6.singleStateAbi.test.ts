@@ -4,7 +4,7 @@ import { Compiler } from "../Compiler";
 import { fromUtf8, fromHex } from "@harmoniclabs/uint8array-utils";
 import { parseUPLC, UPLCConst, Application } from "@harmoniclabs/uplc";
 import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
-import { DataConstr, DataI, DataB, Data } from "@harmoniclabs/plutus-data";
+import { DataConstr, DataList, DataI, DataB, Data } from "@harmoniclabs/plutus-data";
 
 // single-state contract, mirroring Ownership's `Free { coords }` shape
 const SRC = `
@@ -51,7 +51,8 @@ function evalWith( flat: Uint8Array, datum: Data ): string {
     return r instanceof CEKError ? "ERROR: " + String( r.msg ?? "" ).slice( 0, 70 ) : "ACCEPT";
 }
 
-const coords = new DataConstr( 0, [ new DataI(0), new DataI(0), new DataI(4), new DataI(4) ] );
+// `Coords` is declared in shortcut form, so it is list-encoded
+const coords = new DataList([ new DataI(0), new DataI(0), new DataI(4), new DataI(4) ]);
 const bare = coords;                                 // datum = the single state's fields directly?
 const wrapped = new DataConstr( 0, [ coords ] );     // datum = Constr 0 [ coords ]
 
