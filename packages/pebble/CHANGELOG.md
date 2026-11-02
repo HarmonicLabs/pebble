@@ -2,6 +2,57 @@
 
 All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are documented in this file.
 
+## v0.6.0
+
+Milestone 3: sourcemaps. A failing script now says where it failed in the Pebble
+source, in `pebble test`, in buildooor and in any tool using
+`@harmoniclabs/plutus-machine` 3.1.0.
+
+### Sourcemaps
+
+- `pebble compile` and `pebble export` write a source map next to the script,
+  `out/out.flat.map` (and `<output>.map` with `-o`). The script itself does not
+  change: maps on or off, the bytes are identical (checked on every example, the
+  four masterpiece contracts and the UPLC-CAPE exports).
+- `pebble test` prints the location of a failure and the open calls:
+
+  ```text
+    FAIL  small_input  [cpu: 1190152, mem: 6404]
+          error: explicit error from uplc
+          at check (src/index.pebble:6:5)
+          at entry (src/index.pebble:11:15)
+          at test small_input (src/index.test.pebble:4:26)
+  ```
+
+  `--json` gains `location` and `stack` next to `error`; `TestIterationResult.error`
+  gains `location` and `stack`.
+- Locations are right where optimizations would mislead a simpler resolver: two
+  asserts merged into one `error` report the one whose condition was false; an
+  `if( x ) fail;` whose `error` branch is pruned reports the `if`; a helper the
+  optimizer copied into its caller still gets its own frame, pointing at the call.
+- Options: `sourceMap` (default `true`) and `sourceMapContent` (include the source
+  texts, for tools that print the failing line). `Compiler.compileWithSourceMap()`
+  and `Compiler.exportWithSourceMap()` return the program and its map without
+  writing files.
+- The map format belongs to `@harmoniclabs/plutus-machine` (version 1, see its
+  README); buildooor 0.3.0 reads it (`sourceMaps` option).
+
+### Fixes
+
+- `fail "message";` was a type error ("Type 'bytes' is not assignable to type
+  'string'"): `fail` did not cast the string literal as `assert ... else` does.
+- Statement ranges, used by diagnostics: declarations started at the end of the
+  previous statement (on the line before); an `assert` covered only its `;`
+  (or only the keyword, with `else`); `fail` and `trace` only their last token;
+  `match` started after its keyword.
+- `pebble export -o` and `pebble compile -o` copied `out.flat` before it was written
+  (a 0-byte file): the compiler awaited none of its writes.
+- `completeCompilerOptions` replaced the caller's `targetUplcVersion` with the
+  default.
+- A REPL line no longer writes `out/out.flat`.
+- `pebble test` without `compilerVersion` in the config uses the running compiler,
+  as `pebble compile` does.
+
 ## v0.5.0
 
 Milestone 2 release: the built-in test framework is complete, and the
