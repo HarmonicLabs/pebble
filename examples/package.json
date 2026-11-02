@@ -12,7 +12,8 @@
     "preprod:vesting": "tsx linear-vesting/offchain/preprod.ts",
     "preprod:escrow": "tsx two-party-escrow/offchain/preprod.ts",
     "preprod": "npm run preprod:vesting && npm run preprod:escrow",
-    "demo:sourcemap": "cd two-party-escrow && npx pebble compile && tsx offchain/refund-too-early.ts"
+    "demo:sourcemap": "cd two-party-escrow && npx pebble compile && tsx offchain/refund-too-early.ts",
+    "golden:sourcemap": "cd two-party-escrow && npx pebble compile && tsx offchain/sourcemap-golden.ts && cd ../linear-vesting && npx pebble compile && tsx offchain/sourcemap-golden.ts"
   },
   "dependencies": {
     "@harmoniclabs/blockfrost-pluts": "^0.5.1",
