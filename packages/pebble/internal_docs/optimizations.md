@@ -105,7 +105,7 @@ DFS traversal with a reprocessing stack. When a term is rewritten, its parent is
 
 ## Pass 2: Dead Code Elimination
 
-**File:** `src/IR/toUPLC/subRoutines/removeUnusuedVarsAndReturnRoot/`
+**File:** `src/IR/toUPLC/subRoutines/removeUnusedVarsAndReturnRoot/`
 
 Removes unused function parameters and their corresponding arguments.
 
