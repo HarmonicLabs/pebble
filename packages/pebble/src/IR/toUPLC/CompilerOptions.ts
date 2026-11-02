@@ -165,6 +165,21 @@ export interface CompilerOptions {
      *   declarations derive against whichever family is selected.
      */
     targetPlutusVersion: TargetPlutusVersion;
+    /**
+     * write a source map next to the compiled program (`out.flat.map`), which
+     * `pebble test`, buildooor and the LSP use to report failures in the source.
+     * The map never changes the script.
+     *
+     * @default true
+     */
+    sourceMap?: boolean;
+    /**
+     * include the source texts in the source map (`sourcesContent`), so that
+     * failures can show the failing line without access to the sources
+     *
+     * @default false
+     */
+    sourceMapContent?: boolean;
 }
 
 export type TargetPlutusVersion = "v3" | "experimental-v4";
@@ -266,11 +281,17 @@ export function completeCompilerOptions(
     complete: Partial<CompilerOptions> = defaultOptions as Partial<CompilerOptions>
 ): CompilerOptions
 {
-    let targetUplcVersion = options.targetUplcVersion instanceof UPLCVersion ? complete.targetUplcVersion : defaultTargetUplcVersion;
     complete = {
         ...(defaultOptions as Partial<CompilerOptions>),
         ...complete
     };
+    // the caller's version wins (it used to be dropped for the default's); duck-typed,
+    // since the CLI may hold its own copy of the uplc package
+    const targetUplcVersion = (
+        isUPLCVersionLike( options.targetUplcVersion ) ? options.targetUplcVersion :
+        isUPLCVersionLike( complete.targetUplcVersion ) ? complete.targetUplcVersion :
+        defaultTargetUplcVersion
+    );
     let uplcOptimizations = options.uplcOptimizations as CompilerUplcOptimizations;
     if( typeof options.uplcOptimizations === "boolean" )
     {
@@ -303,6 +324,17 @@ export function completeCompilerOptions(
         encodingStrategy: options.encodingStrategy ?? complete.encodingStrategy ?? "minimal",
         targetPlutusVersion: normalizeTargetPlutusVersion(
             options.targetPlutusVersion ?? complete.targetPlutusVersion
-        )
+        ),
+        sourceMap: options.sourceMap ?? complete.sourceMap ?? true,
+        sourceMapContent: options.sourceMapContent ?? complete.sourceMapContent ?? false,
     };
+}
+
+function isUPLCVersionLike( v: unknown ): v is UPLCVersion
+{
+    return (
+        typeof v === "object" && v !== null &&
+        typeof ( v as UPLCVersion ).major === "number" &&
+        typeof ( v as UPLCVersion ).isV3Friendly === "function"
+    );
 }

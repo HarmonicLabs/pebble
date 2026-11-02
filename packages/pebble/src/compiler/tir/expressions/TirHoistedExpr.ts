@@ -23,14 +23,22 @@ export class TirHoistedExpr
         return this.expr.type;
     }
 
+    /** the use's range for a clone standing for one use (see `cloneAtUse`), else the definition's */
     get range(): SourceRange {
-        return this.expr.range;
+        return this.useRange ?? this.expr.range;
     }
 
     constructor(
         readonly varName: string,
-        public expr: TirExpr
+        public expr: TirExpr,
+        readonly useRange?: SourceRange
     ) {}
+
+    /** a clone standing for one use: its IR takes the use's range */
+    cloneAtUse( useRange: SourceRange ): TirHoistedExpr
+    {
+        return new TirHoistedExpr( this.varName, this.expr, useRange );
+    }
 
     toString(): string
     {
@@ -55,6 +63,7 @@ export class TirHoistedExpr
         return new TirHoistedExpr(
             this.varName,
             this.expr,
+            this.useRange
         );
     }
 
@@ -67,6 +76,7 @@ export class TirHoistedExpr
         return new TirHoistedExpr(
             this.varName,
             this.expr, // this.expr.clone(),
+            this.useRange
         );
     }
 

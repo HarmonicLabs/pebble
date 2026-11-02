@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { UPLCTerm } from "@harmoniclabs/uplc";
 import { BasePlutsError } from "../../utils/BasePlutsError";
 import { Cloneable } from "../../utils/Cloneable";
@@ -96,8 +97,11 @@ export class IRRecursive
         
         // keep the parent reference in the old child, useful for compilation
         // _body.parent = undefined;
+        const replaced = this._body;
         this._body = newBody;
         this._body.parent = this;
+        // sourcemaps: the new body takes the old one's place
+        inheritRange( newBody, replaced );
     }
 
     private _parent: IRParentTerm | undefined;
@@ -118,11 +122,13 @@ export class IRRecursive
 
     clone(): IRRecursive
     {
-        return new IRRecursive(
+        const cloned = new IRRecursive(
             this.name,
             this._body.clone(),
             this._hash
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
 
     toJSON() { return this.toJson(); }

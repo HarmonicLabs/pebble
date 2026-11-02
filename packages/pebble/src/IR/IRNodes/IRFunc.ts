@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
 import { BasePlutsError } from "../../utils/BasePlutsError";
 import { ToJson } from "../../utils/ToJson";
@@ -46,7 +47,7 @@ export class IRFunc
         const arity = this.params.length;
         const irBody = this._body;
         // IRRecursive not valid for uplc translation
-        let result = irBody.toUPLC( ctx );
+        let result = ctx.convert( irBody );
         for( let i = 0; i < arity; i++ ) result = new Lambda( result );
         return result;
     }
@@ -93,8 +94,11 @@ export class IRFunc
         
         // keep the parent reference in the old child, useful for compilation
         // _body.parent = undefined;
+        const replaced = this._body;
         this._body = newBody;
         this._body.parent = this;
+        // sourcemaps: the new body takes the old one's place
+        inheritRange( newBody, replaced );
     }
 
     readonly meta: IRFuncMetadata
@@ -118,10 +122,12 @@ export class IRFunc
 
     clone(): IRFunc
     {
-        return new IRFunc(
+        const cloned = new IRFunc(
             this.params, // .slice() in constructor
             this._body.clone()
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson(): any

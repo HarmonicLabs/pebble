@@ -28,6 +28,7 @@ import { IRNative } from "../../../IRNodes/IRNative";
 import { isForcedNativeTag } from "../../../IRNodes/IRNative/isForcedNative";
 import { lettedToStr, prettyIRInline } from "../../../utils/showIR";
 import { IRNativeTag } from "../../../IRNodes/IRNative/IRNativeTag";
+import { mergeRanges } from "../../../sourceMap/irRanges";
 
 let __handleLettedCallN = 0;
 export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
@@ -371,8 +372,11 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             continue;
         }
 
+        // from here on one value is bound for every reference (sourcemaps)
+        for( const ref of sameLettedRefs ) mergeRanges( letted.value, ref.value );
+
         let lca: IRTerm | undefined = minScope ?? sameLettedRefs[0];
-        
+
         // const forceHoist = false && sameLettedRefs.some( letted => letted.meta.forceHoist === true );
     
         for( let j = 1; j < sameLettedRefs.length; j++ )

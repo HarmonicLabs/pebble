@@ -12,6 +12,7 @@ import { TirFuncT } from "../types/TirNativeType/native/function";
 import { IRTerm } from "../../../IR/IRTerm";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
 import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
+import { irMeta, isSourceRange } from "../../../IR/sourceMap/irRanges";
 import type { TirExpr } from "./TirExpr";
 
 export class TirFuncExpr
@@ -70,9 +71,12 @@ export class TirFuncExpr
         );
     }
 
+    /** the name stack traces show, when `name` is an internal one (e.g. `test my_test`) */
+    displayName: string | undefined = undefined;
+
     clone(): TirExpr
     {
-        return new TirFuncExpr(
+        const cloned = new TirFuncExpr(
             this.name,
             this.params.slice(),
             this.returnType.clone(),
@@ -80,6 +84,8 @@ export class TirFuncExpr
             this.range.clone(),
             this._isLoop
         );
+        cloned.displayName = this.displayName;
+        return cloned;
     }
 
     // / **
@@ -150,9 +156,20 @@ export class TirFuncExpr
         if( isRecursive ) recursiveVarSym = ctx.defineRecursiveVar( this.name );
         const introuducedVars = this.params.map( param => ctx.defineVar( param.name ) );
 
+        const irBody = expr.toIR( ctx );
+        // sourcemaps: evaluating the body's root enters this function, wherever the
+        // optimizer moves or copies the body; loops are part of their enclosing function
+        if( !this.isLoop && isSourceRange( this.range ) && !this.range.source.isLibrary() )
+        {
+            irMeta( irBody ).fnEntry = {
+                name: this.displayName ?? ( this.name.length > 0 ? this.name : "<anonymous>" ),
+                range: this.range
+            };
+        }
+
         let irFunc: IRTerm = this.params.length === 0
-            ? new IRDelayed( expr.toIR( ctx ) )
-            : new IRFunc( introuducedVars, expr.toIR( ctx ) );
+            ? new IRDelayed( irBody )
+            : new IRFunc( introuducedVars, irBody );
         if( isRecursive ) irFunc = new IRRecursive( recursiveVarSym!, irFunc );
 
         return irFunc;

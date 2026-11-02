@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { Compiler, CompilerOptions, productionOptions, TestResult } from "@harmoniclabs/pebble";
+import { Compiler, CompilerOptions, COMPILER_VERSION, productionOptions, TestResult } from "@harmoniclabs/pebble";
 import { createFsIo } from "../utils/crateFsIo";
 import { normalizeRoot, isRecord } from "../utils/miscellaneous";
 import { discoverTestFiles } from "./discoverTestFiles";
@@ -46,6 +46,12 @@ export async function runTestsCommand(
         } catch {
             // ignore malformed config
         }
+    }
+    // as `pebble compile` does: without a config range, test with THIS compiler
+    // (an explicit range in the config still wins and is checked)
+    if( typeof baseConfig?.compilerVersion !== "string" || baseConfig.compilerVersion.length === 0 )
+    {
+        baseConfig = { ...baseConfig, compilerVersion: COMPILER_VERSION } as CompilerOptions;
     }
 
     const testPathPattern = flags.testPathPattern ? new RegExp( flags.testPathPattern ) : undefined;
@@ -131,6 +137,9 @@ export async function runTestsCommand(
                         budgetSpent: { cpu: it.budgetSpent.cpu.toString(), mem: it.budgetSpent.mem.toString() },
                         logs: it.logs,
                         error: it.error?.msg,
+                        // where the evaluation failed in the source, and the open calls
+                        location: it.error?.location,
+                        stack: it.error?.stack,
                         inputs: it.inputs?.map( i => ({
                             name: i.name,
                             value: _jsonInputValue( i.value )

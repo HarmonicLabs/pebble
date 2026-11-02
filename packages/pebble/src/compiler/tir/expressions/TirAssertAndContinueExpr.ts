@@ -1,5 +1,6 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
-import { _ir_apps } from "../../../IR/IRNodes/IRApp";
+import { _ir_apps, IRApp } from "../../../IR/IRNodes/IRApp";
+import { irMeta, isSourceRange } from "../../../IR/sourceMap/irRanges";
 import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import { IRError } from "../../../IR/IRNodes/IRError";
 import { IRForced } from "../../../IR/IRNodes/IRForced";
@@ -22,7 +23,9 @@ export class TirAssertAndContinueExpr
     constructor(
         public conditions: TirExpr[],
         public continuation: TirExpr,
-        readonly range: SourceRange
+        readonly range: SourceRange,
+        /** range of the assert statement of each condition */
+        public assertRanges: SourceRange[] = []
     ) {}
 
     toString(): string
@@ -52,7 +55,8 @@ export class TirAssertAndContinueExpr
         return new TirAssertAndContinueExpr(
             this.conditions.map( c => c.clone() ),
             this.continuation.clone(),
-            this.range.clone()
+            this.range.clone(),
+            this.assertRanges.slice()
         );
     }
 
@@ -64,11 +68,13 @@ export class TirAssertAndContinueExpr
         if( assertions.length <= 0 ) return continuation;
 
         const correctAssertions = assertions.map( a => a.toSafeCondition() );
+        const assertRanges = assertions.map( a => a.range );
         assertions.length = 0;
         return new TirAssertAndContinueExpr(
             correctAssertions,
             continuation,
-            continuation.range
+            continuation.range,
+            assertRanges
         );
     }
 
@@ -88,23 +94,55 @@ export class TirAssertAndContinueExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const irContinuation = this.continuation.toIR( ctx );
-        
+
         if( this.conditions.length <= 0 ) return irContinuation;
 
-        let irConditions: IRTerm = this.conditions.pop()!.toIR( ctx );
+        // sourcemaps: the conditions share one `error`, which has a location only when it
+        // stands for a single assert; the glue around them belongs to no assert
+        const nConditions = this.conditions.length;
+        const lastAssertRange = this.assertRanges.pop();
+        let irConditions: IRTerm = markAssertCondition( this.conditions.pop()!.toIR( ctx ), lastAssertRange );
 
-        irConditions = this.conditions.reduce(( ir, cond ) => _ir_apps(
+        irConditions = this.conditions.reduce(( ir, cond, i ) => withoutRange( _ir_apps(
             IRNative._strictAnd,
             ir,
-            cond.toIR( ctx ),
-        ), irConditions );
+            markAssertCondition( cond.toIR( ctx ), this.assertRanges[i] ),
+        )), irConditions );
 
-        return new IRForced( _ir_apps(
+        const error = new IRError();
+        error.meta.range = nConditions === 1 && isSourceRange( lastAssertRange ) ? lastAssertRange : null;
+        const delayedContinuation = new IRDelayed( irContinuation );
+        const delayedError = new IRDelayed( error );
+        delayedContinuation.meta.range = null;
+        delayedError.meta.range = null;
+
+        const forced = new IRForced( withoutRange( _ir_apps(
             IRNative.strictIfThenElse,
             irConditions,
-            new IRDelayed( irContinuation ),
-            new IRDelayed( new IRError() )
-        ));
+            delayedContinuation,
+            delayedError
+        )));
+        forced.meta.range = null;
+        return forced;
     }
-    
+
+}
+
+function markAssertCondition( ir: IRTerm, assertRange: SourceRange | undefined ): IRTerm
+{
+    if( isSourceRange( assertRange ) ) irMeta( ir ).assertCond = assertRange;
+    return ir;
+}
+
+/** `null` range on an application spine and its function; the arguments keep theirs */
+function withoutRange( app: IRTerm ): IRTerm
+{
+    let node: IRTerm = app;
+    while( node instanceof IRApp )
+    {
+        node.meta.range = null;
+        node = node.fn;
+    }
+    irMeta( node ).range = null;
+    return app;
 }

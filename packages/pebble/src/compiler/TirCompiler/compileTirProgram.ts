@@ -1,6 +1,7 @@
 import { IRTerm } from "../../IR";
 import { CompilerOptions } from "../../IR/toUPLC/CompilerOptions";
 import { TirFuncExpr } from "../tir/expressions/TirFuncExpr";
+import { installIRRangeStamping } from "../tir/expressions/installIRRangeStamping";
 import { ToIRTermCtx } from "../tir/expressions/ToIRTermCtx";
 import { TypedProgram } from "../tir/program/TypedProgram";
 import { expressify } from "./expressify/expressify";
@@ -18,6 +19,9 @@ export function compileTypedProgram(
     tirProgram: TypedProgram
 ): IRTerm
 {
+    // IR nodes record the source range they come from (sourcemaps)
+    installIRRangeStamping();
+
     /*
     const ctx = new TirCompilerCtx(
         cfg,

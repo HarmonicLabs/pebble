@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
 import { BasePlutsError } from "../../utils/BasePlutsError";
 import { ToJson } from "../../utils/ToJson";
@@ -38,7 +39,7 @@ export class IRForced
     }
 
     toUPLC(ctx: ToUplcCtx): UPLCTerm {
-        return new Force( this.forced.toUPLC( ctx ) );
+        return new Force( ctx.convert( this.forced ) );
     }
 
     private _hash: IRHash | undefined;
@@ -79,8 +80,11 @@ export class IRForced
         // keep the parent reference in the old child, useful for compilation
         // _forced.parent = undefined;
         
+        const replaced = this._forced;
         this._forced = newForced;
         this._forced.parent = this;
+        // sourcemaps: the new child takes the old one's place
+        inheritRange( newForced, replaced );
     }
 
     private _parent: IRParentTerm | undefined;
@@ -105,10 +109,12 @@ export class IRForced
 
     clone(): IRForced
     {
-        return new IRForced(
+        const cloned = new IRForced(
             this.forced.clone(),
             this._hash
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson(): any

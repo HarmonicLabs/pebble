@@ -28,6 +28,7 @@ import { introduceCaseForDualHeadTailAndReturnRoot } from "./subRoutines/introdu
 import { inlineSingleUseLetBindingsAndReturnRoot } from "./subRoutines/inlineSingleUseLetBindingsAndReturnRoot";
 import { _debug_assertClosedIR, onlyHoistedAndLetted, prettyIR, prettyIRJsonStr, prettyIRText } from "../utils";
 import { ToUplcCtx } from "./ctx/ToUplcCtx";
+import type { UplcMarks } from "../sourceMap/uplcMarks";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusedVarsAndReturnRoot/removeUnusedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
 import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/ensureProperlyForcedBuiltinsAndReturnRoot";
@@ -89,15 +90,20 @@ function dbgClosed( term: IRTerm, stage: string ): void
     }
 }
 
+/**
+ * @param marks when given, receives the source information of every term of the result
+ * (see `buildSourceMap`)
+ */
 export function compileIRToUPLC(
     term: IRTerm,
-    paritalOptions: Partial<CompilerOptions> = defaultOptions
+    paritalOptions: Partial<CompilerOptions> = defaultOptions,
+    marks?: UplcMarks
 ): UPLCTerm
 {
     __stageT0 = Date.now();
     // most of the time we are just compiling small
     // pre-execuded terms (hence constants)
-    if( term instanceof IRConst ) return term.toUPLC();
+    if( term instanceof IRConst ) return ToUplcCtx.root( marks ).convert( term );
 
     ///////////////////////////////////////////////////////////////////////////////
     // ------------------------------------------------------------------------- //
@@ -214,7 +220,7 @@ export function compileIRToUPLC(
     if(
         term instanceof IRNative ||
         term instanceof IRConst // while we are at it
-    ) return term.toUPLC();
+    ) return ToUplcCtx.root( marks ).convert( term );
 
     ///////////////////////////////////////////////////////////////////////////////
     // ------------------------------------------------------------------------- //
@@ -400,8 +406,7 @@ export function compileIRToUPLC(
         console.error( "===IR-DUMP-BEGIN===\n" + prettyIRText( term, 2 ) + "\n===IR-DUMP-END===" );
     }
 
-    // const srcmap = {};
-    const uplc = term.toUPLC( ToUplcCtx.root() );
+    const uplc = ToUplcCtx.root( marks ).convert( term );
 
     if( !isClosedTerm( uplc ) ) {
         console.error(
@@ -412,8 +417,6 @@ export function compileIRToUPLC(
             "This is a compiler internal error; please open an issue on github so we can fix this."
         );
     }
-
-    // console.log( "srcmap", srcmap );
 
     __dbgStageReport();
 

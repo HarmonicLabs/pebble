@@ -109,10 +109,12 @@ export class IRVar
 
     clone(): IRVar
     {
-        return new IRVar(
+        const cloned = new IRVar(
             this.name,
             this._hash
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
 
     toJSON() { return this.toJson(); }

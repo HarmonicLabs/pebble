@@ -71,7 +71,7 @@ export class IRConstr
             return new Constr( this.index, [] );
         }
 
-        const fields = mapArrayLike( this.fields, f => f.toUPLC( ctx ) );
+        const fields = mapArrayLike( this.fields, f => ctx.convert( f ) );
         
         return new Constr( this.index, fields );
     }

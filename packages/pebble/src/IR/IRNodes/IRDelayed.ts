@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
 import { BasePlutsError } from "../../utils/BasePlutsError";
 import { ToJson } from "../../utils/ToJson";
@@ -40,7 +41,7 @@ export class IRDelayed
     }
 
     toUPLC(ctx: ToUplcCtx): UPLCTerm {
-        return new Delay( this.delayed.toUPLC( ctx ) );
+        return new Delay( ctx.convert( this.delayed ) );
     }
 
     private _hash: IRHash | undefined;
@@ -85,8 +86,11 @@ export class IRDelayed
         // keep the parent reference in the old child, useful for compilation
         // _delayed.parent = undefined;
         
+        const replaced = this._delayed;
         this._delayed = newDelayed;
         this._delayed.parent = this;
+        // sourcemaps: the new child takes the old one's place
+        inheritRange( newDelayed, replaced );
     }
 
     private _parent: IRParentTerm | undefined;
@@ -107,10 +111,12 @@ export class IRDelayed
 
     clone(): IRDelayed
     {
-        return new IRDelayed(
+        const cloned = new IRDelayed(
             this.delayed.clone(),
             this._hash
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson(): any

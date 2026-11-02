@@ -1,5 +1,5 @@
 import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, showUPLCConstValue, UPLCConst, UPLCProgram, UPLCTerm } from "@harmoniclabs/uplc";
-import { CEKConst, CEKError, Machine } from "@harmoniclabs/plutus-machine";
+import { CEKConst, CEKError, locateFailure, Machine, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
 import { DiagnosticCategory } from "../diagnostics/DiagnosticCategory";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
@@ -12,6 +12,8 @@ import { compileTypedProgram } from "./TirCompiler/compileTirProgram";
 import { toHex } from "@harmoniclabs/uint8array-utils";
 import { CompilationCtx, withCompilationCtx } from "../IR/CompilationCtx";
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
+import { buildSourceMap } from "../IR/sourceMap/buildSourceMap";
+import type { UplcMarks } from "../IR/sourceMap/uplcMarks";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
 import { TirFuncExpr } from "./tir/expressions/TirFuncExpr";
@@ -19,6 +21,7 @@ import { CheckResult } from "./SourceTypeMap";
 import { SourceRange } from "../ast/Source/SourceRange";
 import {
     TestBudget,
+    TestError,
     TestInput,
     TestIterationResult,
     TestResult,
@@ -33,6 +36,7 @@ import { TirType } from "./tir/types/TirType";
 export { CheckResult, SourceTypeMap, TypeEntry, MemberInfo } from "./SourceTypeMap";
 export {
     TestBudget,
+    TestError,
     TestIterationResult,
     TestResult,
     TestKind,
@@ -78,12 +82,31 @@ export class Compiler
         return await astCompiler.check();
     }
 
+    /** compiles the project and writes `out.flat` (and `out.flat.map`, see `sourceMap`) */
     async compile( config?: Partial<CompilerOptions> ): Promise<Uint8Array>
     {
         const cfg = {
             ...this.cfg,
             ...config
         };
+        const compiled = await this._compileProgram( cfg );
+        await this._writeOutputs( cfg, compiled );
+        return compiled.bytes;
+    }
+
+    /** like `compile`, but writes nothing: the program and its source map */
+    async compileWithSourceMap( config?: Partial<CompilerOptions> ): Promise<CompiledWithSourceMap>
+    {
+        const cfg = {
+            ...this.cfg,
+            ...config
+        };
+        const compiled = await this._compileProgram( cfg );
+        return { bytes: compiled.bytes, sourceMap: compiled.sourceMap() };
+    }
+
+    private async _compileProgram( cfg: CompilerOptions ): Promise<CompiledProgram>
+    {
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.compile();
         if( this.diagnostics.length > 0 ) {
@@ -99,7 +122,23 @@ export class Compiler
         return this._compileBackend( cfg, program );
     }
 
+    /** compiles a single function and writes it to `out.flat` (and `out.flat.map`) */
     async export( config: Partial<ExportOptions> & HasFuncitonName ): Promise<Uint8Array>
+    {
+        const cfg = this._exportOptions( config );
+        const compiled = await this._exportProgram( cfg );
+        await this._writeOutputs( cfg, compiled );
+        return compiled.bytes;
+    }
+
+    /** like `export`, but writes nothing: the program and its source map */
+    async exportWithSourceMap( config: Partial<ExportOptions> & HasFuncitonName ): Promise<CompiledWithSourceMap>
+    {
+        const compiled = await this._exportProgram( this._exportOptions( config ) );
+        return { bytes: compiled.bytes, sourceMap: compiled.sourceMap() };
+    }
+
+    private _exportOptions( config: Partial<ExportOptions> & HasFuncitonName ): ExportOptions
     {
         const cfg: ExportOptions = {
             ...this.cfg,
@@ -110,7 +149,11 @@ export class Compiler
         if( typeof cfg.functionName !== "string" || cfg.functionName.length === 0 ) {
             throw new Error("Compiler::export - invalid function name in export options");
         }
+        return cfg;
+    }
 
+    private async _exportProgram( cfg: ExportOptions ): Promise<CompiledProgram>
+    {
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.export( cfg.functionName, cfg.entry );
         // Surface diagnostics instead of silently swallowing them (audit
@@ -152,8 +195,9 @@ export class Compiler
             }
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
-        const serialized = this._compileBackend( cfg, program );
-        const uplcProgram = parseUPLC( serialized );
+        const compiled = this._compileBackend( cfg, program );
+        await this._writeOutputs( cfg, compiled );
+        const uplcProgram = parseUPLC( compiled.bytes );
         // the run-wrapper is always a 0-arg function, which now
         // compiles to `Delay(body)`; force it so the body executes.
         return Machine.eval( new Force( uplcProgram.body ) );
@@ -250,9 +294,9 @@ export class Compiler
         }
         astCompiler.program.contractTirFuncName = desc.tirFuncName;
 
-        let serialized: Uint8Array;
+        let compiled: CompiledProgram;
         try {
-            serialized = this._compileBackend( cfg, astCompiler.program, true );
+            compiled = this._compileBackend( cfg, astCompiler.program );
         } catch ( err ) {
             return _failedTestResult(
                 desc,
@@ -261,11 +305,12 @@ export class Compiler
             );
         }
 
-        const uplcProgram = parseUPLC( serialized );
+        const uplcProgram = parseUPLC( compiled.bytes );
 
         if( !isProperty )
         {
-            const evalResult = Machine.eval( new Force( uplcProgram.body ) );
+            const term = new Force( uplcProgram.body );
+            const evalResult = Machine.eval( term );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
                 cpu: BigInt( evalResult.budgetSpent.cpu ),
@@ -275,7 +320,10 @@ export class Compiler
                 passed: !isErr,
                 budgetSpent: budget,
                 logs: evalResult.logs.slice(),
-                error: isErr ? { msg: ( evalResult.result as CEKError ).msg } : undefined,
+                error: isErr ? {
+                    msg: ( evalResult.result as CEKError ).msg,
+                    ...locateTestFailure( term, uplcProgram.body, compiled )
+                } : undefined,
             };
             return {
                 name: desc.name,
@@ -325,8 +373,8 @@ export class Compiler
                     desc, `fuzzer entry '${fi.tirFuncName}' not found after re-parse`, "property"
                 );
                 viaCompiler.program.contractTirFuncName = fi.tirFuncName;
-                const viaSerialized = this._compileBackend( cfg, viaCompiler.program, true );
-                viaBodies.set( fi.tirFuncName, parseUPLC( viaSerialized ).body );
+                const viaCompiled = this._compileBackend( cfg, viaCompiler.program );
+                viaBodies.set( fi.tirFuncName, parseUPLC( viaCompiled.bytes ).body );
             } catch ( err ) {
                 return _failedTestResult(
                     desc,
@@ -343,7 +391,7 @@ export class Compiler
         let passedAll = true;
         let shrinkSteps: number | undefined = undefined;
 
-        const evalWithArgs = ( args: UPLCTerm[] ): { iter: TestIterationResult } =>
+        const evalWithArgs = ( args: UPLCTerm[] ): { iter: TestIterationResult, term: UPLCTerm } =>
         {
             let app: UPLCTerm = uplcProgram.body;
             for( const arg of args ) app = new Application( app, arg );
@@ -359,8 +407,13 @@ export class Compiler
                     budgetSpent: budget,
                     logs: evalResult.logs.slice(),
                     error: isErr ? { msg: ( evalResult.result as CEKError ).msg } : undefined,
-                }
+                },
+                term: app
             };
+        };
+        // only reported failures are located: shrink candidates are not
+        const locate = ( iter: TestIterationResult, term: UPLCTerm ): void => {
+            if( iter.error ) Object.assign( iter.error, locateTestFailure( term, uplcProgram.body, compiled ) );
         };
 
         for( let i = 0; i < propertyIterations; i++ )
@@ -424,7 +477,7 @@ export class Compiler
                 break;
             }
 
-            const { iter } = evalWithArgs( args );
+            const { iter, term } = evalWithArgs( args );
             iter.inputs = inputs;
             iterations.push( iter );
             totalBudget = addBudget( totalBudget, iter.budgetSpent );
@@ -432,6 +485,7 @@ export class Compiler
             if( !iter.passed )
             {
                 passedAll = false;
+                locate( iter, term );
 
                 // ── Shrinking ──────────────────────────────────────────
                 // Greedy minimization, only when every parameter is a
@@ -444,6 +498,7 @@ export class Compiler
                     let evals = 0;
                     let best = samples as TypedSample[];
                     let bestIter = iter;
+                    let bestTerm = term;
                     let steps = 0;
                     let improved = true;
                     while( improved && evals < MAX_SHRINK_EVALS )
@@ -459,11 +514,12 @@ export class Compiler
                                 const candSamples = best.slice();
                                 candSamples[p] = cand;
                                 const candArgs = candSamples.map( s => s.term() );
-                                const { iter: candIter } = evalWithArgs( candArgs );
+                                const { iter: candIter, term: candTerm } = evalWithArgs( candArgs );
                                 if( !candIter.passed )
                                 {
                                     best = candSamples;
                                     bestIter = candIter;
+                                    bestTerm = candTerm;
                                     steps++;
                                     improved = true;
                                     break outer;
@@ -473,6 +529,7 @@ export class Compiler
                     }
                     if( steps > 0 )
                     {
+                        locate( bestIter, bestTerm );
                         bestIter.inputs = best.map( ( s, k ) => ({
                             name: desc.paramNames[k] ?? `param${k}`,
                             value: _sampleInputValue( s )
@@ -516,18 +573,19 @@ export class Compiler
             }
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
-        const serialized = this._compileBackend( cfg, program );
-        const uplcProgram = parseUPLC( serialized );
+        // a REPL line writes nothing: with real filesystem access it would overwrite the
+        // project's `out.flat` at every line
+        const uplcProgram = parseUPLC( this._compileBackend( cfg, program ).bytes );
         // the repl-wrapper is always a 0-arg function, which now
         // compiles to `Delay(body)`; force it so the body executes.
         return Machine.eval( new Force( uplcProgram.body ) );
     }
 
+    /** compiles to UPLC; writes nothing (see `_writeOutputs`) */
     private _compileBackend(
         cfg: CompilerOptions,
-        program: TypedProgram,
-        skipFileOutput: boolean = false
-    ): Uint8Array
+        program: TypedProgram
+    ): CompiledProgram
     {
         // Run the whole backend under a fresh per-compilation context. All
         // node-level caches (hoisted/letted naming, hoisted->letted lowering,
@@ -541,25 +599,58 @@ export class Compiler
                 cfg,
                 program
             );
-            const uplc = compileIRToUPLC( ir, cfg );
-            const serialized = compileUPLC(
-                new UPLCProgram(
-                    cfg.targetUplcVersion,
-                    uplc
-                )
+            const marks: UplcMarks = new Map();
+            const uplc = compileIRToUPLC( ir, cfg, marks );
+            const uplcProgram = new UPLCProgram(
+                cfg.targetUplcVersion,
+                uplc
             );
+            const bytes = compileUPLC( uplcProgram );
 
-            if( !skipFileOutput )
-            {
-                const outDir = cfg.outDir;
-                const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
-                this.io.writeFile( outPath, serialized, cfg.root );
-                this.io.stdout.write( `compiled program written to ${outPath}\n` );
-            }
-
-            return serialized;
+            // the map costs a walk of the program; most callers never ask for it
+            let sourceMap: UPLCSourceMap | undefined = undefined;
+            return {
+                bytes,
+                sourceMap: () => sourceMap ??= buildSourceMap({
+                    program: uplc,
+                    marks,
+                    serialized: bytes,
+                    version: uplcProgram.version,
+                    compiler: "pebble " + COMPILER_VERSION,
+                    sourcesContent: cfg.sourceMapContent === true,
+                    root: cfg.root,
+                }),
+            };
         });
     }
+
+    /**
+     * writes `out.flat` and, unless `sourceMap` is `false`, its source map `out.flat.map`;
+     * resolves once both are written
+     */
+    private async _writeOutputs( cfg: CompilerOptions, compiled: CompiledProgram ): Promise<void>
+    {
+        const outDir = cfg.outDir;
+        const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
+        await this.io.writeFile( outPath, compiled.bytes, cfg.root );
+        this.io.stdout.write( `compiled program written to ${outPath}\n` );
+        if( cfg.sourceMap === false ) return;
+        await this.io.writeFile( outPath + ".map", JSON.stringify( compiled.sourceMap() ), cfg.root );
+        this.io.stdout.write( `source map written to ${outPath}.map\n` );
+    }
+}
+
+interface CompiledProgram {
+    /** the flat-encoded program */
+    bytes: Uint8Array;
+    /** built on the first call */
+    sourceMap: () => UPLCSourceMap;
+}
+
+export interface CompiledWithSourceMap {
+    /** the flat-encoded program */
+    bytes: Uint8Array;
+    sourceMap: UPLCSourceMap;
 }
 
 /**
@@ -575,6 +666,30 @@ function _sampleInputValue( sample: TypedSample ): unknown
         return rt;
     } catch {}
     return sample.show;
+}
+
+/**
+ * Where a failing test evaluation failed in the source, from the program's source map;
+ * empty when unknown. Locating must never break a test run, so its errors are dropped
+ * (set `PEBBLE_DBG_SOURCEMAP` to see them).
+ */
+function locateTestFailure(
+    term: UPLCTerm,
+    program: UPLCTerm,
+    compiled: CompiledProgram
+): Pick<TestError, "location" | "stack">
+{
+    try {
+        const failure = locateFailure({ term, program, map: compiled.sourceMap() });
+        if( failure === undefined ) return {};
+        return failure.location === undefined
+            ? { stack: failure.stack }
+            : { location: failure.location, stack: failure.stack };
+    }
+    catch( e ) {
+        if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not locate the failure:", e );
+        return {};
+    }
 }
 
 interface HasFuncitonName {

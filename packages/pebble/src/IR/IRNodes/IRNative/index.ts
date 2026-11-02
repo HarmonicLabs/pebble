@@ -131,7 +131,9 @@ export class IRNative
 
     clone(): IRNative
     {
-        return new IRNative( this.tag );
+        const cloned = new IRNative( this.tag );
+        if( isObject( this._meta ) ) cloned._meta = { ...this._meta };
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson()

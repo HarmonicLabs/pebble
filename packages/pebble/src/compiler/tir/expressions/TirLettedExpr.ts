@@ -59,10 +59,33 @@ export class TirLettedExpr
 
     clone(): TirExpr
     {
+        return this.cloneAtUse( this.range );
+    }
+
+    /**
+     * like `cloneAtUse`, but sharing the value's expression,
+     * for the places that hand out this same object to every use
+     */
+    withUseRange( useRange: SourceRange ): TirLettedExpr
+    {
+        return new TirLettedExpr(
+            this.varName,
+            this.expr,
+            useRange,
+            this._irVarSym,
+            this._creationStack,
+            this.siteScoped,
+            this.eagerFnScope
+        );
+    }
+
+    /** a clone standing for one use of the variable: its IR takes the use's range */
+    cloneAtUse( useRange: SourceRange ): TirLettedExpr
+    {
         return new TirLettedExpr(
             this.varName,
             this.expr.clone() as any,
-            this.range.clone(),
+            useRange.clone(),
             this._irVarSym,
             this._creationStack,
             this.siteScoped,

@@ -1,8 +1,14 @@
+import type { UPLCTerm } from "@harmoniclabs/uplc";
+import type { IRTerm } from "../../IRTerm";
+import type { BaseIRMetadata } from "../../IRNodes/BaseIRMetadata";
+import { recordOwnTerms, UplcMarks } from "../../sourceMap/uplcMarks";
 
 export class ToUplcCtx
 {
     readonly parent: ToUplcCtx | undefined;
     readonly ctxMap: Map<symbol, ToUplcCtx>;
+    /** source information of the terms produced so far (sourcemaps); shared by the whole tree */
+    readonly marks: UplcMarks | undefined;
 
     private readonly _variables: symbol[];
 
@@ -14,23 +20,32 @@ export class ToUplcCtx
     }
 
     private _frozen: boolean;
-    
+
     constructor(
         parent: ToUplcCtx | undefined,
         variables: symbol[],
+        marks?: UplcMarks
     ) {
         this.parent = parent;
         this.ctxMap = this.parent?.ctxMap ?? new Map();
+        this.marks = this.parent?.marks ?? marks;
         this._variables = variables;
         for( const v of variables ) this.ctxMap.set( v, this );
     }
 
-    static root(): ToUplcCtx {
-        return new ToUplcCtx( undefined, [] );
+    static root( marks?: UplcMarks ): ToUplcCtx {
+        return new ToUplcCtx( undefined, [], marks );
     }
 
     newChild( variables: symbol[] ): ToUplcCtx {
         return new ToUplcCtx( this, variables );
+    }
+
+    /** `node.toUPLC( this )`, recording which terms the node created (sourcemaps) */
+    convert( node: IRTerm ): UPLCTerm {
+        const uplc = node.toUPLC( this );
+        if( this.marks !== undefined ) recordOwnTerms( uplc, node.meta as BaseIRMetadata, this.marks );
+        return uplc;
     }
 
     getVarDeclDbn( sym: symbol ): number
@@ -105,7 +120,7 @@ export class ToUplcCtx
     expectedDbn( sym: symbol ): number
     {
         const vars = this.allVars();
-        return vars.length - 1 - vars.lastIndexOf( sym )
+        return vars.length - 1 - vars.lastIndexOf( sym );
     }
 
 }

@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { Cloneable } from "../../utils/Cloneable";
 import { ToJson } from "../../utils/ToJson";
 import { IIRTerm, IRTerm } from "../IRTerm";
@@ -63,10 +64,10 @@ export class IRCase
     }
 
     toUPLC(ctx: ToUplcCtx): UPLCTerm {
-        const constrTermUplc = this.constrTerm.toUPLC( ctx );
+        const constrTermUplc = ctx.convert( this.constrTerm );
         const continuationsUplc = mapArrayLike(
             this.continuations,
-            c => c.toUPLC( ctx )
+            c => ctx.convert( c )
         );
 
         return new Case(
@@ -110,8 +111,11 @@ export class IRCase
 
         // keep the parent reference in the old child, useful for compilation
         // constrTerm.parent = undefined;
+        const replaced = this._constrTerm;
         this._constrTerm = newConstrTerm;
         this._constrTerm.parent = this;
+        // sourcemaps: the new child takes the old one's place
+        inheritRange( newConstrTerm, replaced );
     }
 
 

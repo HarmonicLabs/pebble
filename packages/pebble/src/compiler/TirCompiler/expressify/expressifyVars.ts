@@ -141,7 +141,12 @@ export function expressifyVars(
         }
 
         // resovledVariable instanceof TirVariableAccessExpr
-        return resolvedVariable.clone() as (TirLettedExpr | TirNativeFunc | TirHoistedExpr);
+        // the clone stands for this use: its IR takes the use's range (sourcemaps)
+        if(
+            resolvedVariable instanceof TirLettedExpr ||
+            resolvedVariable instanceof TirHoistedExpr
+        ) return resolvedVariable.cloneAtUse( expr.range );
+        return resolvedVariable.clone() as TirNativeFunc;
     }
 
     if( isTirUnaryPrefixExpr( expr ) ) {
@@ -371,7 +376,7 @@ function expressifyPropAccess(
             )
         }
 
-        return expr;
+        return atUse( expr, propAccessExpr.range );
     }
 
     // expressify as normal variable
@@ -470,8 +475,8 @@ function expressifyPropAccess(
                         propAccessExpr.range
                     )
                 }
-    
-                return result;
+
+                return atUse( result, propAccessExpr.range );
             }
 
             // if there is no property in the context
@@ -1192,3 +1197,14 @@ function expressifyListMethodCall(
     */
 }
 
+
+/**
+ * a variable handed out for one use: locals and hoisted definitions take the use's range,
+ * so that their IR points at the use (sourcemaps); the value is shared, as before
+ */
+function atUse<T>( variable: T, useRange: SourceRange ): T
+{
+    if( variable instanceof TirLettedExpr ) return variable.withUseRange( useRange ) as T;
+    if( variable instanceof TirHoistedExpr ) return variable.cloneAtUse( useRange ) as T;
+    return variable;
+}

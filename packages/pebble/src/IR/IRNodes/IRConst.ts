@@ -153,11 +153,13 @@ export class IRConst
 
     clone(): IRConst
     {
-        return new IRConst(
+        const cloned = new IRConst(
             this.type,
             this.value,
             this._hash
         );
+        if( this._meta ) cloned._meta = { ...this._meta };
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson(): any

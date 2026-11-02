@@ -69,7 +69,9 @@ export class IRError
 
     clone(): IRError
     {
-        return new IRError( this.msg, { ...this.addInfos } );
+        const cloned = new IRError( this.msg, { ...this.addInfos } );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson()

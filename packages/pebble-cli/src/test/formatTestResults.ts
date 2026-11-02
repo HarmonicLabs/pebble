@@ -1,5 +1,6 @@
 import * as path from "node:path";
-import { TestResult } from "@harmoniclabs/pebble";
+import { TestError, TestResult } from "@harmoniclabs/pebble";
+import { formatFailureStack, formatSourceLocation } from "@harmoniclabs/plutus-machine";
 
 export interface FormattedSummary {
     totalTests: number;
@@ -75,6 +76,7 @@ export function formatTestResults(
                     }
                     const reportIter = minimalIter ?? failedIter;
                     if( reportIter?.error?.msg ) lines.push( `        error:  ${reportIter.error.msg}` );
+                    for( const l of _failureLines( reportIter?.error ) ) lines.push( `        ${l}` );
                     if( reportIter?.logs && reportIter.logs.length > 0 )
                     {
                         for( const log of reportIter.logs ) lines.push( `        trace:  ${log}` );
@@ -93,6 +95,7 @@ export function formatTestResults(
                     for( const log of it.logs ) lines.push( `        trace: ${log}` );
                 }
                 if( it.error?.msg ) lines.push( `        error: ${it.error.msg}` );
+                for( const l of _failureLines( it.error ) ) lines.push( `        ${l}` );
             }
         }
     }
@@ -104,6 +107,16 @@ export function formatTestResults(
         text: lines.join( "\n" ),
         summary: { totalTests: total, passed, failed, skipped }
     };
+}
+
+/** `at fn (file:line:column)` lines for a located failure, innermost first */
+function _failureLines( error: TestError | undefined ): string[]
+{
+    if( !error ) return [];
+    if( error.stack && error.stack.length > 0 )
+    return formatFailureStack({ message: error.msg ?? "", location: error.location, stack: error.stack });
+    if( error.location ) return [ `at ${formatSourceLocation( error.location )}` ];
+    return [];
 }
 
 function _renderValue( v: unknown ): string

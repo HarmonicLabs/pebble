@@ -1,5 +1,7 @@
 import { IRDelayed } from "./IRDelayed";
 import { IRMetadata } from "../interfaces/IRMetadata";
+import { BaseIRMetadata } from "./BaseIRMetadata";
+import { mergeRanges } from "../sourceMap/irRanges";
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
 import { freezeAll } from "@harmoniclabs/obj-utils";
 import { BasePlutsError } from "../../utils/BasePlutsError";
@@ -31,10 +33,10 @@ export type HoistedSetEntry = {
     nReferences: number
 }
 
-export interface IRHoistedMeta {
+export interface IRHoistedMeta extends BaseIRMetadata {
     /**
      * force hoisting even if only a single reference is found
-     * 
+     *
      * useful to hoist terms used once in recursive expressions
     **/
     forceHoist?: boolean,
@@ -242,11 +244,13 @@ export function getSortedHoistedSet( hoistedTerms: HoistedSetEntry[] ): HoistedS
             }
             else
             {
-                const entry = set[ idxInSet ]; 
+                const entry = set[ idxInSet ];
                 entry.nReferences += thisHoistedEntry.nReferences;
-                entry.hoisted.meta.forceHoist = 
-                    entry.hoisted.meta.forceHoist || 
+                entry.hoisted.meta.forceHoist =
+                    entry.hoisted.meta.forceHoist ||
                     thisHoistedEntry.hoisted.meta.forceHoist;
+                // the bound value stands for both (the references keep their own ranges)
+                mergeRanges( entry.hoisted.hoisted, thisHoistedEntry.hoisted.hoisted );
             }
         }
     }

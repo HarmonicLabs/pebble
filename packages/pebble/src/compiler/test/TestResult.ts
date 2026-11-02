@@ -1,6 +1,15 @@
+import type { ScriptFailureFrame, SourceLocation } from "@harmoniclabs/plutus-machine";
 import { SourceRange } from "../../ast/Source/SourceRange";
 
 export type TestKind = "unit" | "property";
+
+export interface TestError {
+    msg?: string;
+    /** where the evaluation failed in the source (from the program's source map) */
+    location?: SourceLocation;
+    /** function calls open at the failure, innermost first */
+    stack?: ScriptFailureFrame[];
+}
 
 export interface TestBudget {
     cpu: bigint;
@@ -16,7 +25,7 @@ export interface TestIterationResult {
     passed: boolean;
     budgetSpent: TestBudget;
     logs: string[];
-    error?: { msg?: string };
+    error?: TestError;
     /** the fuzzed input tuple for this iteration; undefined for unit tests */
     inputs?: TestInput[];
 }

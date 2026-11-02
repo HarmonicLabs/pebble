@@ -83,6 +83,7 @@ export function _compileTestStmt(
         false // isMethod
     );
     if( !tirFuncExpr ) return false;
+    tirFuncExpr.displayName = "test " + astName;
 
     program.functions.set( tirFuncName, tirFuncExpr );
 

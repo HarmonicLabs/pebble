@@ -94,10 +94,12 @@ export class IRSelfCall
 
     clone(): IRSelfCall
     {
-        return new IRSelfCall(
+        const cloned = new IRSelfCall(
             this.name,
             this._hash
         );
+        Object.assign( cloned.meta, this.meta );
+        return cloned;
     }
     toJSON() { return this.toJson(); }
     toJson(): any

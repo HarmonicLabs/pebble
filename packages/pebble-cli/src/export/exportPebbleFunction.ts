@@ -1,7 +1,6 @@
-import * as path from "node:path";
-import * as fsp from "node:fs/promises";
 import { Compiler } from "@harmoniclabs/pebble";
 import { createFsIo } from "../utils/crateFsIo";
+import { copyOutput } from "../utils/copyOutput";
 import { CliExportOptions } from "./completeExportOptions";
 
 export async function exportPebbleFunction(opts: CliExportOptions): Promise<void> {
@@ -17,10 +16,6 @@ export async function exportPebbleFunction(opts: CliExportOptions): Promise<void
 		outDir
 	});
 
-	if (output && output !== "./out.flat") {
-		const generated = path.resolve(root, outDir, "out.flat");
-		const target = path.isAbsolute(output) ? output : path.resolve(root, output);
-		await fsp.mkdir(path.dirname(target), { recursive: true });
-		await fsp.copyFile(generated, target);
-	}
+	// `export` resolves once the outputs are written, so they can be copied
+	if (output && output !== "./out.flat") await copyOutput(root, outDir, output);
 }

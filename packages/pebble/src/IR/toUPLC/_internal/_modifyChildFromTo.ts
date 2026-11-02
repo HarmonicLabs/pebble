@@ -11,14 +11,28 @@ import { IRCase } from "../../IRNodes/IRCase";
 import { equalIrHash, IRHash, irHashToHex, isIRHash } from "../../IRHash";
 import { IRRecursive } from "../../IRNodes/IRRecursive";
 import { isIRTerm } from "../../utils/isIRTerm";
+import { inheritRange } from "../../sourceMap/irRanges";
 
 /**
- * 
+ *
  * @param parent node to modify the child of
  * @param currentChild mainly passed to distinguish in case of `IRApp`
  * @param newChild new node's child
  */
 export function _modifyChildFromTo(
+    parent: IRParentTerm | undefined,
+    currentChild: IRTerm | IRHash,
+    newChild: IRTerm
+): void
+{
+    const replaced = isIRTerm( currentChild ) ? currentChild : (
+        parent?.children().find( child => equalIrHash( child.hash, currentChild ) )
+    );
+    _replaceChild( parent, currentChild, newChild );
+    inheritRange( newChild, replaced );
+}
+
+function _replaceChild(
     parent: IRParentTerm | undefined,
     currentChild: IRTerm | IRHash,
     newChild: IRTerm

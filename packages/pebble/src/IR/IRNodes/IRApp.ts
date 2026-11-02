@@ -1,3 +1,4 @@
+import { inheritRange } from "../sourceMap/irRanges";
 import { IIRTerm, IRTerm } from "../IRTerm";
 import { IHash } from "../interfaces/IHash";
 import { IIRParent } from "../interfaces/IIRParent";
@@ -50,8 +51,8 @@ export class IRApp
     }
 
     toUPLC( ctx: ToUplcCtx ): UPLCTerm {
-        const arg = this._arg.toUPLC( ctx );
-        const fn = this._fn.toUPLC( ctx );
+        const arg = ctx.convert( this._arg );
+        const fn = ctx.convert( this._fn );
         return new Application( fn, arg );
     }
 
@@ -94,8 +95,11 @@ export class IRApp
                     
         // keep the parent reference in the old child, useful for compilation
         // fn.parent = undefined;
+        const replaced = this._fn;
         this._fn = newFn;
         this._fn.parent = this;
+        // sourcemaps: the new child takes the old one's place
+        inheritRange( newFn, replaced );
     }
 
     private _arg!: IRTerm;
@@ -106,8 +110,11 @@ export class IRApp
 
         // keep the parent reference in the old child, useful for compilation
         // arg.parent = undefined;
+        const replaced = this._arg;
         this._arg = newArg;
         this._arg.parent = this;
+        // sourcemaps: the new child takes the old one's place
+        inheritRange( newArg, replaced );
     }
 
     private _parent: IRParentTerm | undefined;
