@@ -195,7 +195,11 @@ export class Parser extends DiagnosticEmitter
         const tn = this.tn;
         
         let flags = CommonFlags.None;
-        let startPos = tn.pos;
+        // where the statement's first token starts; `tn.pos` is where the
+        // previous statement ended, which put every declaration's range
+        // (diagnostics, sourcemaps) on the line before it
+        tn.peek();
+        let startPos = tn.nextTokenPos;
 
         // `export` keyword
         // `export default` is NOT supported (`export default` should have never exsisted)
@@ -4338,7 +4342,8 @@ export class Parser extends DiagnosticEmitter
         const tn = this.tn;
         // at 'match': Expression '{' MatchStmtCase* '}' ';'
 
-        const startPos = tn.pos;
+        // the `match` keyword's start (`tn.pos`, its end, cut it off the statement's range)
+        const startPos = tn.tokenPos;
 
         // the `{` after the subject opens the match block, not a struct literal
         this._noStructLiteral = true;
@@ -4347,7 +4352,7 @@ export class Parser extends DiagnosticEmitter
         if( !expr )
         return this.error(
             DiagnosticCode.Expression_expected,
-            tn.range( startPos - 5, startPos)
+            tn.range( startPos, startPos + 5 )
         );
 
         if( !tn.skip( Token.OpenBrace ) )
@@ -4445,23 +4450,26 @@ export class Parser extends DiagnosticEmitter
     parseFailStatement(): FailStmt | undefined
     {
         const tn = this.tn;
+        const startPos = tn.tokenPos;
         // at 'fail': Expression? ';'
 
+        // the statement's range is the whole statement (it used to be its last token)
         if(
             tn.skip( Token.Semicolon ) ||
             tn.isNextTokenOnNewLine()
         )
-        return new FailStmt( undefined, tn.range() );
+        return new FailStmt( undefined, tn.range( startPos, tn.pos ) );
 
         const expr = this.parseExpr();
         if( !expr ) return undefined;
-        
-        return new FailStmt( expr, tn.range() );
+
+        return new FailStmt( expr, tn.range( startPos, tn.pos ) );
     }
 
     parseTraceStatement(): TraceStmt | undefined
     {
         const tn = this.tn;
+        const startPos = tn.tokenPos;
         // at 'trace': Expression ';'?
 
         const expr = this.parseExpr();
@@ -4471,7 +4479,7 @@ export class Parser extends DiagnosticEmitter
             tn.range()
         );
 
-        return new TraceStmt( expr, tn.range() );
+        return new TraceStmt( expr, tn.range( startPos, tn.pos ) );
     }
 
     /**
@@ -4538,16 +4546,18 @@ export class Parser extends DiagnosticEmitter
             tn.range()
         );
 
+        // the statement's range is the whole statement: it used to be the last token
+        // (the `;`) without `else`, and the `assert` keyword with it
         if( !tn.skip( Token.Else ) )
         {
             tn.skip( Token.Semicolon );
             return new AssertStmt(
                 condition,
-                undefined, 
-                tn.range()
+                undefined,
+                tn.range( startPos, tn.pos )
             );
         }
-    
+
         const message = this.parseExpr();
         if( !message )
         return this.error(
@@ -4560,7 +4570,7 @@ export class Parser extends DiagnosticEmitter
         return new AssertStmt(
             condition,
             message,
-            tn.range( startPos, startPos + 6)
+            tn.range( startPos, tn.pos )
         );
     }
 
