@@ -13,6 +13,7 @@ import { IRTerm } from "../../../IR/IRTerm";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
 import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import { irMeta, isSourceRange } from "../../../IR/sourceMap/irRanges";
+import { PEBBLE_INTERNAL_IDENTIFIER_PREFIX } from "../../internalVar";
 import type { TirExpr } from "./TirExpr";
 
 export class TirFuncExpr
@@ -162,7 +163,7 @@ export class TirFuncExpr
         if( !this.isLoop && isSourceRange( this.range ) && !this.range.source.isLibrary() )
         {
             irMeta( irBody ).fnEntry = {
-                name: this.displayName ?? ( this.name.length > 0 ? this.name : "<anonymous>" ),
+                name: this.displayName ?? sourceNameOf( this.name ),
                 range: this.range
             };
         }
@@ -174,4 +175,16 @@ export class TirFuncExpr
 
         return irFunc;
     }
+}
+
+/**
+ * the name a function has in the source: internal names (`§` + name + `_` + uid, e.g. the
+ * function a `contract` compiles to) lose prefix and uid
+ */
+function sourceNameOf( name: string ): string
+{
+    if( name.length === 0 ) return "<anonymous>";
+    if( !name.startsWith( PEBBLE_INTERNAL_IDENTIFIER_PREFIX ) ) return name;
+    const stripped = name.slice( PEBBLE_INTERNAL_IDENTIFIER_PREFIX.length ).replace( /_[0-9a-z]+$/, "" );
+    return stripped.length > 0 ? stripped : "<anonymous>";
 }

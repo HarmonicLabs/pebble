@@ -11,14 +11,15 @@
     "compile:escrow": "cd two-party-escrow && npx pebble compile",
     "preprod:vesting": "tsx linear-vesting/offchain/preprod.ts",
     "preprod:escrow": "tsx two-party-escrow/offchain/preprod.ts",
-    "preprod": "npm run preprod:vesting && npm run preprod:escrow"
+    "preprod": "npm run preprod:vesting && npm run preprod:escrow",
+    "demo:sourcemap": "cd two-party-escrow && npx pebble compile && tsx offchain/refund-too-early.ts"
   },
   "dependencies": {
     "@harmoniclabs/blockfrost-pluts": "^0.5.1",
-    "@harmoniclabs/buildooor": "^0.2.9"
+    "@harmoniclabs/buildooor": "^0.3.0"
   },
   "devDependencies": {
-    "@harmoniclabs/pebble-cli": "0.4.3",
+    "@harmoniclabs/pebble-cli": "0.6.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.23.1",
     "typescript": "^5.6.0"
