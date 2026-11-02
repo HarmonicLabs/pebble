@@ -2201,7 +2201,8 @@ export class Parser extends DiagnosticEmitter
 
         // at '[': ( VarDecl ','? )* ']' ( ':' AstTypeExpr )? ( '=' PebbleExpr )?
 
-        const startPos = tn.pos;
+        // the `[`'s start (`tn.pos` is its end)
+        const startPos = tn.tokenPos;
 
         const elems = new Array<VarDecl>();
         let rest: Identifier | undefined = undefined;
@@ -4239,7 +4240,8 @@ export class Parser extends DiagnosticEmitter
         const tn = this.tn;
         // at 'test': Identifier '(' TestParam (',' TestParam)* ')' '{' BlockStmt
 
-        const startPos = tn.pos;
+        // the `test` keyword's start (`tn.pos`, its end, cut it off the statement's range)
+        const startPos = tn.tokenPos;
 
         if( !tn.skipIdentifier() )
         return this.error(
