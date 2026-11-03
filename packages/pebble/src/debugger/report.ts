@@ -37,8 +37,9 @@ export function stmtText( range: SourceRange ): string
     const text = range.source.text;
     const lineStart = text.lastIndexOf( "\n", range.start - 1 ) + 1;
     const before = text.slice( lineStart, range.start ).trimEnd();
-    const from = /[:,]$/.test( before ) ? lineStart : range.start;
-    return text.slice( from, range.end ).split( "\n" )[0].trim();
+    // the whole line: the pattern alone (`{ deadline }`) says little
+    if( /[:,]$/.test( before ) ) return text.slice( lineStart ).split( "\n" )[0].trim();
+    return text.slice( range.start, range.end ).split( "\n" )[0].trim();
 }
 
 export interface DebugVariableJson {

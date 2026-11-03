@@ -46,15 +46,23 @@ source, in `pebble test`, in buildooor and in any tool using
   lists every variable in scope:
 
   ```text
+  spend #0 470f22571c405a0a30678ebb863279b31ffd2845dd0b9e17dd9688c2: 5 steps, failed at step 5
+
   accept  src/index.pebble
-    #1   42  const { tx, spendingRef, state: { deadline } } = context;   deadline = 1000000000
-    #2   44  const sellerPkh = this.seller                   sellerPkh = #008b47844d92812f…
+    #1   42  const { tx, spendingRef, state: { deadline } } = context;  deadline = 1000000000
+    #2   44  const sellerPkh = this.seller                     sellerPkh = #008b47844d92812f…
     #3   45  assert tx.requiredSigners.includes( sellerPkh );
-    #4   49  const Finite{ n: txLatest } = tx.validityInterval.to.boundary   txLatest = 1000001000
-    #5   50  assert txLatest <= deadline;                    <- failed
-               ...
+    #4   49  const Finite{ n: txLatest } = tx.validityInterval.to.boundary  txLatest = 1000001000
+    #5   50  assert txLatest <= deadline;                      <- failed
+               buyer = #0d6a577e9441ad8e…
+               seller = #008b47844d92812f…
+               price = 10000000
+               tx = Tx{ inputs: [TxIn{ … }, TxIn{ … }], refInputs: [], outputs: [TxOut{ … }, TxOut{ … }], fee: 216849, … 12 more }
+               spendingRef = <not evaluated>
                deadline = 1000000000
+               sellerPkh = #008b47844d92812f…
                txLatest = 1000001000
+  failed: explicit error from uplc (cpu 10514744, mem 39056)
   ```
 
   `--step N` prints one step in full (the open calls, every variable with its whole value),
