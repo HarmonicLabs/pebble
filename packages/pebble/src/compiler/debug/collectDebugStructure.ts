@@ -181,6 +181,7 @@ class StructureWalker
             func.range, kind, parent, undefined, definedAt,
             typeof func.displayName === "string" && func.displayName.startsWith( "test " )
         );
+        fn.returnType = func.returnType;
         this.dbg.fnOf.set( func, fn );
         this.dbg.fnOf.set( func.body, fn );
 
@@ -212,6 +213,7 @@ class StructureWalker
             params: [],
             stmts: [],
             isTest,
+            returnType: undefined,
         };
         this.dbg.functions.push( fn );
         return fn;

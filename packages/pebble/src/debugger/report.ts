@@ -69,6 +69,8 @@ export interface DebugStepJson extends SourcePosition {
     budget: { cpu: number, mem: number };
     /** the variables the statement declares, with their values */
     declares: DebugVariableJson[];
+    /** for the `return` that ends a call: the value returned */
+    returns?: { value: unknown, text: string };
     /** the variables in scope before it runs (only for the steps asked for) */
     variables?: DebugVariableJson[];
     /** the open calls, innermost first (only for the steps asked for) */
@@ -141,6 +143,11 @@ export function stepJson( run: DebugRun, step: DebugStep, opts: DebugReportOptio
         declares: run.declaredAt( step.index ).map( v => variableJson( v ) ),
     };
     if( step.frame.fn.kind === "loop" ) out.iteration = step.frame.iteration;
+    if( step.returned !== undefined )
+    {
+        const node = decodeValue( step.returned, functionFrame( step.frame ).fn.returnType );
+        out.returns = { value: valueToJson( node ), text: formatValue( node ) };
+    }
     const detailed = opts.allVariables === true || step.failed || opts.step === step.index + 1;
     if( detailed )
     {
@@ -199,6 +206,7 @@ export function formatDebugRun( run: DebugRun, opts: DebugReportOptions = {} ): 
         const notes: string[] = [];
         const declared = run.declaredAt( step.index ).map( v => `${v.v.name} = ${valueText( v, format )}` ).join( ", " );
         if( declared.length > 0 ) notes.push( declared );
+        if( step.returned !== undefined ) notes.push( "returns " + formatValue( decodeValue( step.returned, fnFrame.fn.returnType ), format ) );
         if( step.frame.fn.kind === "loop" ) notes.push( `(iteration ${step.frame.iteration})` );
         if( step.failed ) notes.push( "<- failed" );
         lines.push(

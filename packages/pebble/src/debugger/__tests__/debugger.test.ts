@@ -110,6 +110,7 @@ describe("debugger", () => {
             "  3 i <= n", "  4 acc = acc + i", "  3 i++",
             "  3 i <= n", "  4 acc = acc + i", "  3 i++",
             "  3 i <= n",
+            "  6 return acc;",
             "31 assert s == 10;",
             "32 const c = classify( 3 )",
             "  10 if( x > 10 ) {",
@@ -171,6 +172,16 @@ describe("debugger", () => {
         expect( stmtText( run.steps[ run.next( inClassify, "out" ) ].stmt.range ) ).toBe( "assert c == 7;" );
         expect( run.prev( callC, "into" ) ).toBe( callC - 1 );
         expect( run.next( run.steps.length - 1, "into" ) ).toBe( -1 );
+    });
+
+    test("the return that ends a call carries the value returned", async () => {
+        const run = await debugTest( FIXTURE, "sums" );
+        const returns = run.steps
+            .filter( s => s.returned !== undefined )
+            .map( s => `${stmtText( s.stmt.range )} ${valueText({ v: { type: undefined } as any, status: "value", value: s.returned!, state: -1 } as any )}` );
+        // `return acc;` has no term of its own left (the loop's result is computed where it
+        // is used): it shows at the call's exit; `return x;` returns from inside the loop
+        expect( returns ).toEqual([ "return acc; 10", "return y; 7", "return x; 7", "return 2; 2" ]);
     });
 
     test("a passing test shows every statement", async () => {

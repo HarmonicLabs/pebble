@@ -51,6 +51,8 @@ export interface DebugFunction {
     readonly stmts: DebugStmt[];
     /** a test (`test name() {}`) */
     readonly isTest: boolean;
+    /** what it returns (loops: `undefined`) */
+    readonly returnType: TirType | undefined;
 }
 
 export interface DebugStmt {
