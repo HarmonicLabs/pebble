@@ -10,6 +10,7 @@ import { IRLetted } from "../../../IR/IRNodes/IRLetted";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import { IRVar } from "../../../IR/IRNodes/IRVar";
 import type { IRTerm } from "../../../IR/IRTerm";
+import { failRangeOfDropped, irMeta } from "../../../IR/sourceMap/irRanges";
 import { _ir_lazyIfThenElse } from "../../../IR/tree_utils/_ir_lazyIfThenElse";
 import { _ir_let, _ir_let_sym } from "../../../IR/tree_utils/_ir_let";
 import { filterSortedStrArrInplace } from "../../../utils/array/filterSortedStrArrInplace";
@@ -142,6 +143,18 @@ export class TirCaseExpr
      * "find the matching arm (or wildcard), extract any bound fields, run
      * the body".
      */
+    /**
+     * sourcemaps: `caseIR` lost the failing branches `dropped` (a value with no branch fails
+     * just the same): failing there is the failure they stood for, or else no arm matching
+     */
+    private _withFailRange( caseIR: IRTerm, dropped: IRTerm[] ): IRTerm
+    {
+        if( dropped.length === 0 ) return caseIR;
+        const failRange = failRangeOfDropped( dropped, this.range );
+        if( failRange !== undefined ) irMeta( caseIR ).failRange = failRange;
+        return caseIR;
+    }
+
     private _untaggedDataStructToIR(
         matchExprType: TirDataStructType,
         ctx: ToIRTermCtx
@@ -195,7 +208,7 @@ export class TirCaseExpr
             const varDecl = pattern.fields.get( f.name );
             if(!( varDecl instanceof TirSimpleVarDecl ))
                 throw new Error("case pattern not expressified.");
-            const sym = branchCtx.defineVar( varDecl.name );
+            const sym = branchCtx.defineVar( varDecl.name, varDecl );
             return {
                 sym,
                 extract: _inlineFromData(
@@ -235,11 +248,12 @@ export class TirCaseExpr
             return branch ? branch.body.toIR( ctx ) : wildcardBodyIR.clone();
         });
 
+        const dropped: IRTerm[] = [];
         while( branches.length > 0 && branches[ branches.length - 1 ] instanceof IRError )
-            branches.pop();
+            dropped.push( branches.pop()! );
 
         return branches.length > 0
-            ? new IRCase( this.matchExpr.toIR( ctx ), branches )
+            ? this._withFailRange( new IRCase( this.matchExpr.toIR( ctx ), branches ), dropped )
             : new IRError();
     }
 
@@ -262,7 +276,7 @@ export class TirCaseExpr
                 const varDecl = someBranch.pattern.fields.values().next().value;
                 if(!( varDecl instanceof TirSimpleVarDecl ))
                 throw new Error("case pattern not expressified.");
-                someBranchVarSym = someBranchCtx.defineVar( varDecl.name );
+                someBranchVarSym = someBranchCtx.defineVar( varDecl.name, varDecl );
                 someValueType = varDecl.type;
             }
             const someBranchIR = someBranch?.body.toIR( someBranchCtx ) ?? wildcardBodyIR.clone();
@@ -336,7 +350,7 @@ export class TirCaseExpr
                     if(!(varDecl instanceof TirSimpleVarDecl ))
                     throw new Error("case pattern not expressified.");
 
-                    introducedVars[i] = branchCtx.defineVar( varDecl.name );
+                    introducedVars[i] = branchCtx.defineVar( varDecl.name, varDecl );
                 }
 
                 // console.log( nFields, introducedVars, branchCtx.allVariables() );
@@ -368,14 +382,15 @@ export class TirCaseExpr
         // branches at the end that are supposed to "just fail"
         // can be omitted, as the CEK machine will fail if no branch for
         // a given constructor is found
+        const dropped: IRTerm[] = [];
         while(
             branches[ branches.length - 1 ] instanceof IRError
-        ) branches.pop();
+        ) dropped.push( branches.pop()! );
 
-        return branches.length > 0 ? new IRCase(
+        return branches.length > 0 ? this._withFailRange( new IRCase(
             this.matchExpr.toIR( ctx ),
             branches
-        ) : new IRError() ; // all branches fail, so the whole expression fails
+        ), dropped ) : new IRError() ; // all branches fail, so the whole expression fails
     }
 
     private _dataStructToIR(
@@ -471,7 +486,8 @@ export class TirCaseExpr
                                 )
                             )
                         )
-                    )
+                    ),
+                    patternVarDecl
                 );
             }
 
@@ -490,13 +506,14 @@ export class TirCaseExpr
 
         // trailing `IRError` branches can be omitted — the CEK machine
         // fails naturally if no branch exists for the runtime tag
+        const dropped: IRTerm[] = [];
         while(
             innerBranches.length > 0
             && innerBranches[ innerBranches.length - 1 ] instanceof IRError
-        ) innerBranches.pop();
+        ) dropped.push( innerBranches.pop()! );
 
         const innerCase: IRTerm = innerBranches.length > 0
-            ? new IRCase( new IRVar( idxSym ), innerBranches )
+            ? this._withFailRange( new IRCase( new IRVar( idxSym ), innerBranches ), dropped )
             : new IRError();
 
         // outer Case over the pair: single branch destructures (idx, fields)

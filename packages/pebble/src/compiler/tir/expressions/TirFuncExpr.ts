@@ -14,6 +14,7 @@ import { IRFunc } from "../../../IR/IRNodes/IRFunc";
 import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
 import { irMeta, isSourceRange } from "../../../IR/sourceMap/irRanges";
 import { PEBBLE_INTERNAL_IDENTIFIER_PREFIX } from "../../internalVar";
+import { currentDebug } from "../../debug/DebugCollector";
 import type { TirExpr } from "./TirExpr";
 
 export class TirFuncExpr
@@ -155,18 +156,22 @@ export class TirFuncExpr
         ctx = ctx.newChild();
         let recursiveVarSym: symbol | undefined = undefined;
         if( isRecursive ) recursiveVarSym = ctx.defineRecursiveVar( this.name );
-        const introuducedVars = this.params.map( param => ctx.defineVar( param.name ) );
+        const introuducedVars = this.params.map( param => ctx.defineVar( param.name, param ) );
 
         const irBody = expr.toIR( ctx );
+        // debug information: the function, or the loop this function runs one iteration of
+        const debugFn = currentDebug()?.fnOf.get( this ) ?? currentDebug()?.fnOf.get( this.body );
         // sourcemaps: evaluating the body's root enters this function, wherever the
         // optimizer moves or copies the body; loops are part of their enclosing function
         if( !this.isLoop && isSourceRange( this.range ) && !this.range.source.isLibrary() )
         {
             irMeta( irBody ).fnEntry = {
                 name: this.displayName ?? sourceNameOf( this.name ),
-                range: this.range
+                range: this.range,
+                ...( debugFn !== undefined ? { debugFn } : {} )
             };
         }
+        if( this.isLoop && debugFn !== undefined ) irMeta( irBody ).loopEntry = debugFn;
 
         let irFunc: IRTerm = this.params.length === 0
             ? new IRDelayed( irBody )
@@ -181,7 +186,7 @@ export class TirFuncExpr
  * the name a function has in the source: internal names (`§` + name + `_` + uid, e.g. the
  * function a `contract` compiles to) lose prefix and uid
  */
-function sourceNameOf( name: string ): string
+export function sourceNameOf( name: string ): string
 {
     if( name.length === 0 ) return "<anonymous>";
     if( !name.startsWith( PEBBLE_INTERNAL_IDENTIFIER_PREFIX ) ) return name;

@@ -1,3 +1,4 @@
+import type { SourceRange } from "../../../ast/Source/SourceRange";
 import { DiagnosticEmitter } from "../../../diagnostics/DiagnosticEmitter";
 import { DiagnosticMessage } from "../../../diagnostics/DiagnosticMessage";
 import { FuncExpr } from "../../../ast/nodes/expr/functions/FuncExpr";
@@ -169,6 +170,13 @@ export class TypedProgram extends DiagnosticEmitter
 
     /** main */
     public contractTirFuncName: string = "";
+
+    /**
+     * Source names that stand for a variable of another name: a contract method's
+     * `const { tx } = context;` is compiled away, and `tx` reads the dispatch's own variable
+     * (`tirName`). Debug information shows that variable as `name` after `range`.
+     */
+    readonly debugAliases: { name: string, tirName: string, range: SourceRange }[] = [];
 
     readonly stdTypes: StdTypes;
 

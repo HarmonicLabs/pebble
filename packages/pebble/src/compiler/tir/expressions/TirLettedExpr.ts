@@ -6,6 +6,8 @@ import { TirType } from "../types/TirType";
 import { ITirExpr } from "./ITirExpr";
 import { TirExpr } from "./TirExpr";
 import { ToIRTermCtx } from "./ToIRTermCtx";
+import { currentDebug } from "../../debug/DebugCollector";
+import { stampVarValue } from "../../../IR/sourceMap/irDebug";
 
 export class TirLettedExpr
     implements ITirExpr
@@ -95,9 +97,12 @@ export class TirLettedExpr
     
     get isConstant(): boolean { return this.expr.isConstant; }
 
+    /** the symbol every use of this value shares (debug information keys variables by it) */
+    get irVarSym(): symbol { return this._irVarSym; }
+
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
-        return new IRLetted(
+        const letted = new IRLetted(
             this._irVarSym,
             this.expr.toIR( ctx ),
             {
@@ -105,5 +110,14 @@ export class TirLettedExpr
                 ...( this.eagerFnScope ? { eagerFnScope: true } : {} ),
             }
         );
+        // debug information: wherever the value ends up (inlined, bound, hoisted), it is
+        // the value of the variables this letted holds
+        const bindings = currentDebug()?.bindingsOfSymbol( this._irVarSym );
+        if( bindings !== undefined )
+        {
+            stampVarValue( letted, bindings );
+            stampVarValue( letted.value, bindings );
+        }
+        return letted;
     }
 }

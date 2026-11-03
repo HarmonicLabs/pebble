@@ -53,6 +53,7 @@ import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirNativeFunc } from "../../tir/expressions/TirNativeFunc";
 import { TypedProgram } from "../../tir/program/TypedProgram";
 import { TirType } from "../../tir/types/TirType";
+import { debugAssignBinding, debugBindLetted, debugDeclBinding, debugLinkCopy, debugLinkDecl } from "../../debug/debugHooks";
 
 export function expressify(
     func: TirFuncExpr,
@@ -214,6 +215,7 @@ export function expressifyFuncBody(
                 initExpr,
                 stmt.range
             );
+            debugBindLetted( lettedExpr, debugDeclBinding( stmt ) );
             if( !stmt.isConst ) {
                 ctx.setNewVariableName( stmt.name, lettedExpr.varName );
             }
@@ -331,6 +333,7 @@ export function expressifyFuncBody(
                     );
 
                     ctx.setNewVariableName( varDecl.name, lettedField.varName );
+                    debugBindLetted( lettedField, debugDeclBinding( varDecl ) );
                 }
                 continue;
             }
@@ -452,6 +455,7 @@ export function expressifyFuncBody(
                 if( elem instanceof TirSimpleVarDecl )
                 {
                     ctx.setNewVariableName( elem.name, uniqueVarName );
+                    debugBindLetted( lettedElem, debugDeclBinding( elem ) );
                 }
                 else {
                     elem.initExpr = lettedElem;
@@ -890,6 +894,7 @@ export function expressifyFuncBody(
             const reassignedAndFlow = determineReassignedVariablesAndFlowInfos( stmt );
             const returnTypeAndInvalidInit = getBranchStmtReturnType( reassignedAndFlow, ctx, stmt.range );
             const forStmt = loopToForStmt( stmt );
+            debugLinkCopy( forStmt, stmt );
             const { bodyStateType, initState } = getBodyStateType(
                 returnTypeAndInvalidInit,
                 forStmt
@@ -956,6 +961,7 @@ export function expressifyFuncBody(
                     stmt.range
                 );
                 ctx.setNewVariableName( varName, lettedExpr.varName );
+                debugBindLetted( lettedExpr, debugAssignBinding( stmt, varName ) );
 
                 return TirAssertAndContinueExpr.fromStmtsAndContinuation(
                     assertions,
@@ -1097,16 +1103,18 @@ function wrapNonTerminatingFinalStmtAsCaseExpr(
     const contPattern = new TirNamedDeconstructVarDecl(
         sop.constructors[0].name,
         new Map(
-            contFields.map(( f, i ) => [
-                f.name,
-                new TirSimpleVarDecl(
+            contFields.map(( f, i ) => {
+                const decl = new TirSimpleVarDecl(
                     getUniqueInternalName( f.name ),
                     f.type,
                     undefined, // no init expr (pattern is used as case matcher)
                     false, // not a constant
                     stmtRange
-                )
-            ])
+                );
+                // debug information: the value the variable holds after the statement
+                debugLinkDecl( decl, debugAssignBinding( undefined, f.name, stmtRange ) );
+                return [ f.name, decl ];
+            })
         ),
         undefined, // no rest
         sop,

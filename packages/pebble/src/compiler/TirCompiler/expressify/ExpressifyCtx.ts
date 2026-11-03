@@ -25,6 +25,7 @@ import { TirUnConstrDataResultT } from "../../tir/types/TirNativeType";
 import { TirListT } from "../../tir/types/TirNativeType/native/list";
 import { TypedProgram } from "../../tir/program/TypedProgram";
 import { TirVarDecl } from "../../tir/statements/TirVarDecl/TirVarDecl";
+import { debugBindLetted, debugDeclBinding } from "../../debug/debugHooks";
 
 /**
  * Static Single Assignment (SSA) variable name.
@@ -565,6 +566,7 @@ export class ExpressifyCtx
                     fieldVarDecl.name,
                     lettedField.varName
                 );
+                debugBindLetted( lettedField, debugDeclBinding( fieldVarDecl ) );
             }
             else {
                 // fieldVarDecl.type ??= fieldType;
@@ -650,6 +652,7 @@ export class ExpressifyCtx
                     elemVarDecl.name,
                     lettedElem.varName
                 );
+                debugBindLetted( lettedElem, debugDeclBinding( elemVarDecl ) );
 
                 if(
                     lettedElem.type instanceof TirDataStructType

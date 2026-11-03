@@ -1,4 +1,5 @@
 import { inheritRange } from "../sourceMap/irRanges";
+import { noteLambdaBinding } from "../sourceMap/irDebug";
 import { Cloneable } from "@harmoniclabs/cbor/dist/utils/Cloneable";
 import { BasePlutsError } from "../../utils/BasePlutsError";
 import { ToJson } from "../../utils/ToJson";
@@ -48,7 +49,12 @@ export class IRFunc
         const irBody = this._body;
         // IRRecursive not valid for uplc translation
         let result = ctx.convert( irBody );
-        for( let i = 0; i < arity; i++ ) result = new Lambda( result );
+        // the innermost lambda binds the last parameter
+        for( let i = 0; i < arity; i++ )
+        {
+            result = new Lambda( result );
+            noteLambdaBinding( result, this.params[ arity - 1 - i ] );
+        }
         return result;
     }
 

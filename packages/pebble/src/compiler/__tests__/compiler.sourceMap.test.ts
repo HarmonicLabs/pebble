@@ -153,9 +153,10 @@ describe("sourcemaps: failure locations", () => {
             // the standard library's `head` fails: located at the user's call
             t_head_empty: [ "main.pebble:12:18", "firstOf@main.pebble:12:18", "test t_head_empty@main.pebble:33:30" ],
             t_loop:       [ "main.pebble:18:9", "sumPositive@main.pebble:18:9", "test t_loop@main.pebble:34:24" ],
-            // identical code on two lines: each failure keeps its own line
-            t_twin_b:     [ "main.pebble:28:12", "twinB@main.pebble:28:12", "test t_twin_b@main.pebble:35:39" ],
-            t_twin_a:     [ "main.pebble:24:12", "twinA@main.pebble:24:12", "test t_twin_a@main.pebble:36:26" ],
+            // identical code on two lines: each failure keeps its own line (the assert, as
+            // the case the optimizer dropped its failing branch from says)
+            t_twin_b:     [ "main.pebble:28:5", "twinB@main.pebble:28:5", "test t_twin_b@main.pebble:35:39" ],
+            t_twin_a:     [ "main.pebble:24:5", "twinA@main.pebble:24:5", "test t_twin_a@main.pebble:36:26" ],
         });
     });
 
@@ -258,5 +259,26 @@ describe("sourcemaps: the map", () => {
         const failure = locateFailure({ term: applied, map: parseSourceMap( JSON.stringify( sourceMap ) ) });
         expect( at( failure?.location ) ).toBe( "main.pebble:2:5" );
         expect( failure?.stack.map( f => f.functionName ) ).toEqual([ "guarded" ]);
+    });
+
+    test("compiling again in the same process gives the same map", async () => {
+        // `_compTimeDropN` used to hand out its shared `drop` templates, which the passes of
+        // the first compilation rewrote (and stamped with its source); a later compilation
+        // then listed that source too and had terms mapped to it
+        const CONTRACT = lines(
+            "contract Counter {",
+            "    param owner: PubKeyHash;",
+            "    spend take( amount: int ) {",
+            "        const { tx } = context;",
+            "        assert tx.requiredSigners.includes( this.owner );",
+            "        assert tx.fee > amount;",
+            "    }",
+            "}",
+        );
+        const first = await makeCompiler([[ "main.pebble", CONTRACT ]]).compiler.compileWithSourceMap({ entry: "main.pebble", root: "/" });
+        const second = await makeCompiler([[ "main.pebble", CONTRACT ]]).compiler.compileWithSourceMap({ entry: "main.pebble", root: "/" });
+        expect( toHex( second.bytes ) ).toBe( toHex( first.bytes ) );
+        expect( second.sourceMap.sources ).toEqual([ "main.pebble" ]);
+        expect( second.sourceMap ).toEqual( first.sourceMap );
     });
 });

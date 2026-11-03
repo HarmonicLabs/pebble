@@ -1,4 +1,5 @@
 import type { IRHash } from "./IRHash";
+import type { DebugCollector } from "../compiler/debug/DebugCollector";
 
 /**
  * Per-compilation mutable state.
@@ -25,6 +26,8 @@ export class CompilationCtx
     readonly lettedHashToSymbol: Map<IRHash, WeakRef<Symbol>> = new Map();
     /** element-type name -> cached `mapToType` TIR helper (clones only). */
     readonly mapToTypeCache: Map<string, any> = new Map();
+    /** debug information being collected for a debugger; `undefined` (the default) collects none */
+    debug: DebugCollector | undefined = undefined;
 }
 
 let _current: CompilationCtx | undefined = undefined;

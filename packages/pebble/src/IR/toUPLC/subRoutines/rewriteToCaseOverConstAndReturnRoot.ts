@@ -36,6 +36,7 @@ import { _ir_apps, IRApp } from "../../IRNodes/IRApp";
 import { IRCase } from "../../IRNodes/IRCase";
 import { IRDelayed } from "../../IRNodes/IRDelayed";
 import { IRError } from "../../IRNodes/IRError";
+import { failRangeOfDropped, irMeta } from "../../sourceMap/irRanges";
 import { IRForced } from "../../IRNodes/IRForced";
 import { IRHoisted } from "../../IRNodes/IRHoisted";
 import { IRLetted } from "../../IRNodes/IRLetted";
@@ -213,6 +214,9 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                         ( _, i ) => conts[ i ]!.clone()
                     )
                 );
+                // sourcemaps: a value with no branch now fails here, as the dropped errors did
+                const failRange = failRangeOfDropped( Array.from( { length: conts.length - lastNonError }, ( _, k ) => conts[ lastNonError + k ]! ) );
+                if( failRange !== undefined && irMeta( pruned ).failRange === undefined ) irMeta( pruned ).failRange = failRange;
                 modifyTermAndPushToReprocess( current, pruned );
                 continue;
             }

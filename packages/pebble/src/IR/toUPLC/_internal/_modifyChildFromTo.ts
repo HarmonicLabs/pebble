@@ -12,6 +12,7 @@ import { equalIrHash, IRHash, irHashToHex, isIRHash } from "../../IRHash";
 import { IRRecursive } from "../../IRNodes/IRRecursive";
 import { isIRTerm } from "../../utils/isIRTerm";
 import { inheritRange } from "../../sourceMap/irRanges";
+import { noteVarReplaced } from "../../sourceMap/irDebug";
 
 /**
  *
@@ -30,6 +31,7 @@ export function _modifyChildFromTo(
     );
     _replaceChild( parent, currentChild, newChild );
     inheritRange( newChild, replaced );
+    noteVarReplaced( newChild, replaced );
 }
 
 function _replaceChild(

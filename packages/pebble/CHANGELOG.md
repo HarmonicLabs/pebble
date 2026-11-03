@@ -37,8 +37,60 @@ source, in `pebble test`, in buildooor and in any tool using
 - The map format belongs to `@harmoniclabs/plutus-machine` (version 1, see its
   README); buildooor 0.3.0 reads it (`sourceMaps` option).
 
+### Debugger
+
+- `pebble debug` (pebble-cli) records one evaluation, a test (`--test <name>`) or a
+  script evaluation buildooor saved (`--eval <file>`, see buildooor's
+  `saveFailedEvaluations`), and prints it statement by statement, each call under the
+  statement that makes it, with the values the statements declare; the failing statement
+  lists every variable in scope:
+
+  ```text
+  accept  src/index.pebble
+    #1   42  const { tx, spendingRef, state: { deadline } } = context;   deadline = 1000000000
+    #2   44  const sellerPkh = this.seller                   sellerPkh = #008b47844d92812f…
+    #3   45  assert tx.requiredSigners.includes( sellerPkh );
+    #4   49  const Finite{ n: txLatest } = tx.validityInterval.to.boundary   txLatest = 1000001000
+    #5   50  assert txLatest <= deadline;                    <- failed
+               ...
+               deadline = 1000000000
+               txLatest = 1000001000
+  ```
+
+  `--step N` prints one step in full (the open calls, every variable with its whole value),
+  `--json` the run as JSON for tools and AI agents, `--all` the variables at every step. It
+  exits 0 whenever the evaluation could be shown, passed or failed.
+- The steps follow the source, not the machine: the compiled program computes a `const` where
+  it is used, merges asserts, hoists what does not depend on the call. Evaluation is pure, so
+  each call lists the statements whose terms ran, sorted as written; a call the optimizer
+  computed ahead of its caller still shows under the statement that makes it; a loop runs one
+  frame per iteration (condition, body, update); a failing run ends at the statement that
+  failed.
+- Variables carry their source names and types, and the value they have at that statement
+  (after reassignments, in that iteration), decoded with the type (`TxOutRef{ id: #…, index: 0 }`,
+  `Some{ value: 7 }`, `true` for a boolean read from data); `<not evaluated>` when the run never
+  needed the value, `<optimized out>` when the compiler removed the variable. A contract
+  method's `const { tx } = context;` shows `tx`.
+- The debug information stays in memory: `out.flat.map` does not change, and neither does
+  the program. `Compiler.compileWithDebugInfo()` returns it with the program and its map;
+  `Compiler.debugTest()` and `Compiler.debugScript()` return a `DebugRun` (steps, frames,
+  `variablesAt`, `declaredAt`, `stackAt`, `next` / `prev`); `formatDebugRun`,
+  `formatDebugStep`, `debugRunToJson`, `decodeValue` and `formatValue` format it.
+- The VS Code extension (pebble-lsp) uses the same runs: a debugger that steps forwards and
+  backwards.
+
 ### Fixes
 
+- A second compilation in the same process (the language server, `pebble test` over several
+  files, any tool) got a source map listing the first one's source again, with terms mapped to
+  it: `_compTimeDropN` handed out its shared `drop` templates uncloned, and the first
+  compilation's passes rewrote them in place (their hoisted `tailList` became that
+  compilation's letted one, with its range).
+- An assert whose comparison the optimizer flipped to drop its `error` branch (`y < 20`
+  checked as `20 <= y`) was located at the term that failed: with `const y = x * 2;`, the `2`.
+  A `case` that lost failing branches now records the failure they stood for (the source map's
+  new optional `failures`), and a false assert condition is the failure whatever term fails;
+  twin asserts report the assert statement (`24:5`), not its operand (`24:12`).
 - `fail "message";` was a type error ("Type 'bytes' is not assignable to type
   'string'"): `fail` did not cast the string literal as `assert ... else` does.
 - Statement ranges, used by diagnostics: declarations started at the end of the

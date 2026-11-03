@@ -28,6 +28,7 @@ import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { expressifyFuncBody, LoopReplacements } from "./expressify";
 import { ExpressifyCtx, isExpressifyFuncParam } from "./ExpressifyCtx";
 import { expressifyVars } from "./expressifyVars";
+import { debugLinkDecl, debugLinkLoopFunction, debugLoopBinding } from "../../debug/debugHooks";
 
 export function loopToForStmt( stmt: TirWhileStmt | TirForOfStmt | TirForStmt ): TirForStmt
 {
@@ -310,13 +311,18 @@ export function expressifyForStmt(
     const loopFuncExpr = new TirFuncExpr(
         loopFuncName, // func name
         // func params
-        bodyStateType.constructors[0].fields.map( f => new TirSimpleVarDecl(
-            f.name,
-            f.type,
-            undefined, // no initial value
-            false, // is constant
-            stmt.range
-        )),
+        bodyStateType.constructors[0].fields.map( f => {
+            const param = new TirSimpleVarDecl(
+                f.name,
+                f.type,
+                undefined, // no initial value
+                false, // is constant
+                stmt.range
+            );
+            // debug information: the value the variable starts an iteration with
+            debugLinkDecl( param, debugLoopBinding( stmt, f.name ) );
+            return param;
+        }),
         // func return type
         effectiveReturnType,
         // func body
@@ -336,6 +342,7 @@ export function expressifyForStmt(
         stmt.range,
         true // is loop
     );
+    debugLinkLoopFunction( loopFuncExpr, stmt );
     return new TirCallExpr(
         loopFuncExpr,
         // loop call init args

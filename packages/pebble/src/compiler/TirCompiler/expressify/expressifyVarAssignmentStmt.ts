@@ -3,6 +3,7 @@ import { TirLettedExpr } from "../../tir/expressions/TirLettedExpr";
 import { TirAssignmentStmt } from "../../tir/statements/TirAssignmentStmt";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { ExpressifyCtx } from "./ExpressifyCtx";
+import { debugAssignBinding, debugBindLetted } from "../../debug/debugHooks";
 import { expressifyVars } from "./expressifyVars";
 
 export function expressifyVarAssignmentStmt(
@@ -26,11 +27,12 @@ export function expressifyVarAssignmentStmt(
     const newUniqueName = getUniqueInternalName( originalName );
     ctx.setNewVariableName( originalName, newUniqueName );
     // point to the same object
-    ctx.introduceLettedConstant(
+    const letted = ctx.introduceLettedConstant(
         newUniqueName,
         assignedExpr,
         stmt.range
     );
+    debugBindLetted( letted, debugAssignBinding( stmt, originalName ) );
     
     // will replace re-assignment in body
     // return new TirSimpleVarDecl(

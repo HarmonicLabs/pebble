@@ -1,6 +1,8 @@
 import type { SourceRange } from "../../ast/Source/SourceRange";
 import type { IRTerm } from "../IRTerm";
 import type { BaseIRMetadata, IRFnEntryMeta } from "../IRNodes/BaseIRMetadata";
+import { unionBindings } from "./unionBindings";
+import { collectingDebugInfo } from "./irDebug";
 import { IRHoisted } from "../IRNodes/IRHoisted";
 import { IRLetted } from "../IRNodes/IRLetted";
 import { IRNodeKind } from "../IRNodeKind";
@@ -110,6 +112,28 @@ export function inheritRange( replacement: IRTerm, replaced: IRTerm | undefined 
         to.assertCond = from.assertCond;
         from.assertCond = undefined;
     }
+    if( from.failRange !== undefined && to.failRange === undefined )
+    {
+        to.failRange = from.failRange;
+        from.failRange = undefined;
+    }
+    // debug information: the replacement computes the same value, and starts what it started
+    if( from.varValue !== undefined ) to.varValue = unionBindings( to.varValue, from.varValue );
+    // a letted value copied where it is used keeps its own range; the use is another place
+    // its evaluation stands for
+    if(
+        replaced.kind === IRNodeKind.Letted &&
+        collectingDebugInfo() &&
+        isSourceRange( from.range ) &&
+        isSourceRange( to.range ) &&
+        !sameRange( to.range, from.range )
+    ) to.useRanges = unionRanges( to.useRanges, [ from.range ] );
+    if( from.useRanges !== undefined && from !== to ) to.useRanges = unionRanges( to.useRanges, from.useRanges );
+    if( from.loopEntry !== undefined && to.loopEntry === undefined )
+    {
+        to.loopEntry = from.loopEntry;
+        from.loopEntry = undefined;
+    }
 }
 
 /**
@@ -134,6 +158,12 @@ export function mergeRanges( kept: IRTerm, dropped: IRTerm ): void
         ma.fnEntry = mergeFnEntry( ma.fnEntry, mb.fnEntry );
 
         if( !sameRange( ma.assertCond, mb.assertCond ) ) ma.assertCond = null;
+        if( !sameRange( ma.failRange, mb.failRange ) ) ma.failRange = null;
+
+        // equal hashes compute equal values: the kept node computes both nodes' variables
+        if( mb.varValue !== undefined ) ma.varValue = unionBindings( ma.varValue, mb.varValue );
+        if( mb.useRanges !== undefined ) ma.useRanges = unionRanges( ma.useRanges, mb.useRanges );
+        if( ma.loopEntry !== mb.loopEntry ) ma.loopEntry = null;
 
         const ca = a.children();
         const cb = b.children();
@@ -150,16 +180,46 @@ function mergeFnEntry(
 {
     // a body in one copy and a plain expression in the other: not a function entry anymore
     if( !a || !b ) return undefined;
-    if( a.name === b.name && sameRange( a.range, b.range ) && sameRange( a.callRange, b.callRange ) ) return a;
+    if(
+        a.name === b.name &&
+        sameRange( a.range, b.range ) &&
+        sameRange( a.callRange, b.callRange ) &&
+        a.debugFn === b.debugFn
+    ) return a;
     // copies standing for different calls stand for no call in particular
     const merged: IRFnEntryMeta = { name: a.name === b.name ? a.name : null, range: a.range };
     if( a.callRange && sameRange( a.callRange, b.callRange ) ) merged.callRange = a.callRange;
+    if( a.debugFn === b.debugFn && a.debugFn !== undefined ) merged.debugFn = a.debugFn;
     return merged;
 }
 
 function rangeWithin( inner: SourceRange, outer: SourceRange ): boolean
 {
     return inner.source === outer.source && inner.start >= outer.start && inner.end <= outer.end;
+}
+
+function unionRanges( a: readonly SourceRange[] | undefined, b: readonly SourceRange[] ): readonly SourceRange[]
+{
+    if( a === undefined || a.length === 0 ) return b;
+    const extra = b.filter( r => !a.some( x => sameRange( x, r ) ) );
+    return extra.length === 0 ? a : a.concat( extra );
+}
+
+/**
+ * The failure dropped branches stood for: the range the failing branches agree on, `null`
+ * when they disagree, `fallback` when none has one
+ */
+export function failRangeOfDropped( dropped: readonly IRTerm[], fallback?: SourceRange ): SourceRange | null | undefined
+{
+    let found: SourceRange | null | undefined = undefined;
+    for( const d of dropped )
+    {
+        const r = irMeta( d ).range;
+        if( !isSourceRange( r ) ) continue;
+        if( found === undefined ) found = r;
+        else if( found !== null && !sameRange( found, r ) ) found = null;
+    }
+    return found ?? ( isSourceRange( fallback ) ? fallback : undefined );
 }
 
 export function sameRange( a: SourceRange | null | undefined, b: SourceRange | null | undefined ): boolean

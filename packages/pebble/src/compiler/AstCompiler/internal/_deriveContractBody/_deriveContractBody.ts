@@ -59,7 +59,7 @@ import { WhileStmt } from "../../../../ast/nodes/statements/WhileStmt";
 import { SourceRange } from "../../../../ast/Source/SourceRange";
 import { CommonFlags } from "../../../../common";
 import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.generated";
-import { getUniqueInternalName } from "../../../internalVar";
+import { getUniqueInternalName, isInternalName } from "../../../internalVar";
 import { TirDataStructType, TirStructConstr, TirStructField } from "../../../tir/types/TirStructType";
 import { AstCompiler } from "../../AstCompiler";
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
@@ -1007,6 +1007,9 @@ function _getMatchedRedeemerBlockStatements(
 
                 // when reading `introducedVarName`, it will be replaced with `realVarName`
                 renamedVariables[ introducedVarName ] = realVarName;
+                // debug information: the source name of `realVarName` in this method
+                if( !isInternalName( introducedVarName ) )
+                compiler.program.debugAliases.push({ name: introducedVarName, tirName: realVarName, range: fieldVarDecl.range });
             }
 
             // remove the context destrucuturing statement from the result

@@ -1,12 +1,22 @@
 import { Application, Case, Constr, Delay, Force, Lambda, UPLCTerm } from "@harmoniclabs/uplc";
 import type { SourceRange } from "../../ast/Source/SourceRange";
 import type { BaseIRMetadata, IRFnEntryMeta } from "../IRNodes/BaseIRMetadata";
+import type { DebugBinding, DebugFunction } from "../../compiler/debug/DebugInfo";
+import { unionBindings } from "./unionBindings";
 
 /** source information of one UPLC term, taken from the IR node that created it */
 export interface UplcMark {
     range: SourceRange | null | undefined
     fnEntry?: IRFnEntryMeta | null
     assertCond?: SourceRange | null
+    /** a case with no branch for some values: the failure that stands for */
+    failRange?: SourceRange | null
+    /** debug information: variables whose value the term computes */
+    varValue?: readonly DebugBinding[]
+    /** debug information: the term starts an iteration of this loop */
+    loopEntry?: DebugFunction | null
+    /** debug information: uses of a variable the term was copied in place of */
+    useRanges?: readonly SourceRange[]
 }
 
 export type UplcMarks = Map<UPLCTerm, UplcMark>;
@@ -24,10 +34,19 @@ export function recordOwnTerms( root: UPLCTerm, meta: BaseIRMetadata, marks: Upl
         // the node created no term of its own (e.g. a function without parameters)
         if( rootMark.fnEntry === undefined && meta.fnEntry !== undefined ) rootMark.fnEntry = meta.fnEntry;
         if( rootMark.assertCond === undefined && meta.assertCond !== undefined ) rootMark.assertCond = meta.assertCond;
+        if( rootMark.failRange === undefined && meta.failRange !== undefined ) rootMark.failRange = meta.failRange;
+        if( meta.varValue !== undefined ) rootMark.varValue = unionBindings( rootMark.varValue, meta.varValue );
+        if( rootMark.loopEntry === undefined && meta.loopEntry !== undefined ) rootMark.loopEntry = meta.loopEntry;
+        if( meta.useRanges !== undefined ) rootMark.useRanges = ( rootMark.useRanges ?? [] ).concat( meta.useRanges );
         return;
     }
 
-    marks.set( root, { range: meta.range, fnEntry: meta.fnEntry, assertCond: meta.assertCond } );
+    const mark: UplcMark = { range: meta.range, fnEntry: meta.fnEntry, assertCond: meta.assertCond };
+    if( meta.failRange !== undefined ) mark.failRange = meta.failRange;
+    if( meta.varValue !== undefined ) mark.varValue = meta.varValue;
+    if( meta.loopEntry !== undefined ) mark.loopEntry = meta.loopEntry;
+    if( meta.useRanges !== undefined ) mark.useRanges = meta.useRanges;
+    marks.set( root, mark );
     const stack: UPLCTerm[] = uplcChildren( root ).slice();
     while( stack.length > 0 )
     {

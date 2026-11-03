@@ -2,6 +2,9 @@ import { IRVar } from "../../../IR/IRNodes/IRVar";
 import { debugCreationStack } from "../../../utils/debugCreationStack";
 import { IRSelfCall } from "../../../IR/IRNodes/IRSelfCall";
 import type { IRTerm } from "../../../IR/IRTerm";
+import { IRNodeKind } from "../../../IR/IRNodeKind";
+import { stampVarValue } from "../../../IR/sourceMap/irDebug";
+import { debugBindDecl, debugDeclBinding } from "../../debug/debugHooks";
 
 const _1n = BigInt(1);
 
@@ -112,18 +115,33 @@ export class ToIRTermCtx
      * result in `IRLetted` if you want the IR-level let-handling pass to
      * dedup / hoist / eliminate as appropriate.
      */
-    defineDeferredAccess( name: string, factory: () => IRTerm ): void
+    defineDeferredAccess( name: string, factory: () => IRTerm, decl?: object ): void
     {
         if( this.localVars.has( name ) || this.deferredAccess.has( name ) ) {
             throw new Error(`variable '${name}' already defined in the current scope`);
         }
-        this.deferredAccess.set( name, factory );
+        // debug information: every access computes the declared variable's value
+        const binding = debugDeclBinding( decl );
+        this.deferredAccess.set( name, binding === undefined ? factory : () => {
+            const ir = factory();
+            stampVarValue( ir, [ binding ] );
+            if( ir.kind === IRNodeKind.Letted ) stampVarValue( ( ir as any ).value, [ binding ] );
+            return ir;
+        });
     }
 
     /**
+     * @param decl the declaration of the variable, when it has one (debug information)
      * @returns the symbol of the defined variable (for eventual `new IRFunc( ... )`)
     **/
-    defineVar( varName: string | symbol ): symbol
+    defineVar( varName: string | symbol, decl?: object ): symbol
+    {
+        const sym = this._defineVar( varName );
+        debugBindDecl( sym, decl );
+        return sym;
+    }
+
+    private _defineVar( varName: string | symbol ): symbol
     {
         const name = typeof varName === "string" ? varName : varName.description!;
 

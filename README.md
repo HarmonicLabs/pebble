@@ -36,6 +36,11 @@ What you get out of the box:
   tests on the real CEK machine, with typed fuzzers for every parameter
   type, user-defined `via` fuzzers, failing-input shrinking, and per-test
   cpu/mem budgets;
+- **source maps and a debugger**: a failing script says which line of the
+  Pebble source failed (in `pebble test` and in buildooor), and
+  `pebble debug` shows a test or a failed transaction statement by
+  statement with the variables' values (`--json` for tools and AI
+  agents); the VS Code extension steps through it forwards and backwards;
 - **competitive output**: Pebble holds the lowest CPU numbers in the
   [UPLC-CAPE](https://github.com/IntersectMBO/UPLC-CAPE)
   `two_party_escrow` real-world benchmark and the `factorial` open

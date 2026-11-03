@@ -1,4 +1,4 @@
-import { indexProgram, UPLCSourceMap, UPLCSourceMapAssert, UPLCSourceMapFunction, UPLCSourceMapInlinedCall, UPLCSourceMapping } from "@harmoniclabs/plutus-machine";
+import { indexProgram, UPLCSourceMap, UPLCSourceMapAssert, UPLCSourceMapFailure, UPLCSourceMapFunction, UPLCSourceMapInlinedCall, UPLCSourceMapping } from "@harmoniclabs/plutus-machine";
 import { blake2b_256 } from "@harmoniclabs/crypto";
 import { toHex } from "@harmoniclabs/uint8array-utils";
 import type { UPLCTerm, UPLCVersion } from "@harmoniclabs/uplc";
@@ -61,6 +61,7 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
     const functions: UPLCSourceMapFunction[] = [];
     const asserts: UPLCSourceMapAssert[] = [];
     const inlinedCalls: UPLCSourceMapInlinedCall[] = [];
+    const failures: UPLCSourceMapFailure[] = [];
 
     for( let i = 0; i < index.terms.length; i++ )
     {
@@ -87,6 +88,9 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
 
         if( isUserRange( mark.assertCond ) )
         asserts.push([ i, sourceIndexOf( mark.assertCond ), ...positionOf( mark.assertCond ) ]);
+
+        if( isUserRange( mark.failRange ) )
+        failures.push([ i, sourceIndexOf( mark.failRange ), ...positionOf( mark.failRange ) ]);
     }
 
     const map: UPLCSourceMap = {
@@ -102,6 +106,7 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
         asserts,
     };
     if( inlinedCalls.length > 0 ) map.inlinedCalls = inlinedCalls;
+    if( failures.length > 0 ) map.failures = failures;
     if( args.sourcesContent === true ) map.sourcesContent = sources.map( s => s.text );
     return map;
 }

@@ -1,5 +1,5 @@
-import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, showUPLCConstValue, UPLCConst, UPLCProgram, UPLCTerm } from "@harmoniclabs/uplc";
-import { CEKConst, CEKError, locateFailure, Machine, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
+import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, showUPLCConstValue, UPLCConst, UPLCProgram, UPLCTerm, UPLCVersion } from "@harmoniclabs/uplc";
+import { CEKConst, CEKError, ExBudget, findMappedProgram, indexProgram, locateFailure, Machine, recordEvaluation, RecordEvaluationOptions, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
 import { DiagnosticCategory } from "../diagnostics/DiagnosticCategory";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
@@ -13,6 +13,10 @@ import { toHex } from "@harmoniclabs/uint8array-utils";
 import { CompilationCtx, withCompilationCtx } from "../IR/CompilationCtx";
 import { compileIRToUPLC } from "../IR/toUPLC/compileIRToUPLC";
 import { buildSourceMap } from "../IR/sourceMap/buildSourceMap";
+import { DebugCollector } from "./debug/DebugCollector";
+import { collectDebugStructure } from "./debug/collectDebugStructure";
+import { buildDebugTable, DebugTable } from "./debug/buildDebugTable";
+import { DebugRun } from "../debugger/DebugRun";
 import type { UplcMarks } from "../IR/sourceMap/uplcMarks";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
@@ -105,7 +109,21 @@ export class Compiler
         return { bytes: compiled.bytes, sourceMap: compiled.sourceMap() };
     }
 
-    private async _compileProgram( cfg: CompilerOptions ): Promise<CompiledProgram>
+    /**
+     * like `compileWithSourceMap`, plus the debug information a debugger shows variables and
+     * statements with (see `compiler/debug`); the program is the one `compile` writes
+     */
+    async compileWithDebugInfo( config?: Partial<CompilerOptions> ): Promise<CompiledWithDebugInfo>
+    {
+        const cfg = {
+            ...this.cfg,
+            ...config
+        };
+        const compiled = await this._compileProgram( cfg, true );
+        return { bytes: compiled.bytes, sourceMap: compiled.sourceMap(), debugTable: compiled.debugTable!() };
+    }
+
+    private async _compileProgram( cfg: CompilerOptions, collectDebugInfo: boolean = false ): Promise<CompiledProgram>
     {
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.compile();
@@ -119,7 +137,7 @@ export class Compiler
             // return new Uint8Array();
             throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
         }
-        return this._compileBackend( cfg, program );
+        return this._compileBackend( cfg, program, collectDebugInfo );
     }
 
     /** compiles a single function and writes it to `out.flat` (and `out.flat.map`) */
@@ -224,14 +242,27 @@ export class Compiler
         const propertyIterations = Math.max( 1, config?.propertyIterations ?? 100 );
         const seed = config?.seed ?? 0;
 
-        // 1) discovery pass: parse + check, populate program.tests.
-        //    diagnostics from this pass are surfaced once; subsequent per-test
-        //    passes use their own diagnostic arrays so we don't double-report.
+        const descriptors = ( await this._discoverTests( cfg ) ).filter( t => matches( t.name ) );
+
+        const results: TestResult[] = new Array( descriptors.length );
+        for( let i = 0; i < descriptors.length; i++ )
+        {
+            results[i] = await this._runOneTest( cfg, descriptors[i], propertyIterations, seed );
+        }
+        return results;
+    }
+
+    /**
+     * discovery pass: parse + check, populate program.tests.
+     * diagnostics from this pass are surfaced once; subsequent per-test
+     * passes use their own diagnostic arrays so we don't double-report.
+     */
+    private async _discoverTests( cfg: CompilerOptions ): Promise<TestDescriptor[]>
+    {
         const discovery = new AstCompiler( cfg, this.io, this.diagnostics );
         const discoveryResult = await discovery.check();
 
-        const descriptors = discoveryResult.program.tests
-        .filter( t => matches( t.name ) )
+        return discoveryResult.program.tests
         .map( t => {
             const fn = discoveryResult.program.functions.get( t.tirFuncName );
             const paramNames = (fn instanceof TirFuncExpr) ? fn.params.map( p => p.sourceName ?? p.name ) : [];
@@ -244,27 +275,94 @@ export class Compiler
                 fuzzerInfos: t.fuzzerInfos,
             };
         });
+    }
 
-        const results: TestResult[] = new Array( descriptors.length );
-        for( let i = 0; i < descriptors.length; i++ )
-        {
-            results[i] = await this._runOneTest( cfg, descriptors[i], propertyIterations, seed );
-        }
-        return results;
+    /**
+     * Runs one test the way `test` does, and records the evaluation a debugger shows: the one
+     * that failed (for a property test, with the smallest failing inputs), or else the first.
+     * Debug information is collected for it (see `compiler/debug`): the program is the same.
+     *
+     * `name` is the test's name, or a part of it no other test's name contains.
+     */
+    async debugTest( config: Partial<CompilerOptions> & {
+        name: string;
+        propertyIterations?: number;
+        seed?: number;
+        /** states recorded at most (see `recordEvaluation`) */
+        maxStates?: number;
+    } ): Promise<DebugTestResult>
+    {
+        const cfg: CompilerOptions = {
+            ...this.cfg,
+            ...config,
+            silent: true,
+            addMarker: false,
+        };
+        const all = await this._discoverTests( cfg );
+        const exact = all.filter( t => t.name === config.name );
+        const candidates = exact.length > 0 ? exact : all.filter( t => t.name.includes( config.name ) );
+        if( candidates.length === 0 ) throw new Error( `no test named "${config.name}"` + ( all.length > 0 ? `; the tests are: ${all.map( t => t.name ).join( ", " )}` : "" ) );
+        if( candidates.length > 1 ) throw new Error( `"${config.name}" names more than one test: ${candidates.map( t => t.name ).join( ", " )}` );
+
+        const capture: TestCapture = {};
+        const test = await this._runOneTest(
+            cfg,
+            candidates[0],
+            Math.max( 1, config.propertyIterations ?? 100 ),
+            config.seed ?? 0,
+            capture
+        );
+        if( capture.term === undefined || capture.body === undefined || capture.compiled?.debugTable === undefined )
+        return { test, run: undefined, bytes: capture.compiled?.bytes, sourceMap: capture.compiled?.sourceMap(), debugTable: undefined };
+
+        const debugTable = capture.compiled.debugTable();
+        const recording = recordEvaluation( capture.term, { maxStates: config.maxStates } );
+        return {
+            test,
+            run: new DebugRun( recording, debugTable, indexProgram( capture.body ) ),
+            bytes: capture.compiled.bytes,
+            sourceMap: capture.compiled.sourceMap(),
+            debugTable,
+        };
+    }
+
+    /**
+     * Records an evaluation of this project's program (`term`: the script as a transaction
+     * holds it, applied to its arguments, see `savedEvaluationTerm`) and shows it in source
+     * terms. The project is compiled with debug information; `term` must contain the program
+     * it compiles to (its hash is checked), otherwise this throws.
+     */
+    async debugScript( config: Partial<CompilerOptions> & {
+        term: UPLCTerm;
+        /** version of the program `term` comes from; default: the compiled program's */
+        version?: UPLCVersion | string;
+        /** cost model and budget of the evaluation to reproduce */
+        costModel?: RecordEvaluationOptions["costModel"];
+        budget?: ExBudget;
+        maxStates?: number;
+    } ): Promise<DebugScriptResult>
+    {
+        const { term, version, costModel, budget, maxStates, ...compileConfig } = config;
+        const compiled = await this.compileWithDebugInfo( compileConfig );
+        const program = findMappedProgram( term, compiled.sourceMap, version );
+        if( program === undefined ) throw new Error(
+            "the script is not the program this project compiles to (no part of it has the source map's programHash " +
+            compiled.sourceMap.programHash + "); compile the version of the project the script comes from"
+        );
+        const recording = recordEvaluation( term, { costModel, budget, maxStates } );
+        return {
+            ...compiled,
+            run: new DebugRun( recording, compiled.debugTable, indexProgram( program ) ),
+        };
     }
 
     private async _runOneTest(
         cfg: CompilerOptions,
-        desc: {
-            name: string;
-            tirFuncName: string;
-            sourceFile: string;
-            range: SourceRange;
-            paramNames: string[];
-            fuzzerInfos: FuzzerInfo[];
-        },
+        desc: TestDescriptor,
         propertyIterations: number,
         seed: number,
+        /** set: compile with debug information and keep the evaluation to show (see `debugTest`) */
+        capture?: TestCapture,
     ): Promise<TestResult>
     {
         const isProperty = desc.fuzzerInfos.length > 0;
@@ -296,7 +394,7 @@ export class Compiler
 
         let compiled: CompiledProgram;
         try {
-            compiled = this._compileBackend( cfg, astCompiler.program );
+            compiled = this._compileBackend( cfg, astCompiler.program, capture !== undefined );
         } catch ( err ) {
             return _failedTestResult(
                 desc,
@@ -306,10 +404,16 @@ export class Compiler
         }
 
         const uplcProgram = parseUPLC( compiled.bytes );
+        if( capture !== undefined )
+        {
+            capture.compiled = compiled;
+            capture.body = uplcProgram.body;
+        }
 
         if( !isProperty )
         {
             const term = new Force( uplcProgram.body );
+            if( capture !== undefined ) capture.term = term;
             const evalResult = Machine.eval( term );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
@@ -395,6 +499,7 @@ export class Compiler
         {
             let app: UPLCTerm = uplcProgram.body;
             for( const arg of args ) app = new Application( app, arg );
+            if( capture !== undefined && capture.term === undefined ) capture.term = app;
             const evalResult = Machine.eval( app );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
@@ -414,6 +519,8 @@ export class Compiler
         // only reported failures are located: shrink candidates are not
         const locate = ( iter: TestIterationResult, term: UPLCTerm ): void => {
             if( iter.error ) Object.assign( iter.error, locateTestFailure( term, uplcProgram.body, compiled ) );
+            // the reported failure is the one to debug (the shrunk one comes last)
+            if( capture !== undefined ) capture.term = term;
         };
 
         for( let i = 0; i < propertyIterations; i++ )
@@ -581,10 +688,16 @@ export class Compiler
         return Machine.eval( new Force( uplcProgram.body ) );
     }
 
-    /** compiles to UPLC; writes nothing (see `_writeOutputs`) */
+    /**
+     * compiles to UPLC; writes nothing (see `_writeOutputs`)
+     *
+     * @param collectDebugInfo also collect debug information (see `compiler/debug`);
+     * the program is the same either way
+     */
     private _compileBackend(
         cfg: CompilerOptions,
-        program: TypedProgram
+        program: TypedProgram,
+        collectDebugInfo: boolean = false
     ): CompiledProgram
     {
         // Run the whole backend under a fresh per-compilation context. All
@@ -594,7 +707,12 @@ export class Compiler
         // dropped automatically when this scope exits, even on throw. The
         // content-addressed `IRHash` has no global state at all, so there is
         // nothing else to reset.
-        return withCompilationCtx( new CompilationCtx(), () => {
+        const compilationCtx = new CompilationCtx();
+        const debug = collectDebugInfo ? new DebugCollector() : undefined;
+        compilationCtx.debug = debug;
+        return withCompilationCtx( compilationCtx, () => {
+            // the statements as written: `compileTypedProgram` rewrites them into expressions
+            if( debug !== undefined ) collectDebugStructure( program, debug );
             const ir = compileTypedProgram(
                 cfg,
                 program
@@ -609,6 +727,7 @@ export class Compiler
 
             // the map costs a walk of the program; most callers never ask for it
             let sourceMap: UPLCSourceMap | undefined = undefined;
+            let debugTable: DebugTable | undefined = undefined;
             return {
                 bytes,
                 sourceMap: () => sourceMap ??= buildSourceMap({
@@ -619,6 +738,11 @@ export class Compiler
                     compiler: "pebble " + COMPILER_VERSION,
                     sourcesContent: cfg.sourceMapContent === true,
                     root: cfg.root,
+                }),
+                debugTable: debug === undefined ? undefined : () => debugTable ??= buildDebugTable({
+                    program: uplc,
+                    marks,
+                    debug
                 }),
             };
         });
@@ -645,12 +769,19 @@ interface CompiledProgram {
     bytes: Uint8Array;
     /** built on the first call */
     sourceMap: () => UPLCSourceMap;
+    /** built on the first call; only when debug information was collected */
+    debugTable: ( () => DebugTable ) | undefined;
 }
 
 export interface CompiledWithSourceMap {
     /** the flat-encoded program */
     bytes: Uint8Array;
     sourceMap: UPLCSourceMap;
+}
+
+export interface CompiledWithDebugInfo extends CompiledWithSourceMap {
+    /** what a debugger needs beyond the source map; never written to a file */
+    debugTable: DebugTable;
 }
 
 /**
@@ -694,6 +825,38 @@ function locateTestFailure(
 
 interface HasFuncitonName {
     functionName: string;
+}
+
+interface TestDescriptor {
+    name: string;
+    tirFuncName: string;
+    sourceFile: string;
+    range: SourceRange;
+    paramNames: string[];
+    fuzzerInfos: FuzzerInfo[];
+}
+
+/** what `_runOneTest` keeps for `debugTest` */
+interface TestCapture {
+    compiled?: CompiledProgram;
+    /** the compiled program's body: what the source map and debug table describe */
+    body?: UPLCTerm;
+    /** the evaluation to show */
+    term?: UPLCTerm;
+}
+
+export interface DebugTestResult {
+    /** the test's result, as `test` reports it */
+    test: TestResult;
+    /** the evaluation shown in source terms; `undefined` when the test could not run */
+    run: DebugRun | undefined;
+    bytes: Uint8Array | undefined;
+    sourceMap: UPLCSourceMap | undefined;
+    debugTable: DebugTable | undefined;
+}
+
+export interface DebugScriptResult extends CompiledWithDebugInfo {
+    run: DebugRun;
 }
 
 export interface ExportOptions extends CompilerOptions, HasFuncitonName {

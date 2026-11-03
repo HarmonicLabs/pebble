@@ -113,12 +113,14 @@ export function _compTimeDropN( bigN: bigint ): IRHoisted | IRNative
     if( n < 0 ) throw new Error(`Cannot drop a negative number of elements from a list`);
     if( n === 0 ) return IRNative._id;
     if( n === 1 ) return tailList.clone();
-    if( n === 2 ) return hoisted_drop2;
-    if( n === 3 ) return hoisted_drop3;
-    if( n === 4 ) return hoisted_drop4;
-    if( n === 8 ) return hoisted_drop8;
-    if( n === 16 ) return hoisted_drop16;
-    if( n === 32 ) return hoisted_drop32;
+    // always a clone: the result goes into the tree being compiled, whose passes rewrite
+    // nodes in place; the templates are shared by every compilation
+    if( n === 2 ) return hoisted_drop2.clone();
+    if( n === 3 ) return hoisted_drop3.clone();
+    if( n === 4 ) return hoisted_drop4.clone();
+    if( n === 8 ) return hoisted_drop8.clone();
+    if( n === 16 ) return hoisted_drop16.clone();
+    if( n === 32 ) return hoisted_drop32.clone();
 
     // Greedy decomposition into available drop sizes (largest first)
     let remaining = n;
