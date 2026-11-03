@@ -9,7 +9,7 @@
 //  cannot pass by breaking something else.
 // ===========================================================================
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     Address, Credential, DataI, PrivateKey, TxBuilder, TxOut, UTxO, Value, defaultProtocolParameters,
@@ -61,8 +61,13 @@ const funds = new UTxO({
     resolved: { address: beneficiary.address, value: Value.lovelaces(50_000_000n) },
 });
 
+let savedCases = 0;
 const txBuilder = new TxBuilder(defaultProtocolParameters, genesisInfos, {
     sourceMaps: [readFileSync(FLAT + ".map", "utf8")],
+    // SAVE_FAILED=<dir>: every refused case is saved there, one file each, for
+    // `pebble debug --eval` (see debugger-golden.ts)
+    saveFailedEvaluations: process.env.SAVE_FAILED === undefined ? undefined :
+        (ev) => writeFileSync(join(process.env.SAVE_FAILED!, `case-${String(++savedCases).padStart(2, "0")}.json`), JSON.stringify(ev)),
 });
 
 /** a valid claim of `amount`, halfway through the schedule */
