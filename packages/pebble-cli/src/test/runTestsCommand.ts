@@ -1,8 +1,8 @@
 import * as path from "node:path";
-import { existsSync, readFileSync } from "node:fs";
-import { Compiler, CompilerOptions, COMPILER_VERSION, productionOptions, TestResult } from "@harmoniclabs/pebble";
+import { Compiler, TestResult } from "@harmoniclabs/pebble";
 import { createFsIo } from "../utils/crateFsIo";
-import { normalizeRoot, isRecord } from "../utils/miscellaneous";
+import { normalizeRoot } from "../utils/miscellaneous";
+import { loadProjectConfig } from "../utils/loadProjectConfig";
 import { discoverTestFiles } from "./discoverTestFiles";
 import { formatTestResults } from "./formatTestResults";
 
@@ -25,34 +25,7 @@ export async function runTestsCommand(
 {
     const root = normalizeRoot();
 
-    // load pebble.config.json if present, otherwise use defaults
-    const configPath = path.resolve( root, flags.config ?? "./pebble.config.json" );
-    // compilerVersion is intentionally not set here — it must come from the
-    // user's pebble.config.json. If missing/invalid, the Compiler throws.
-    let baseConfig: CompilerOptions = productionOptions as CompilerOptions;
-    if( existsSync( configPath ) )
-    {
-        try {
-            const txt = readFileSync( configPath, "utf8" );
-            const parsed = JSON.parse( txt );
-            if( isRecord( parsed ) ) baseConfig = {
-                ...productionOptions,
-                ...parsed,
-                uplcOptimizations: {
-                    ...productionOptions.uplcOptimizations,
-                    ...(parsed.uplcOptimizations as any)
-                }
-            } as CompilerOptions;
-        } catch {
-            // ignore malformed config
-        }
-    }
-    // as `pebble compile` does: without a config range, test with THIS compiler
-    // (an explicit range in the config still wins and is checked)
-    if( typeof baseConfig?.compilerVersion !== "string" || baseConfig.compilerVersion.length === 0 )
-    {
-        baseConfig = { ...baseConfig, compilerVersion: COMPILER_VERSION } as CompilerOptions;
-    }
+    const baseConfig = loadProjectConfig( root, flags.config );
 
     const testPathPattern = flags.testPathPattern ? new RegExp( flags.testPathPattern ) : undefined;
     const nameFilter = flags.testNamePattern ? new RegExp( flags.testNamePattern ) : undefined;

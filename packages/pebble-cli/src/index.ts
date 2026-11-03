@@ -10,6 +10,7 @@ import { exportPebbleFunction } from "./export/exportPebbleFunction";
 import { prettyPrintUplcFromFile } from "./uplc/pretty/prettyPrintUplcFromFile";
 import { pebbleRepl } from "./repl/pebbleRepl";
 import { runTestsCommand } from "./test/runTestsCommand";
+import { debugCommand } from "./debug/debugCommand";
 
 const program = new Command();
 
@@ -116,6 +117,31 @@ program.command("test [path]")
             seed: opts.seed,
             json: opts.json === true,
             bail: opts.bail === true,
+        });
+    });
+
+program.command("debug [path]")
+    .description("Run one evaluation and print it statement by statement, in source order, with the values of the variables: a test (--test) or a script evaluation buildooor saved (--eval). Exits 0 whenever the evaluation could be shown, passed or failed.")
+    .option("-c, --config <string>", "The config file path", "./pebble.config.json")
+    .option("--test <name>", "Debug the test with this name (or part of it), among the tests of [path] (default: the current directory)")
+    .option("--eval <file>", "Replay a saved script evaluation (buildooor's `saveFailedEvaluations`) against this project's program")
+    .option("--step <n>", "Print step n in full: the open calls and every variable in scope with its whole value")
+    .option("--all", "List the variables in scope at every step")
+    .option("--json", "Emit the steps, variables and result as JSON on stdout")
+    .option("--max-states <n>", "Record at most n machine states (default 2000000)")
+    .option("--property-runs <n>", "Iterations of a property test to look for a failure in (default 100)")
+    .option("--seed <int>", "Seed for the property-test PRNG (default 0)")
+    .action( async ( target, opts ) => {
+        await debugCommand( target, {
+            config: opts.config,
+            test: opts.test,
+            eval: opts.eval,
+            step: opts.step,
+            all: opts.all === true,
+            json: opts.json === true,
+            maxStates: opts.maxStates,
+            propertyRuns: opts.propertyRuns,
+            seed: opts.seed,
         });
     });
 
