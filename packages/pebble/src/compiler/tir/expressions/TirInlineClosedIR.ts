@@ -1,5 +1,6 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { IRHoisted } from "../../../IR/IRNodes/IRHoisted";
+import type { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { TirFuncT } from "../types/TirNativeType";
 import { TirType } from "../types/TirType";
@@ -30,7 +31,9 @@ export class TirInlineClosedIR
          */
         readonly type: TirType,
         readonly getIr: ( ctx: ToIRTermCtx ) => IRTerm,
-        readonly range: SourceRange
+        readonly range: SourceRange,
+        /** the UPLC builtin `getIr` returns, when the function is exactly one */
+        readonly builtinTag?: IRNativeTag
     ) {}
 
     toString(): string
@@ -51,7 +54,8 @@ export class TirInlineClosedIR
         return new TirInlineClosedIR(
             this.type.clone(),
             this.getIr,
-            this.range.clone()
+            this.range.clone(),
+            this.builtinTag
         );
     }
 

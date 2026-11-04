@@ -204,6 +204,90 @@ contract T {
         expect( showUPLC( parseUPLC( flat ).body ) ).toContain( "91827" );
     });
 
+    // ---- reads that may not compute the result ------------------------------
+    // The fix's guard was "the variable is READ after the loop". A read that
+    // may never run (or that reads a value assigned later) left the loop out
+    // the same way: the bare result is a letted value, computed only where a
+    // reference is evaluated. The guard is now "the statements after the
+    // loop certainly compute it" (`loopResultIsForced`).
+
+    test("result overwritten before any read: the loop still runs", async () => {
+        const flat = await compileIt(`
+contract T {
+    mint go( xs: List<int> ) {
+        const { tx, policy } = context;
+        let rest = xs;
+        for( let n = 0; n < 2; n++ ) {
+            assert rest.head() != 99;
+            rest = rest.tail();
+        }
+        rest = xs;
+        assert rest.head() != 98;
+    }
+}`);
+        expect( evalWith( flat, intList([ 1, 2 ]) ) ).toBe( "ACCEPT" );
+        expect( evalWith( flat, intList([ 1, 99 ]) ) ).toBe( "ERROR" ); // in-loop check
+        expect( evalWith( flat, intList([ 98, 2 ]) ) ).toBe( "ERROR" ); // post-loop check
+    });
+
+    test("result read only by an unused const: the loop still runs", async () => {
+        const flat = await compileIt(`
+contract T {
+    mint go( xs: List<int> ) {
+        const { tx, policy } = context;
+        let rest = xs;
+        for( let n = 0; n < 2; n++ ) {
+            assert rest.head() != 99;
+            rest = rest.tail();
+        }
+        const remaining = rest.length();
+    }
+}`);
+        expect( evalWith( flat, intList([ 1, 2, 3 ]) ) ).toBe( "ACCEPT" );
+        expect( evalWith( flat, intList([ 1, 99, 3 ]) ) ).toBe( "ERROR" );
+    });
+
+    test("result read only in a branch that is not taken: the loop still runs", async () => {
+        const flat = await compileIt(`
+contract T {
+    mint go( xs: List<int> ) {
+        const { tx, policy } = context;
+        let rest = xs;
+        for( let n = 0; n < 2; n++ ) {
+            assert rest.head() != 99;
+            rest = rest.tail();
+        }
+        if( xs.length() > 5 ) {
+            assert rest.head() != 98;
+        }
+    }
+}`);
+        expect( evalWith( flat, intList([ 1, 2, 3 ]) ) ).toBe( "ACCEPT" );
+        // 3 elements: the branch is not taken, the loop's check must still run
+        expect( evalWith( flat, intList([ 1, 99, 3 ]) ) ).toBe( "ERROR" );
+        // the branch's own check
+        expect( evalWith( flat, intList([ 1, 2, 98, 4, 5, 6 ]) ) ).toBe( "ERROR" );
+    });
+
+    test("result read through a const that is then used: the loop runs once", async () => {
+        const flat = await compileIt(`
+contract T {
+    mint go( xs: List<int> ) {
+        const { tx, policy } = context;
+        let rest = xs;
+        for( let n = 0; n < 2; n++ ) {
+            assert rest.head() != 99;
+            rest = rest.tail();
+        }
+        const next = rest.head();
+        assert next == 7;
+    }
+}`);
+        expect( evalWith( flat, intList([ 1, 2, 7 ]) ) ).toBe( "ACCEPT" );
+        expect( evalWith( flat, intList([ 1, 99, 7 ]) ) ).toBe( "ERROR" );
+        expect( evalWith( flat, intList([ 1, 2, 8 ]) ) ).toBe( "ERROR" );
+    });
+
     // ---- the reported symptom: refutable destructure of a `find` miss -----
 
     // `Box` is declared in shortcut form, so it is list-encoded

@@ -149,6 +149,14 @@ source, in `pebble test`, in buildooor and in any tool using
 
 ### Fixes
 
+- ⚠ Security: a loop that reassigns one variable could be left out of the compiled script,
+  along with every `assert` in it. This happened when the loop's result was overwritten
+  before being read (`rest = xs;` after the loop), was read only by a `const` that is never
+  used, or was read only in a branch (then the loop ran only when the branch was taken). The
+  0.4.0 fix for masterpiece BUG 26 covered only a result that is never read. Now the loop is
+  kept unless the statements after it certainly compute its result, or the loop cannot fail
+  and certainly ends (a `for...of`, or a `for` counting to a bound its body does not change).
+  No example's script changes.
 - `fail "message";` never printed its message: it compiled to `trace( message, error )`, whose
   `error` argument fails before `trace` runs. The failure now waits for the message.
 - A variable declared in a block that shadowed one of its function kept the outer value:

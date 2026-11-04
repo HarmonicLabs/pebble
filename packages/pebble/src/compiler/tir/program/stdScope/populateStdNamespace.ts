@@ -131,7 +131,7 @@ export function populateStdNamespace( program: TypedProgram ): void
         funcType: TirFuncT,
         namespacePath: string,
         /** custom IR (e.g. nullary builtins needing a unit application) */
-        mkIR: () => IRTerm = () => new IRNative( tag )
+        mkIR?: () => IRTerm
     ): void
     {
         const uniqueTirName = `__pebble__std__${namespacePath}__${astName}`;
@@ -139,8 +139,9 @@ export function populateStdNamespace( program: TypedProgram ): void
             uniqueTirName,
             new TirInlineClosedIR(
                 funcType,
-                mkIR,
-                SourceRange.unknown
+                mkIR ?? ( () => new IRNative( tag ) ),
+                SourceRange.unknown,
+                mkIR === undefined ? tag : undefined
             )
         );
         scope.functions.set( astName, uniqueTirName );

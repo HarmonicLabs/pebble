@@ -45,6 +45,7 @@ import { TirLitNamedObjExpr } from "../../tir/expressions/litteral/TirLitNamedOb
 import { TirTernaryExpr } from "../../tir/expressions/TirTernaryExpr";
 import { expressifyIfBranch } from "./expressifyIfBranch";
 import { expressifyForStmt, loopToForStmt } from "./expressifyForStmt";
+import { loopCannotFail, loopResultIsForced } from "./loopResultIsForced";
 import { getListTypeArg } from "../../tir/types/utils/getListTypeArg";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirLitIntExpr } from "../../tir/expressions/litteral/TirLitIntExpr";
@@ -909,19 +910,26 @@ export function expressifyFuncBody(
             // are tail-positioned and their value must match the outer
             // function's expected return type — we don't try to reconcile
             // that here).
-            // ...and only when the reassigned variable is actually READ
-            // after the loop. If it is not, the bare result is bound as a
-            // letted constant nothing references, and letteds only
-            // materialize at their references — the binding, and with it
-            // the WHOLE LOOP (including any `assert` in its body), was
-            // dropped from the compiled script. That silently deleted an
-            // ownership-check loop: masterpiece BUG 26. With the result
-            // dead we keep the SoP path instead, where the loop call is
-            // the scrutinee of an `IRCase` and therefore always evaluated.
+            // ...and only when the statements after the loop CERTAINLY
+            // compute the reassigned variable. If they do not, the bare
+            // result is bound as a letted constant that may never be
+            // referenced, and letteds only materialize at their
+            // references — the binding, and with it the WHOLE LOOP
+            // (including any `assert` in its body), was dropped from the
+            // compiled script. That silently deleted an ownership-check
+            // loop: masterpiece BUG 26 (result never read); a result read
+            // only in one branch, only by an unused `const`, or
+            // overwritten first did the same (see `loopResultIsForced`).
+            // A loop that cannot fail may be dropped, so it needs neither.
+            // Otherwise we keep the SoP path, where the loop call is the
+            // scrutinee of an `IRCase` and therefore always evaluated.
             const bareVarName: string | undefined = reassignedAndFlow.reassigned[0];
             const bareVarIsReadAfterLoop = (
                 typeof bareVarName === "string"
-                && bodyStmts.some( s => s.deps().includes( bareVarName ) )
+                && (
+                    loopResultIsForced( bodyStmts, bareVarName, ctx.program )
+                    || loopCannotFail( stmt, ctx.program )
+                )
             );
             const canBareLower = (
                 reassignedAndFlow.reassigned.length === 1
@@ -952,7 +960,7 @@ export function expressifyFuncBody(
                 // the original `let varName = ...` statement) isn't
                 // shadowed by a no-op `introduceLettedConstant` call.
                 // Sound only because `canBareLower` requires the variable
-                // to be read after the loop (see above).
+                // to be certainly computed after the loop (see above).
                 const [ varName ] = reassignedAndFlow.reassigned;
                 const loopResultName = getUniqueInternalName( varName );
                 const lettedExpr = ctx.introduceLettedConstant(
