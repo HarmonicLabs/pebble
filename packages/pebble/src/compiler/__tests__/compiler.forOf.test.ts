@@ -215,6 +215,22 @@ export function main( xs: List<int> ): int {
         applyAndExpectInt(uplc, intList([1, 2, 3, 4, 5]), 3n);  // 1 + 2
     });
 
+    test("for-of over a list literal: the elements give the element type", async () => {
+        // the loop asks for `List<T>`; the literal used to take that as its type, so `x`
+        // was a `T` (`total += x` did not type-check) and a bytes literal list had no
+        // IR constant type
+        const uplc = await exportFunction(`
+export function main( k: int ): int {
+    let total = 0;
+    for( const x of [ 1, 2, 3 ] ) { total += x * k; }
+    let n = 0;
+    for( const b of [ #ab, #cdef ] ) { n += b.length(); }
+    return total + n;
+}
+`, "main");
+        applyAndExpectInt(uplc, UPLCConst.int(10), 63n);  // ( 1 + 2 + 3 ) * 10 + 1 + 2
+    });
+
     // ── boolean result smoke test ──
 
     test("for-of can drive a boolean predicate", async () => {

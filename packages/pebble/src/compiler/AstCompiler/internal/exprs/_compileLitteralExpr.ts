@@ -38,6 +38,7 @@ import { TirDataOptT } from "../../../tir/types/TirNativeType/native/Optional/da
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
 import { TirDataStructType, TirSoPStructType, TirStructType } from "../../../tir/types/TirStructType";
 import { TirType, isTirType } from "../../../tir/types/TirType";
+import { TirTypeParam } from "../../../tir/types/TirTypeParam";
 import { canAssignTo, isStructOrStructAlias, getStructType, canAssignToOptional, canAssignToList } from "../../../tir/types/utils/canAssignTo";
 import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
@@ -388,6 +389,13 @@ export function _compileLitteralArrayExpr(
             );
         else
             elemsType = getListTypeArg( listType );
+    }
+    // a hint that only asks for some list (`for...of` gives `List<T>`) types nothing: the
+    // elements do. Taken as is, `[ 1, 2, 3 ]` got the type `List<T>`
+    if( elemsType instanceof TirTypeParam && expr.elems.length > 0 )
+    {
+        listType = undefined;
+        elemsType = undefined;
     }
 
     if( expr.elems.length === 0 )
