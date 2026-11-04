@@ -111,6 +111,14 @@ export class TirAssertAndContinueExpr
 
         const error = new IRError();
         error.meta.range = nConditions === 1 && isSourceRange( lastAssertRange ) ? lastAssertRange : null;
+        // `removeTraces`: an assert's message prints when its condition is false; the optimizer
+        // may rewrite the condition (`x > 0` checked as `x <= 0`), so a lone assert's `error`,
+        // which fails for it alone, prints the message too (the replay prints it once)
+        if( nConditions === 1 )
+        {
+            const messages = ( irMeta( irConditions ).tracePoints ?? [] ).filter( p => p.when === 1 );
+            if( messages.length > 0 ) irMeta( error ).tracePoints = messages.map( p => ({ trace: p.trace, when: 2 }) );
+        }
         const delayedContinuation = new IRDelayed( irContinuation );
         const delayedError = new IRDelayed( error );
         delayedContinuation.meta.range = null;

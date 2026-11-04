@@ -31,8 +31,10 @@ export function noteVarReplaced( replacement: IRTerm, replaced: IRTerm | undefin
 /** the lambda `lambda` binds the IR variable `sym` */
 export function noteLambdaBinding( lambda: UPLCTerm, sym: symbol ): void
 {
-    const dbg = currentCompilationCtx().debug;
-    if( dbg !== undefined ) dbg.lambdaBinds.set( lambda, sym );
+    const ctx = currentCompilationCtx();
+    if( ctx.debug !== undefined ) ctx.debug.lambdaBinds.set( lambda, sym );
+    // removed traces with computed messages read their values through the lambdas
+    if( ctx.strippedTraces !== undefined ) ctx.lambdaSymbols.set( lambda, sym );
 }
 
 /** whether debug information is being collected */

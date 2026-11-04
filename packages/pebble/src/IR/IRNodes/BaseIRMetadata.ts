@@ -12,6 +12,19 @@ export interface IRFnEntryMeta {
     debugFn?: DebugFunction
 }
 
+/** a trace the compiler removed (`removeTraces`) that would have run at a node (see `irTraces`) */
+export interface IRTracePoint {
+    /** index in the compilation's removed traces */
+    readonly trace: number
+    /**
+     * `0` when the node is computed, `1` when it (an assert's condition) returns false, `2` when
+     * it fails, `3` when it returns its value (the message is computed from that value)
+     */
+    readonly when: 0 | 1 | 2 | 3
+    /** `2` on a case the compiler dropped failing branches from: the branch the trace was in */
+    readonly branch?: number
+}
+
 export interface BaseIRMetadata {
     name?: string | undefined
     /**
@@ -40,4 +53,9 @@ export interface BaseIRMetadata {
      * `const`): evaluating it evaluates them
      */
     useRanges?: readonly SourceRange[]
+    /**
+     * traces the compiler removed that would have run here, in the order they ran (outer
+     * first); `null` when nodes with different ones were merged
+     */
+    tracePoints?: readonly IRTracePoint[] | null
 }

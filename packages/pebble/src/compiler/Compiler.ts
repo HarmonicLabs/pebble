@@ -1,5 +1,5 @@
 import { Application, compileUPLC, Force, parseUPLC, prettyUPLC, showUPLCConstValue, UPLCConst, UPLCProgram, UPLCTerm, UPLCVersion } from "@harmoniclabs/uplc";
-import { CEKConst, CEKError, ExBudget, findMappedProgram, indexProgram, locateFailure, Machine, recordEvaluation, RecordEvaluationOptions, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
+import { CEKConst, CEKError, CEKValueObj, evaluateWithSourceMap, ExBudget, findMappedProgram, indexProgram, locateFailure, Machine, recordEvaluation, RecordEvaluationOptions, ScriptFailure, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
 import { DiagnosticCategory } from "../diagnostics/DiagnosticCategory";
 import { DiagnosticEmitter } from "../diagnostics/DiagnosticEmitter"
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
@@ -18,6 +18,13 @@ import { collectDebugStructure } from "./debug/collectDebugStructure";
 import { buildDebugTable, DebugTable } from "./debug/buildDebugTable";
 import { DebugRun } from "../debugger/DebugRun";
 import type { UplcMarks } from "../IR/sourceMap/uplcMarks";
+import type { StrippedTrace } from "../IR/sourceMap/irTraces";
+import { IRDelayed } from "../IR/IRNodes/IRDelayed";
+import { IRNodeKind } from "../IR/IRNodeKind";
+import { IRLetted } from "../IR/IRNodes/IRLetted";
+import { IRHoisted } from "../IR/IRNodes/IRHoisted";
+import type { IRTerm } from "../IR/IRTerm";
+import { _modifyChildFromTo } from "../IR/toUPLC/_internal/_modifyChildFromTo";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
 import { TirFuncExpr } from "./tir/expressions/TirFuncExpr";
@@ -218,7 +225,8 @@ export class Compiler
         const uplcProgram = parseUPLC( compiled.bytes );
         // the run-wrapper is always a 0-arg function, which now
         // compiles to `Delay(body)`; force it so the body executes.
-        return Machine.eval( new Force( uplcProgram.body ) );
+        const { result, budgetSpent, logs } = evaluateCompiled( new Force( uplcProgram.body ), uplcProgram.body, compiled );
+        return { result, budgetSpent, logs };
     }
 
     async test( config?: Partial<CompilerOptions> & {
@@ -316,7 +324,11 @@ export class Compiler
         return { test, run: undefined, bytes: capture.compiled?.bytes, sourceMap: capture.compiled?.sourceMap(), debugTable: undefined };
 
         const debugTable = capture.compiled.debugTable();
-        const recording = recordEvaluation( capture.term, { maxStates: config.maxStates } );
+        // with the traces the compiler removed put back in its logs
+        const recording = recordEvaluation( capture.term, {
+            maxStates: config.maxStates,
+            ...( capture.compiled.strippedTraces > 0 ? { map: capture.compiled.sourceMap(), program: capture.body } : {} ),
+        });
         return {
             test,
             run: new DebugRun( recording, debugTable, indexProgram( capture.body ) ),
@@ -349,7 +361,7 @@ export class Compiler
             "the script is not the program this project compiles to (no part of it has the source map's programHash " +
             compiled.sourceMap.programHash + "); compile the version of the project the script comes from"
         );
-        const recording = recordEvaluation( term, { costModel, budget, maxStates } );
+        const recording = recordEvaluation( term, { costModel, budget, maxStates, map: compiled.sourceMap, program } );
         return {
             ...compiled,
             run: new DebugRun( recording, compiled.debugTable, indexProgram( program ) ),
@@ -414,7 +426,7 @@ export class Compiler
         {
             const term = new Force( uplcProgram.body );
             if( capture !== undefined ) capture.term = term;
-            const evalResult = Machine.eval( term );
+            const evalResult = evaluateCompiled( term, uplcProgram.body, compiled );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
                 cpu: BigInt( evalResult.budgetSpent.cpu ),
@@ -423,10 +435,13 @@ export class Compiler
             const iter: TestIterationResult = {
                 passed: !isErr,
                 budgetSpent: budget,
-                logs: evalResult.logs.slice(),
+                logs: evalResult.logs,
                 error: isErr ? {
                     msg: ( evalResult.result as CEKError ).msg,
-                    ...locateTestFailure( term, uplcProgram.body, compiled )
+                    ...( evalResult.failure !== undefined
+                        ? failureLocation( evalResult.failure )
+                        : locateTestFailure( term, uplcProgram.body, compiled )
+                    )
                 } : undefined,
             };
             return {
@@ -500,7 +515,7 @@ export class Compiler
             let app: UPLCTerm = uplcProgram.body;
             for( const arg of args ) app = new Application( app, arg );
             if( capture !== undefined && capture.term === undefined ) capture.term = app;
-            const evalResult = Machine.eval( app );
+            const evalResult = evaluateCompiled( app, uplcProgram.body, compiled );
             const isErr = evalResult.result instanceof CEKError;
             const budget: TestBudget = {
                 cpu: BigInt( evalResult.budgetSpent.cpu ),
@@ -510,7 +525,7 @@ export class Compiler
                 iter: {
                     passed: !isErr,
                     budgetSpent: budget,
-                    logs: evalResult.logs.slice(),
+                    logs: evalResult.logs,
                     error: isErr ? { msg: ( evalResult.result as CEKError ).msg } : undefined,
                 },
                 term: app
@@ -712,9 +727,15 @@ export class Compiler
         const outPath = outDir + ( outDir.endsWith("/") ? "" : "/" ) + "out.flat";
         await this.io.writeFile( outPath, compiled.bytes, cfg.root );
         this.io.stdout.write( `compiled program written to ${outPath}\n` );
-        if( cfg.sourceMap === false ) return;
-        await this.io.writeFile( outPath + ".map", JSON.stringify( compiled.sourceMap() ), cfg.root );
+        if( cfg.sourceMap === false )
+        {
+            if( compiled.strippedTraces > 0 ) this.io.stdout.write( `${compiled.strippedTraces} traces removed (removeTraces); without a source map they are gone\n` );
+            return;
+        }
+        const map = compiled.sourceMap();
+        await this.io.writeFile( outPath + ".map", JSON.stringify( map ), cfg.root );
         this.io.stdout.write( `source map written to ${outPath}.map\n` );
+        if( compiled.strippedTraces > 0 ) this.io.stdout.write( removedTracesNote( map ) );
     }
 }
 
@@ -740,6 +761,9 @@ export function compileProgramBackend(
     const compilationCtx = new CompilationCtx();
     const debug = collectDebugInfo ? new DebugCollector() : undefined;
     compilationCtx.debug = debug;
+    // traces are removed before anything is optimized: the program is the one without them,
+    // and its map keeps them
+    if( cfg.removeTraces === true ) compilationCtx.strippedTraces = [];
     return withCompilationCtx( compilationCtx, () => {
         // the statements as written: `compileTypedProgram` rewrites them into expressions
         if( debug !== undefined ) collectDebugStructure( program, debug );
@@ -754,12 +778,15 @@ export function compileProgramBackend(
             uplc
         );
         const bytes = compileUPLC( uplcProgram );
+        const strippedTraces = compilationCtx.strippedTraces ?? [];
+        const lambdaSymbols = compilationCtx.lambdaSymbols;
 
         // the map costs a walk of the program; most callers never ask for it
         let sourceMap: UPLCSourceMap | undefined = undefined;
         let debugTable: DebugTable | undefined = undefined;
         return {
             bytes,
+            strippedTraces: strippedTraces.length,
             sourceMap: () => sourceMap ??= buildSourceMap({
                 program: uplc,
                 marks,
@@ -768,6 +795,9 @@ export function compileProgramBackend(
                 compiler: "pebble " + COMPILER_VERSION,
                 sourcesContent: cfg.sourceMapContent === true,
                 root: cfg.root,
+                traces: strippedTraces,
+                tracePrograms: compileTracePrograms( strippedTraces, cfg ),
+                lambdaSymbols,
             }),
             debugTable: debug === undefined ? undefined : () => debugTable ??= buildDebugTable({
                 program: uplc,
@@ -778,9 +808,54 @@ export function compileProgramBackend(
     });
 }
 
+/**
+ * the programs computing the messages of removed traces (see `StrippedTrace.recipe`), each
+ * compiled on its own; `undefined` for a constant message, or one that could not be compiled
+ */
+function compileTracePrograms( traces: readonly StrippedTrace[], cfg: CompilerOptions ): ( Uint8Array | undefined )[]
+{
+    return traces.map( t => {
+        const recipe = t.recipe;
+        if( recipe === undefined ) return undefined;
+        // the values the message reads, computed in place: a message is computed once, on the
+        // side, and the backend miscompiled some chains of letted values taken out of a function
+        const message = inlineLettedValues( recipe.ir.clone() );
+        // the backend expects a program rooted at a function, or a `delay` (a function without
+        // parameters): a message that takes nothing is delayed (`TraceReplay` forces it)
+        const ir = message.kind === IRNodeKind.Func ? message : new IRDelayed( message );
+        try {
+            return withCompilationCtx( new CompilationCtx(), () => compileUPLC( new UPLCProgram(
+                cfg.targetUplcVersion,
+                compileIRToUPLC( ir, cfg, new Map() )
+            )));
+        }
+        catch( e ) {
+            // a message the map cannot compute is shown as its source text
+            if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not compile a removed trace:", e );
+            return undefined;
+        }
+    });
+}
+
+/** `term` with every letted value outside hoisted terms replaced by the value itself */
+function inlineLettedValues( term: IRTerm ): IRTerm
+{
+    if( term instanceof IRLetted ) return inlineLettedValues( term.value.clone() );
+    if( term instanceof IRHoisted ) return term;
+    const children = term.children();
+    for( const child of children )
+    {
+        const inlined = inlineLettedValues( child );
+        if( inlined !== child ) _modifyChildFromTo( term as any, child, inlined );
+    }
+    return term;
+}
+
 export interface CompiledProgram {
     /** the flat-encoded program */
     bytes: Uint8Array;
+    /** how many traces the compiler removed (`removeTraces`); the source map keeps them */
+    strippedTraces: number;
     /** built on the first call */
     sourceMap: () => UPLCSourceMap;
     /** built on the first call; only when debug information was collected */
@@ -811,6 +886,56 @@ function _sampleInputValue( sample: TypedSample ): unknown
         return rt;
     } catch {}
     return sample.show;
+}
+
+/**
+ * Evaluates `term`, the compiled program `body` applied, as the machine does; when the compiler
+ * removed traces (`removeTraces`), with the source map, so the logs have them back (and a failure
+ * comes located). The evaluation itself is the program's either way.
+ */
+function evaluateCompiled(
+    term: UPLCTerm,
+    body: UPLCTerm,
+    compiled: CompiledProgram
+): { result: CEKValueObj, budgetSpent: ExBudget, logs: string[], failure?: ScriptFailure }
+{
+    if( compiled.strippedTraces > 0 )
+    {
+        try {
+            const r = evaluateWithSourceMap({ term, program: body, map: compiled.sourceMap() });
+            if( r.mapped ) return r;
+        }
+        catch( e ) {
+            if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not put the removed traces back:", e );
+        }
+    }
+    const r = Machine.eval( term );
+    return { result: r.result, budgetSpent: r.budgetSpent, logs: r.logs.slice() };
+}
+
+/**
+ * what the compiler says about the traces it removed: kept in the map, except those whose code
+ * the optimizer removed with them (a helper reduced to a builtin has no call left to trace)
+ */
+function removedTracesNote( map: UPLCSourceMap ): string
+{
+    const traces = map.traces ?? [];
+    const placed = new Set( ( map.tracePoints ?? [] ).map( p => p[1] ) );
+    const unplaced = traces.filter( ( _, k ) => !placed.has( k ) );
+    let note = `${traces.length} traces removed (removeTraces); the source map keeps them\n`;
+    if( unplaced.length > 0 )
+    {
+        const where = unplaced.map( t => t.at === undefined ? "library code" : `${map.sources[ t.at[0] ]}:${t.at[1]}:${t.at[2]}` );
+        note += `  ${unplaced.length} of them have no place left in the program, the code around them was optimized away: ${where.join( ", " )}\n`;
+    }
+    return note;
+}
+
+function failureLocation( failure: ScriptFailure ): Pick<TestError, "location" | "stack">
+{
+    return failure.location === undefined
+        ? { stack: failure.stack }
+        : { location: failure.location, stack: failure.stack };
 }
 
 /**

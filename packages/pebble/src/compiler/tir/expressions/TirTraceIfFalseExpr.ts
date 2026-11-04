@@ -16,6 +16,8 @@ import { IRCase, IRConstr } from "../../../IR/IRNodes";
 import { IRFunc } from "../../../IR/IRNodes/IRFunc";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
 import { getUnaliased } from "../types/utils/getUnaliased";
+import { markStrippedTrace, strippingTraces } from "../../../IR/sourceMap/irTraces";
+import { strippedTrace } from "./strippedTrace";
 
 export class TirTraceIfFalseExpr
     implements ITirExpr
@@ -60,6 +62,16 @@ export class TirTraceIfFalseExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const condType = getUnaliased( this.condition.type );
+
+        if( strippingTraces() )
+        {
+            // `removeTraces`: the condition alone; the map keeps the message, for when it is false
+            const trace = strippedTrace( "assert", this.range, this.traceStrExpr, () => this.traceStrExpr.toIR( ctx ) );
+            const condition = condType instanceof TirSopOptT
+                ? new IRCase( this.condition.toIR( ctx ), [ new IRFunc( [ Symbol("_some_val") ], IRConst.bool( true ) ), IRConst.bool( false ) ] )
+                : this.condition.toIR( ctx );
+            return markStrippedTrace( condition, trace, 1 );
+        }
 
         // SoP Optional: use case expression to convert to bool
         if( condType instanceof TirSopOptT )

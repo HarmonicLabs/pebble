@@ -1,5 +1,6 @@
 import type { IRHash } from "./IRHash";
 import type { DebugCollector } from "../compiler/debug/DebugCollector";
+import type { StrippedTrace } from "./sourceMap/irTraces";
 
 /**
  * Per-compilation mutable state.
@@ -28,6 +29,16 @@ export class CompilationCtx
     readonly mapToTypeCache: Map<string, any> = new Map();
     /** debug information being collected for a debugger; `undefined` (the default) collects none */
     debug: DebugCollector | undefined = undefined;
+    /**
+     * set when the program is compiled without its traces (`removeTraces`): the traces removed,
+     * which its source map keeps; `undefined` (the default) keeps the traces
+     */
+    strippedTraces: StrippedTrace[] | undefined = undefined;
+    /**
+     * while traces are removed: the IR variable each UPLC lambda binds (a computed message
+     * reads its values through them)
+     */
+    readonly lambdaSymbols: Map<object, symbol> = new Map();
 }
 
 let _current: CompilationCtx | undefined = undefined;

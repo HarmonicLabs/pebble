@@ -77,6 +77,26 @@ source, in `pebble test`, in buildooor and in any tool using
 - The map format belongs to `@harmoniclabs/plutus-machine` (version 1, see its
   README); buildooor 0.3.0 reads it (`sourceMaps` option).
 
+### `removeTraces` works, and the source map keeps the traces
+
+- ⚠ Output change: `removeTraces` was never read, so every build kept its traces. It now
+  removes `trace` statements and the messages of `assert` and `fail`, and it is `true` in
+  the production options. A contract with traces compiled with it gets smaller and cheaper,
+  and gets a new hash: the UPLC-CAPE `two_party_escrow` (11 assert messages) goes from 1354 to
+  853 bytes. Set `removeTraces: false` to keep them in the script (the examples do).
+- The traces are removed before anything is optimized: the program is byte for byte the one
+  the source without them compiles to, so a value computed only for a trace is not computed,
+  and the optimizer is free to drop a branch that only failed with a message.
+- The source map keeps them (`traces`, `tracePoints`; see the plutus-machine README): where each
+  would have run, its message, or, for a message computed from values, its source text and a
+  small program computing it. `pebble test`, `pebble debug`, the VS Code debugger, buildooor
+  (failing scripts) and `evaluateWithSourceMap` print them back where they would have run, in
+  order with the traces the program kept; a computed message is computed on the side, from the
+  values the program holds there (`trace acc;` after a loop prints `acc` once the loop has
+  computed it), and says so when one is missing.
+- `pebble compile` and `pebble export` say how many traces they removed, and name those the
+  optimizer left no place for (a helper reduced to a builtin has no call left to trace).
+
 ### Debugger
 
 - `pebble debug` (pebble-cli) records one evaluation, a test (`--test <name>`) or a
@@ -129,6 +149,8 @@ source, in `pebble test`, in buildooor and in any tool using
 
 ### Fixes
 
+- `fail "message";` never printed its message: it compiled to `trace( message, error )`, whose
+  `error` argument fails before `trace` runs. The failure now waits for the message.
 - A variable declared in a block that shadowed one of its function kept the outer value:
   `let x = 1; { let x = 5; return x; }` returned 1 (with another type, the outer value of
   the wrong type). Blocks are compiled inline, where both had the same name; a shadowing

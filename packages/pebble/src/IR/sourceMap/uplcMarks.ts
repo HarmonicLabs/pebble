@@ -1,6 +1,6 @@
 import { Application, Case, Constr, Delay, Force, Lambda, UPLCTerm } from "@harmoniclabs/uplc";
 import type { SourceRange } from "../../ast/Source/SourceRange";
-import type { BaseIRMetadata, IRFnEntryMeta } from "../IRNodes/BaseIRMetadata";
+import type { BaseIRMetadata, IRFnEntryMeta, IRTracePoint } from "../IRNodes/BaseIRMetadata";
 import type { DebugBinding, DebugFunction } from "../../compiler/debug/DebugInfo";
 import { unionBindings } from "./unionBindings";
 
@@ -17,6 +17,8 @@ export interface UplcMark {
     loopEntry?: DebugFunction | null
     /** debug information: uses of a variable the term was copied in place of */
     useRanges?: readonly SourceRange[]
+    /** traces the compiler removed that would have run at the term, in the order they ran */
+    tracePoints?: readonly IRTracePoint[]
 }
 
 export type UplcMarks = Map<UPLCTerm, UplcMark>;
@@ -38,6 +40,8 @@ export function recordOwnTerms( root: UPLCTerm, meta: BaseIRMetadata, marks: Upl
         if( meta.varValue !== undefined ) rootMark.varValue = unionBindings( rootMark.varValue, meta.varValue );
         if( rootMark.loopEntry === undefined && meta.loopEntry !== undefined ) rootMark.loopEntry = meta.loopEntry;
         if( meta.useRanges !== undefined ) rootMark.useRanges = ( rootMark.useRanges ?? [] ).concat( meta.useRanges );
+        // the node encloses the one that made the term: its traces ran first
+        if( meta.tracePoints ) rootMark.tracePoints = [ ...meta.tracePoints, ...( rootMark.tracePoints ?? [] ) ];
         return;
     }
 
@@ -46,6 +50,7 @@ export function recordOwnTerms( root: UPLCTerm, meta: BaseIRMetadata, marks: Upl
     if( meta.varValue !== undefined ) mark.varValue = meta.varValue;
     if( meta.loopEntry !== undefined ) mark.loopEntry = meta.loopEntry;
     if( meta.useRanges !== undefined ) mark.useRanges = meta.useRanges;
+    if( meta.tracePoints ) mark.tracePoints = meta.tracePoints;
     marks.set( root, mark );
     const stack: UPLCTerm[] = uplcChildren( root ).slice();
     while( stack.length > 0 )

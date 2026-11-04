@@ -78,8 +78,11 @@ test all_ints_are_negative( a: int ) {
 
         const last = r.iterations[ r.iterations.length - 1 ];
         expect( last.passed ).toBe( false );
-        expect( last.error?.msg ).toBe( "explicit error from uplc" );
+        // the build strips traces (`removeTraces`): the assert's message comes back from the
+        // source map, and the failure is located at the assert, whatever the machine says
+        // (here the `case` the optimizer left without the failing branch)
         expect( last.logs ).toContain( "found a non-negative int" );
+        expect( last.error?.location?.line ).toBe( 3 );
 
         // the counterexample is surfaced and is indeed non-negative
         const counterexample = last.inputs?.[0].value as bigint;

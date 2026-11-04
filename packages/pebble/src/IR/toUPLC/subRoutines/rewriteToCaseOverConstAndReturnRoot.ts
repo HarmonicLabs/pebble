@@ -37,6 +37,7 @@ import { IRCase } from "../../IRNodes/IRCase";
 import { IRDelayed } from "../../IRNodes/IRDelayed";
 import { IRError } from "../../IRNodes/IRError";
 import { failRangeOfDropped, irMeta } from "../../sourceMap/irRanges";
+import { prependTracePoints, tracePointsOfDropped } from "../../sourceMap/irTraces";
 import { IRForced } from "../../IRNodes/IRForced";
 import { IRHoisted } from "../../IRNodes/IRHoisted";
 import { IRLetted } from "../../IRNodes/IRLetted";
@@ -215,8 +216,11 @@ export function rewriteToCaseOverConstAndReturnRoot( term: IRTerm ): IRTerm
                     )
                 );
                 // sourcemaps: a value with no branch now fails here, as the dropped errors did
-                const failRange = failRangeOfDropped( Array.from( { length: conts.length - lastNonError }, ( _, k ) => conts[ lastNonError + k ]! ) );
+                const dropped = Array.from( { length: conts.length - lastNonError }, ( _, k ) => conts[ lastNonError + k ]! );
+                const failRange = failRangeOfDropped( dropped );
                 if( failRange !== undefined && irMeta( pruned ).failRange === undefined ) irMeta( pruned ).failRange = failRange;
+                // and the traces removed from them (`removeTraces`) run when it fails for them
+                prependTracePoints( pruned, tracePointsOfDropped( dropped.map( ( term, k ) => ({ term, branch: lastNonError + k }) ) ) );
                 modifyTermAndPushToReprocess( current, pruned );
                 continue;
             }

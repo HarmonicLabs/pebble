@@ -11,6 +11,7 @@ import { IRNative } from "../../../IR/IRNodes/IRNative";
 import { IRVar } from "../../../IR/IRNodes/IRVar";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { failRangeOfDropped, irMeta } from "../../../IR/sourceMap/irRanges";
+import { prependTracePoints, tracePointsOfDropped } from "../../../IR/sourceMap/irTraces";
 import { _ir_lazyIfThenElse } from "../../../IR/tree_utils/_ir_lazyIfThenElse";
 import { _ir_let, _ir_let_sym } from "../../../IR/tree_utils/_ir_let";
 import { filterSortedStrArrInplace } from "../../../utils/array/filterSortedStrArrInplace";
@@ -152,6 +153,13 @@ export class TirCaseExpr
         if( dropped.length === 0 ) return caseIR;
         const failRange = failRangeOfDropped( dropped, this.range );
         if( failRange !== undefined ) irMeta( caseIR ).failRange = failRange;
+        // the traces removed from the dropped branches (`removeTraces`) run when the case fails
+        // for them; `dropped` lists them from the last branch back
+        const kept = caseIR instanceof IRCase ? caseIR.continuations.length : -1;
+        prependTracePoints( caseIR, tracePointsOfDropped( dropped.map( ( term, k ) => ({
+            term,
+            branch: kept < 0 ? -1 : kept + dropped.length - 1 - k
+        }))));
         return caseIR;
     }
 
@@ -390,7 +398,15 @@ export class TirCaseExpr
         return branches.length > 0 ? this._withFailRange( new IRCase(
             this.matchExpr.toIR( ctx ),
             branches
-        ), dropped ) : new IRError() ; // all branches fail, so the whole expression fails
+        ), dropped ) : this._failingWhole( dropped ); // all branches fail, so the whole expression fails
+    }
+
+    /** every branch fails: so does the expression, with the traces removed from the branches */
+    private _failingWhole( dropped: IRTerm[] ): IRTerm
+    {
+        const err = new IRError();
+        prependTracePoints( err, tracePointsOfDropped( dropped.map( term => ({ term, branch: -1 }) ) ) );
+        return err;
     }
 
     private _dataStructToIR(

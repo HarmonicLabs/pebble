@@ -1,7 +1,11 @@
 import { SourceRange } from "../../../ast/Source/SourceRange";
 import { _ir_apps } from "../../../IR/IRNodes/IRApp";
 import { IRError } from "../../../IR/IRNodes/IRError";
+import { IRDelayed } from "../../../IR/IRNodes/IRDelayed";
+import { IRForced } from "../../../IR/IRNodes/IRForced";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
+import { markStrippedTrace, strippingTraces } from "../../../IR/sourceMap/irTraces";
+import { strippedTrace } from "./strippedTrace";
 import type { IRTerm } from "../../../IR/IRTerm";
 import { TirExpr } from "../expressions/TirExpr";
 import { TirType } from "../types/TirType";
@@ -48,12 +52,21 @@ export class TirFailExpr
     toIR( ctx: ToIRTermCtx ): IRTerm
     {
         const err = new IRError();
-        if( !this.failMsgExpr ) return err;
+        const message = this.failMsgExpr;
+        if( !message ) return err;
 
-        return _ir_apps(
-            IRNative.trace,
-            this.failMsgExpr.toIR( ctx ),
-            err
+        // `removeTraces`: the failure alone; the map keeps the message
+        if( strippingTraces() )
+        return markStrippedTrace( err, strippedTrace( "fail", this.range, message, () => message.toIR( ctx ) ), 2 );
+
+        // the message, then the failure: as an argument of `trace`, the `error` failed before
+        // the message was printed
+        return new IRForced(
+            _ir_apps(
+                IRNative.trace,
+                message.toIR( ctx ),
+                new IRDelayed( err )
+            )
         );
     }
 }

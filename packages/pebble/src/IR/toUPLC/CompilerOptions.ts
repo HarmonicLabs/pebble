@@ -96,11 +96,13 @@ export interface CompilerOptions {
      */
     targetUplcVersion: UPLCVersion;
     /**
-     * @todo TODO
-     * 
+     * compile the program without its traces: `trace` statements and the messages of `assert`
+     * and `fail` (smaller, cheaper; the failures stay). The program is the one the source
+     * without them compiles to; its source map (`sourceMap`) keeps them, so `pebble test`,
+     * `pebble debug`, buildooor and `evaluateWithSourceMap` still print them where they would
+     * have run.
+     *
      * @default true
-     * 
-     * set to `false` only for debugging purposes
      **/
     removeTraces: boolean;
     /**

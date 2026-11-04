@@ -1,10 +1,11 @@
-import { indexProgram, UPLCSourceMap, UPLCSourceMapAssert, UPLCSourceMapFailure, UPLCSourceMapFunction, UPLCSourceMapInlinedCall, UPLCSourceMapping } from "@harmoniclabs/plutus-machine";
+import { indexProgram, ProgramIndex, UPLCSourceMap, UPLCSourceMapAssert, UPLCSourceMapFailure, UPLCSourceMapFunction, UPLCSourceMapInlinedCall, UPLCSourceMapping, UPLCSourceMapTrace, UPLCSourceMapTracePoint } from "@harmoniclabs/plutus-machine";
 import { blake2b_256 } from "@harmoniclabs/crypto";
 import { toHex } from "@harmoniclabs/uint8array-utils";
-import type { UPLCTerm, UPLCVersion } from "@harmoniclabs/uplc";
+import { Lambda, UPLCTerm, UPLCVersion } from "@harmoniclabs/uplc";
 import type { Source } from "../../ast/Source/Source";
 import type { SourceRange } from "../../ast/Source/SourceRange";
 import { isSourceRange } from "./irRanges";
+import type { StrippedTrace } from "./irTraces";
 import type { UplcMarks } from "./uplcMarks";
 
 export interface BuildSourceMapArgs {
@@ -21,6 +22,12 @@ export interface BuildSourceMapArgs {
     sourcesContent?: boolean;
     /** project root: source paths are written relative to it, so maps hold no local directories */
     root?: string;
+    /** the traces the compiler removed (`removeTraces`) */
+    traces?: readonly StrippedTrace[];
+    /** for each of `traces` with a computed message: its program, flat-encoded */
+    tracePrograms?: readonly ( Uint8Array | undefined )[];
+    /** the IR variable each lambda of `program` binds (computed messages read them) */
+    lambdaSymbols?: ReadonlyMap<object, symbol>;
 }
 
 /**
@@ -62,11 +69,25 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
     const asserts: UPLCSourceMapAssert[] = [];
     const inlinedCalls: UPLCSourceMapInlinedCall[] = [];
     const failures: UPLCSourceMapFailure[] = [];
+    const tracePoints: UPLCSourceMapTracePoint[] = [];
+    const removedTraces = args.traces ?? [];
 
     for( let i = 0; i < index.terms.length; i++ )
     {
         const mark = args.marks.get( index.terms[i] );
         if( mark === undefined ) continue;
+
+        for( const p of mark.tracePoints ?? [] )
+        {
+            const params = removedTraces[ p.trace ]?.recipe?.params ?? [];
+            tracePoints.push([
+                i,
+                p.trace,
+                p.when,
+                p.branch ?? -1,
+                ...params.map( s => boundAt( index, i, s, args.lambdaSymbols ) ),
+            ]);
+        }
 
         if( isUserRange( mark.range ) )
         mappings.push([ i, sourceIndexOf( mark.range ), ...positionOf( mark.range ) ]);
@@ -107,8 +128,44 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
     };
     if( inlinedCalls.length > 0 ) map.inlinedCalls = inlinedCalls;
     if( failures.length > 0 ) map.failures = failures;
+    if( removedTraces.length > 0 )
+    {
+        map.traces = removedTraces.map( ( t, k ): UPLCSourceMapTrace => {
+            const entry: UPLCSourceMapTrace = { kind: t.kind };
+            if( isUserRange( t.range ) ) entry.at = [ sourceIndexOf( t.range ), ...positionOf( t.range ) ];
+            if( t.message !== undefined ) entry.message = t.message;
+            else
+            {
+                if( t.expression !== undefined ) entry.expression = t.expression;
+                const program = args.tracePrograms?.[k];
+                if( program !== undefined ) entry.program = toHex( program );
+            }
+            return entry;
+        });
+        map.tracePoints = tracePoints;
+    }
+    // computed after the traces: a trace in a source no mapping uses still names it
+    map.sources = sources.map( s => projectRelativePath( s.absoluteProjPath, args.root ) );
     if( args.sourcesContent === true ) map.sourcesContent = sources.map( s => s.text );
     return map;
+}
+
+/**
+ * the de Bruijn index, in the environment of term `i`, of the lambda binding `sym`;
+ * `-1` when no lambda around the term binds it (the optimizer inlined or removed it)
+ */
+function boundAt( index: ProgramIndex, i: number, sym: symbol, lambdaSymbols: ReadonlyMap<object, symbol> | undefined ): number
+{
+    if( lambdaSymbols === undefined ) return -1;
+    let depth = 0;
+    for( let p = index.parents[i]; p >= 0; p = index.parents[p] )
+    {
+        const t = index.terms[p];
+        if( !( t instanceof Lambda ) ) continue;
+        if( lambdaSymbols.get( t ) === sym ) return depth;
+        depth++;
+    }
+    return -1;
 }
 
 function isUserRange( range: SourceRange | null | undefined ): range is SourceRange

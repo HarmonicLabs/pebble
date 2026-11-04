@@ -134,6 +134,12 @@ export function inheritRange( replacement: IRTerm, replaced: IRTerm | undefined 
         to.loopEntry = from.loopEntry;
         from.loopEntry = undefined;
     }
+    // removed traces ran where `replaced` stood, before anything the replacement itself starts
+    if( from.tracePoints )
+    {
+        to.tracePoints = [ ...from.tracePoints, ...( to.tracePoints ?? [] ) ];
+        from.tracePoints = undefined;
+    }
 }
 
 /**
@@ -164,6 +170,8 @@ export function mergeRanges( kept: IRTerm, dropped: IRTerm ): void
         if( mb.varValue !== undefined ) ma.varValue = unionBindings( ma.varValue, mb.varValue );
         if( mb.useRanges !== undefined ) ma.useRanges = unionRanges( ma.useRanges, mb.useRanges );
         if( ma.loopEntry !== mb.loopEntry ) ma.loopEntry = null;
+        // one node for two places runs once: a removed trace in only one of them has no place
+        if( !sameTracePoints( ma.tracePoints, mb.tracePoints ) ) ma.tracePoints = null;
 
         const ca = a.children();
         const cb = b.children();
@@ -220,6 +228,15 @@ export function failRangeOfDropped( dropped: readonly IRTerm[], fallback?: Sourc
         else if( found !== null && !sameRange( found, r ) ) found = null;
     }
     return found ?? ( isSourceRange( fallback ) ? fallback : undefined );
+}
+
+/** `null` (merged away) equals only itself; none equals an empty list */
+function sameTracePoints( a: BaseIRMetadata["tracePoints"], b: BaseIRMetadata["tracePoints"] ): boolean
+{
+    if( a === null || b === null ) return a === b;
+    const xs = a ?? [];
+    const ys = b ?? [];
+    return xs.length === ys.length && xs.every( ( p, i ) => p.trace === ys[i].trace && p.when === ys[i].when && p.branch === ys[i].branch );
 }
 
 export function sameRange( a: SourceRange | null | undefined, b: SourceRange | null | undefined ): boolean
