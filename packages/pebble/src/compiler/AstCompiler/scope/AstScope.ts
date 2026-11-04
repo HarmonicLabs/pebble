@@ -212,18 +212,42 @@ export class AstScope
         this.parent = parent;
     }
 
-    defineValue( valueInfos: IVariableInfos ): boolean
+    /**
+     * @param astName the name the source uses; `valueInfos.name` is the TIR name, the same
+     * unless the declaration shadows a variable of its function (see `shadowsFunctionLocal`)
+     */
+    defineValue( valueInfos: IVariableInfos, astName: string = valueInfos.name ): boolean
     {
         if( this._isReadonly ) return false;
 
         if(
-            invalidSymbolNames.has( valueInfos.name )
-            && !( valueInfos.name === "this" && this.infos.isMethodScope )
+            invalidSymbolNames.has( astName )
+            && !( astName === "this" && this.infos.isMethodScope )
         ) return false;
-        if( this.variables.has( valueInfos.name ) ) return false; // already defined
+        if( this.variables.has( astName ) ) return false; // already defined
 
-        this.variables.set( valueInfos.name, valueInfos );
+        this.variables.set( astName, valueInfos );
         return true;
+    }
+
+    /**
+     * `true` iff a declaration of `name` in this scope shadows a variable (or parameter) of
+     * the same function, declared in an enclosing block. The two need different TIR names:
+     * a block is compiled inline in the enclosing body, where they would be one variable.
+     *
+     * `false` outside functions, and for variables of enclosing functions (closures get
+     * their own context).
+     */
+    shadowsFunctionLocal( name: string ): boolean
+    {
+        if( this.isFunctionBoundary ) return false;
+        let found = false;
+        for( let scope = this.parent; scope !== undefined; scope = scope.parent )
+        {
+            if( !found && scope.variables.has( name ) ) found = true;
+            if( scope.isFunctionBoundary ) return found;
+        }
+        return false;
     }
 
     resolveValue( name: string ): ResolveValueResult | undefined

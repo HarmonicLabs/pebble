@@ -27,7 +27,9 @@ export class TirSimpleVarDecl
             this.type,
             this.initExpr?.clone(),
             this.isConst,
-            this.range
+            this.range,
+            this.typeAnnotationRange,
+            this.sourceName
         );
     }
 

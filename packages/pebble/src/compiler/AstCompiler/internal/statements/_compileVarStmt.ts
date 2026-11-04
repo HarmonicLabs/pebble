@@ -23,6 +23,7 @@ import { getNamedDestructableType, getStructType, canAssignTo } from "../../../t
 import { canCastToData } from "../../../tir/types/utils/canCastTo";
 import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
+import { getUniqueInternalName } from "../../../internalVar";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { _compileSopEncodedConcreteType } from "../types/_compileSopEncodedConcreteType";
@@ -78,26 +79,37 @@ export function _compileSimpleVarDecl(
     if( !typeAndExpr ) return undefined;
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
+    const astName = decl.name.text;
+    const tirName = _tirNameOfDeclared( ctx, astName );
     const success = ctx.scope.defineValue({
-        name: decl.name.text,
+        name: tirName,
         type: finalVarType,
         isConstant: decl.isConst()
-    });
+    }, astName );
     if( !success )
     return ctx.error(
         DiagnosticCode.Duplicate_identifier_0,
-        decl.name.range, decl.name.text
+        decl.name.range, astName
     );
 
     return new TirSimpleVarDecl(
-        decl.name.text,
+        tirName,
         finalVarType,
         initExpr,
         decl.isConst(),
         decl.range,
         typeAnnotationRange,
-        decl.sourceName
+        decl.sourceName ?? ( tirName === astName ? undefined : astName )
     );
+}
+/**
+ * the TIR name of a variable declared as `astName`: the same name, unless the declaration
+ * shadows a variable of the same function (`let x = 1; { let x = 5; ... }`), which would
+ * otherwise become that variable when the block is compiled inline
+ */
+function _tirNameOfDeclared( ctx: AstCompilationCtx, astName: string ): string
+{
+    return ctx.scope.shadowsFunctionLocal( astName ) ? getUniqueInternalName( astName ) : astName;
 }
 export function _compileNamedDeconstructVarDecl(
     ctx: AstCompilationCtx,
@@ -317,12 +329,12 @@ export function _compileArrayLikeDeconstr(
     let rest: string | undefined = undefined;
     if( decl.rest )
     {
-        rest = decl.rest.text;
+        rest = _tirNameOfDeclared( ctx, decl.rest.text );
         const success = ctx.scope.defineValue({
             name: rest,
             type: finalVarType, // same list type
             isConstant: decl.isConst()
-        });
+        }, decl.rest.text );
         if( !success ) return ctx.error(
             DiagnosticCode.Duplicate_identifier_0,
             decl.rest.range, decl.rest.text
