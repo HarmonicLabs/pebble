@@ -19,7 +19,7 @@
         "prepublishOnly": "npm run build",
         "buidl": "npm run build",
         "build": "rm -rf ./dist && npm i && npm run build:light",
-        "test": "jest",
+        "test": "node --test test/repl.test.mjs",
         "genVersions": "node ./scripts/genVersions.js",
         "build:light": "npm run --silent genVersions && tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",
         "build:no-gen": "tsc --project ./tsconfig.json && tsc-alias -p ./tsconfig.json",

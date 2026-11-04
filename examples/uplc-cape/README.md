@@ -39,6 +39,29 @@ cape submission measure submissions/<scenario>/Pebble_0.5.0_michele-nuzzi
 cape submission verify  submissions/<scenario>/Pebble_0.5.0_michele-nuzzi
 ```
 
+## Trying the functions in the REPL
+
+`pebble repl` started here reads this project, so the sources can be imported
+and called. With the CLI 0.6.0 or later:
+
+```text
+pebble> import { factorial } from "./src/factorial.pebble";
+pebble> factorial(5)
+120
+cpu: 2766005 | mem: 11221
+pebble> import { fibonacci } from "./src/fibonacci.pebble";
+pebble> fibonacci(10)
+55
+cpu: 6289504 | mem: 25047
+pebble> const n = factorial(4);
+pebble> fibonacci(n)
+46368
+cpu: 16831474 | mem: 64745
+pebble> :quit
+```
+
+See [the REPL section](../../README.md#try-it-in-the-repl) of the main README.
+
 ## PV11 note
 
 Pebble 0.5.0 emits UPLC 1.2 `case`/`constr` (builtin casing) unconditionally,

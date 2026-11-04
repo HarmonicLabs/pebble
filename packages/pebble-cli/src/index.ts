@@ -96,7 +96,8 @@ defineVersionManager( program );
 //*/
 
 program.command("repl")
-    .description("Start an interactive Pebble REPL")
+    .description("Start an interactive Pebble REPL in the project of the working directory (lines can also be piped in)")
+    .option("-c, --config <string>", "The config file path (default: the nearest pebble.config.json, from the working directory up)")
     .action( pebbleRepl );
 
 program.command("test [path]")

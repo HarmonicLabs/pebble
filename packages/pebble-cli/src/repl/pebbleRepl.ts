@@ -1,380 +1,318 @@
-import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import * as readline from "node:readline";
+import * as path from "node:path";
+import * as os from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import chalk from "chalk";
 import {
-    Compiler,
     COMPILER_VERSION,
-    createMemoryCompilerIoApi,
-    defaultOptions,
-    fromUtf8,
-    toHex,
-    ConstTyTag,
-    constTypeToStirng,
+    CompilerIoApi,
+    DEFAULT_REPL_BUDGET,
+    isIncompleteInput,
+    ReplDiagnostic,
+    ReplFailure,
+    ReplPosition,
+    ReplResult,
+    ReplSession,
+    ReplTestResult,
+    semverSatisfies,
 } from "@harmoniclabs/pebble";
+import { createFsIo } from "../utils/crateFsIo";
+import { loadProjectConfig } from "../utils/loadProjectConfig";
 
-function formatCEKValue(val: any): string
-{
-    if( val.tag === 5 /* CEKValueTag.Error */ )
-    {
-        return chalk.red("error") + (val.msg ? `: ${val.msg}` : "");
-    }
-    if( val.tag === 0 /* CEKValueTag.Const */ )
-    {
-        switch( val.typeTag )
-        {
-            case ConstTyTag.unit: return chalk.blue("void");
-            case ConstTyTag.int: return chalk.yellow(val.value!.toString());
-            case ConstTyTag.bool: return chalk.blue(val.value ? "true" : "false");
-            case ConstTyTag.str: return chalk.green(`"${val.value}"`);
-            case ConstTyTag.byteStr: return chalk.cyan(`#${toHex(val.value as Uint8Array)}`);
-            case ConstTyTag.data: return `(data ${JSON.stringify(val.value)})`;
-            case ConstTyTag.list:
-            case ConstTyTag.pair:
-            default:
-                return `(${constTypeToStirng(val.type)} ${JSON.stringify(val.value, (_k: string, v: any) => typeof v === "bigint" ? v.toString() : v)})`;
-        }
-    }
-    if( val.tag === 3 /* CEKValueTag.Constr */ )
-    {
-        const fields = val.values.map(formatCEKValue).join(", ");
-        return `Constr ${val.index}${fields ? ` [${fields}]` : ""}`;
-    }
-    return "(lambda)";
+export interface ReplFlags {
+    /** the project's config; default: the nearest `pebble.config.json` up from the working directory */
+    config?: string;
 }
 
-// keywords that produce declarations to accumulate across REPL lines
-const _accumKeywords = new Set([
-    "const", "let", "var",
-    "function",
-    "struct", "enum", "type", "interface",
-    "data", "contract", "runtime",
-    "import", "export",
-]);
+const PROMPT = "pebble> ";
+const CONTINUE_PROMPT = "  ...> ";
+const BUFFER_NAME = "__repl__.pebble";
 
-// all keywords that start statements (accumulated or not)
-const _allKeywords = new Set([
-    ..._accumKeywords,
-    "for", "while", "if", "match",
-    "return", "break", "continue", "using",
-    "trace", "assert", "fail", "test",
-]);
-
-function _readFirstWord( text: string ): string
+/** the directory of the nearest `pebble.config.json`, from `dir` up */
+export function findProjectRoot( dir: string ): string | undefined
 {
-    const m = text.match( /^([a-zA-Z_]\w*)/ );
-    return m ? m[1] : "";
-}
-
-interface ContextEntry { key: string; src: string }
-
-/**
- * extracts the declared name from a declaration statement
- * to use as the context key. returns undefined if not detectable.
- */
-function _extractDeclKey( firstWord: string, input: string ): string | undefined
-{
-    let m: RegExpMatchArray | null;
-
-    switch( firstWord )
-    {
-        case "const":
-        case "let":
-        case "var":
-            m = input.match( /^(?:const|let|var)\s+(\w+)/ );
-            return m ? "var:" + m[1] : undefined;
-
-        case "function":
-            m = input.match( /^function\s+(\w+)/ );
-            return m ? "fn:" + m[1] : undefined;
-
-        case "struct":
-        case "enum":
-        case "type":
-        case "interface":
-            m = input.match( /^(?:struct|enum|type|interface)\s+(\w+)/ );
-            return m ? "type:" + m[1] : undefined;
-
-        case "data":
-            m = input.match( /^data\s+(?:struct|enum)?\s*(\w+)/ );
-            return m ? "type:" + m[1] : undefined;
-
-        case "contract":
-        case "runtime":
-            m = input.match( /^(?:contract|runtime)\s+(\w+)/ );
-            return m ? "type:" + m[1] : undefined;
-
-        case "import":
-            return "import:" + input;
-
-        case "export":
-            // export function foo / export struct Foo / etc.
-            m = input.match( /^export\s+(?:function|struct|enum|type|interface|data|contract|runtime)\s+(\w+)/ );
-            if( m ) return "decl:" + m[1];
-            // export const / let / var
-            m = input.match( /^export\s+(?:const|let|var)\s+(\w+)/ );
-            if( m ) return "var:" + m[1];
-            return "export:" + input;
-    }
-    return undefined;
-}
-
-/**
- * ensures a statement source ends with a semicolon
- * (unless it ends with a closing brace, which is self-terminating).
- */
-function _ensureSemicolon( src: string ): string
-{
-    const trimmed = src.trimEnd();
-    if( trimmed.endsWith(";") || trimmed.endsWith("}") ) return trimmed;
-    return trimmed + ";";
-}
-
-/**
- * counts unmatched braces, parens, and brackets in text,
- * respecting string literals and comments.
- * returns > 0 if there are unclosed delimiters.
- */
-function _unclosedDepth( text: string ): number
-{
-    let depth = 0;
-    const len = text.length;
-    let pos = 0;
-
-    while( pos < len )
-    {
-        const ch = text.charCodeAt( pos );
-
-        // single-line comment
-        if( ch === 0x2F && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F )
-        {
-            pos += 2;
-            while( pos < len && text.charCodeAt( pos ) !== 0x0A ) pos++;
-            continue;
-        }
-        // multi-line comment
-        if( ch === 0x2F && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2A )
-        {
-            pos += 2;
-            while( pos < len && !( text.charCodeAt( pos ) === 0x2A && pos + 1 < len && text.charCodeAt( pos + 1 ) === 0x2F ) ) pos++;
-            pos += 2;
-            continue;
-        }
-        // string literals
-        if( ch === 0x22 || ch === 0x27 || ch === 0x60 )
-        {
-            pos++;
-            while( pos < len )
-            {
-                const sc = text.charCodeAt( pos );
-                if( sc === 0x5C ) { pos += 2; continue; }
-                if( sc === ch ) { pos++; break; }
-                pos++;
-            }
-            continue;
-        }
-
-        if( ch === 0x28 || ch === 0x5B || ch === 0x7B ) depth++;
-        else if( ch === 0x29 || ch === 0x5D || ch === 0x7D ) depth--;
-
-        pos++;
-    }
-
-    return depth;
-}
-
-/**
- * ordered context: entries preserve insertion order,
- * and re-declarations replace at the original position.
- */
-class ReplContext
-{
-    private entries: ContextEntry[] = [];
-
-    set( key: string, src: string ): void
-    {
-        const idx = this.entries.findIndex( e => e.key === key );
-        if( idx >= 0 ) this.entries[idx] = { key, src };
-        else this.entries.push({ key, src });
-    }
-
-    get( key: string ): string | undefined
-    {
-        return this.entries.find( e => e.key === key )?.src;
-    }
-
-    has( key: string ): boolean
-    {
-        return this.entries.some( e => e.key === key );
-    }
-
-    toSource(): string
-    {
-        return this.entries.map( e => e.src ).join( "\n" );
-    }
-
-    snapshot(): ContextEntry[]
-    {
-        return this.entries.map( e => ({ ...e }) );
-    }
-
-    restoreSnapshot( snap: ContextEntry[] ): void
-    {
-        this.entries = snap;
-    }
-}
-
-export async function pebbleRepl(): Promise<void>
-{
-    const rl = readline.createInterface({ input: stdin, output: stdout });
-
-    console.log(chalk.bold("Pebble REPL"));
-    console.log("Type pebble expressions to evaluate them. Use :quit to exit.\n");
-
-    const entryFile = "__repl__.pebble";
-    const context = new ReplContext();
-
+    dir = path.resolve( dir );
     while( true )
     {
-        let input: string;
-        try {
-            input = await rl.question(chalk.blue("pebble> "));
-        }
-        catch {
-            // EOF (ctrl+D)
-            break;
-        }
+        if( existsSync( path.join( dir, "pebble.config.json" ) ) ) return dir;
+        const parent = path.dirname( dir );
+        if( parent === dir ) return undefined;
+        dir = parent;
+    }
+}
 
-        const trimmed = input.trim();
-        if( !trimmed ) continue;
-        if( trimmed === ":quit" || trimmed === ":q" || trimmed === ":exit" )
+/**
+ * The project's files, read only. The compiler asks for project paths (`/src/a.pebble`, from
+ * the root); an existing absolute path is read as it is.
+ */
+function projectIo( root: string ): CompilerIoApi
+{
+    const fsIo = createFsIo( root );
+    const onDisk = ( f: string ) => path.isAbsolute( f ) && existsSync( f ) ? f : path.join( root, f.replace( /^[\\/]+/, "" ) );
+    return {
+        ...fsIo,
+        readFile: f => fsIo.readFile( onDisk( f ), root ),
+        exsistSync: f => existsSync( onDisk( f ) ),
+        listFiles: d => fsIo.listFiles( onDisk( d ), root ),
+        writeFile: () => {},
+    };
+}
+
+function historyFile(): string | undefined
+{
+    const env = process.env.PEBBLE_REPL_HISTORY;
+    if( env !== undefined ) return env.trim().length > 0 ? env : undefined;
+    return path.join( os.homedir(), ".pebble_repl_history" );
+}
+
+function loadHistory( file: string | undefined ): string[]
+{
+    if( file === undefined ) return [];
+    try { return readFileSync( file, "utf8" ).split( "\n" ).filter( l => l.length > 0 ).slice( -1000 ).reverse(); }
+    catch { return []; }
+}
+
+export async function pebbleRepl( flags: ReplFlags = {} ): Promise<void>
+{
+    const cwd = process.cwd();
+    const configPath = flags.config === undefined ? undefined : path.resolve( cwd, flags.config );
+    const root = configPath !== undefined ? path.dirname( configPath ) : ( findProjectRoot( cwd ) ?? cwd );
+    const config = loadProjectConfig( root, configPath === undefined ? undefined : path.basename( configPath ) );
+    const hasConfig = existsSync( configPath ?? path.join( root, "pebble.config.json" ) );
+
+    // the session's source sits in the working directory: relative imports resolve from there
+    const fromRoot = path.relative( root, cwd ).split( path.sep ).filter( s => s.length > 0 );
+    const bufferPath = "/" + [ ...( fromRoot[0] === ".." ? [] : fromRoot ), BUFFER_NAME ].join( "/" );
+
+    const session = new ReplSession({ io: projectIo( root ), config, root, bufferPath });
+
+    const interactive = process.stdin.isTTY === true;
+    const history = interactive ? historyFile() : undefined;
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: interactive ? process.stdout : undefined,
+        terminal: interactive,
+        history: loadHistory( history ),
+        historySize: 1000,
+        removeHistoryDuplicates: true,
+    } as readline.ReadLineOptions );
+
+    if( interactive )
+    {
+        console.log( chalk.bold( `Pebble REPL ${COMPILER_VERSION}` ) + chalk.dim( hasConfig ? `, project ${root}` : "" ) );
+        console.log( chalk.dim( "Type :help for help." ) );
+    }
+    if( hasConfig && typeof config.compilerVersion === "string" && !semverSatisfies( COMPILER_VERSION, config.compilerVersion ) )
+    console.log( chalk.yellow( `warning: pebble.config.json asks for compiler ${config.compilerVersion}; this is ${COMPILER_VERSION}` ) );
+
+    // lines in order, whether typed or piped: a pipe delivers them before they are asked for
+    const CANCEL = Symbol( "cancel" );
+    type Line = string | undefined | typeof CANCEL;
+    const queue: string[] = [];
+    let waiter: (( line: Line ) => void) | undefined = undefined;
+    let closed = false;
+    const deliver = ( line: Line ) => { const w = waiter; waiter = undefined; w?.( line ); };
+    rl.on( "line", line => { if( waiter !== undefined ) deliver( line ); else queue.push( line ); });
+    rl.on( "close", () => { closed = true; deliver( undefined ); });
+
+    let interruptedOnce = false;
+    let pending = false;
+    rl.on( "SIGINT", () => {
+        const hadInput = pending || rl.line.length > 0;
+        // drop what was typed (it stays on screen, as in node's REPL)
+        ( rl as any ).line = "";
+        ( rl as any ).cursor = 0;
+        if( !hadInput )
         {
-            break;
+            if( interruptedOnce ) { rl.close(); return; }
+            interruptedOnce = true;
+            process.stdout.write( "\n" + chalk.dim( "(to exit, press Ctrl+C again or Ctrl+D, or type :quit)" ) );
         }
+        process.stdout.write( "\n" );
+        deliver( CANCEL );
+    });
 
-        // multi-line: keep reading if delimiters are unclosed
-        let fullInput = trimmed;
-        while( _unclosedDepth( fullInput ) > 0 )
+    const readLine = ( prompt: string ): Promise<Line> => {
+        if( queue.length === 0 && !closed && interactive ) { rl.setPrompt( chalk.blue( prompt ) ); rl.prompt(); }
+        const line: Promise<Line> = (
+            queue.length > 0 ? Promise.resolve( queue.shift() ) :
+            closed ? Promise.resolve( undefined ) :
+            new Promise<Line>( resolve => { waiter = resolve; } )
+        );
+        // piped: show the line, so the output reads as a session
+        return line.then( l => { if( !interactive && typeof l === "string" ) process.stdout.write( prompt + l + "\n" ); return l; });
+    };
+
+    let failed = false;
+    loop: while( true )
+    {
+        pending = false;
+        const first = await readLine( PROMPT );
+        if( first === undefined ) break;
+        if( first === CANCEL ) continue;
+        interruptedOnce = false;
+
+        const trimmed = first.trim();
+        if( trimmed.length === 0 ) continue;
+        if( trimmed.startsWith( ":" ) && !trimmed.startsWith( "::" ) )
         {
-            let cont: string;
-            try {
-                cont = await rl.question(chalk.blue("  ...> "));
-            }
-            catch {
-                break;
-            }
-            fullInput += "\n" + cont;
-        }
-
-        // classify: keyword-first → statement, otherwise → expression
-        const firstWord = _readFirstWord( fullInput );
-        const isAccum = _accumKeywords.has( firstWord );
-
-        // detect reassignment: <name> = <expr> where <name> is a known variable
-        let isReassignment = false;
-        let reassignName = "";
-        if( !isAccum )
-        {
-            const reassignMatch = fullInput.match( /^(\w+)\s*=\s/ );
-            if( reassignMatch && context.has( "var:" + reassignMatch[1] ) )
+            switch( trimmed.split( /\s+/ )[0] )
             {
-                isReassignment = true;
-                reassignName = reassignMatch[1];
+                case ":quit": case ":q": case ":exit": break loop;
+                case ":help": printHelp( root, cwd, hasConfig ); continue;
+                case ":reset": session.reset(); console.log( chalk.dim( "the session is empty" ) ); continue;
+                case ":list": printList( session ); continue;
+                default:
+                    console.log( chalk.red( "error" ) + `: unknown command ${trimmed.split( /\s+/ )[0]}; :help lists them` );
+                    failed = true;
+                    continue;
             }
         }
 
-        // save a snapshot so we can restore on failure
-        const snapshot = context.snapshot();
-
-        if( isAccum )
+        let input = first;
+        pending = true;
+        let cancelled = false;
+        while( isIncompleteInput( input ) )
         {
-            // it's a declaration — accumulate in context
-            const key = _extractDeclKey( firstWord, fullInput );
-            if( key )
-            {
-                context.set( key, _ensureSemicolon( fullInput ) );
-            }
+            const next = await readLine( CONTINUE_PROMPT );
+            // at the end of the input, what there is goes to the compiler, which says what is missing
+            if( next === undefined ) break;
+            if( next === CANCEL ) { cancelled = true; break; }
+            input += "\n" + next;
         }
-        else if( isReassignment )
-        {
-            // append the assignment to the variable's context entry
-            const key = "var:" + reassignName;
-            const existing = context.get( key )!;
-            context.set( key, existing + "\n" + _ensureSemicolon( fullInput ) );
-        }
+        pending = false;
+        if( cancelled ) continue;
 
-        // build the full source
-        const contextSrc = context.toSource();
-        let fullSrc: string;
-
-        if( isAccum )
-        {
-            // declarations are already in context; no extra body needed
-            fullSrc = contextSrc;
-        }
-        else if( isReassignment )
-        {
-            // assignment is in context; append variable name to return new value
-            fullSrc = contextSrc + "\n" + reassignName;
-        }
-        else
-        {
-            // expression or transient statement — append after context
-            fullSrc = contextSrc
-                ? contextSrc + "\n" + fullInput
-                : fullInput;
-        }
-
-        const ioApi = createMemoryCompilerIoApi({
-            sources: new Map([
-                [entryFile, fromUtf8(fullSrc)],
-            ]),
-            useConsoleAsOutput: true,
-        });
-
-        const compiler = new Compiler(ioApi, {
-            ...defaultOptions,
-            compilerVersion: COMPILER_VERSION,
-            silent: true,
-        });
-
-        try
-        {
-            const { result, budgetSpent, logs } = await compiler.runRepl({
-                entry: entryFile,
-                root: "/",
-            });
-
-            for( const log of logs )
-            {
-                console.log(chalk.magenta("trace:"), log);
-            }
-
-            console.log(formatCEKValue(result));
-
-            console.log(
-                chalk.dim(`cpu: ${budgetSpent.cpu} | mem: ${budgetSpent.mem}`)
-            );
-        }
-        catch( e: any )
-        {
-            // restore context on failure
-            context.restoreSnapshot( snapshot );
-
-            const diagnostics = compiler.diagnostics;
-            if( diagnostics.length > 0 )
-            {
-                for( const d of diagnostics )
-                {
-                    console.error(chalk.red(String(d)));
-                }
-            }
-            else
-            {
-                console.error(chalk.red(e?.message ?? String(e)));
-            }
-        }
+        const result = await session.eval( input );
+        printResult( result );
+        if( !result.ok || result.tests.some( t => !t.passed ) ) failed = true;
     }
 
+    if( history !== undefined )
+    {
+        try { writeFileSync( history, ( rl as any ).history.slice().reverse().join( "\n" ) + "\n" ); }
+        catch { /* a history is a convenience */ }
+    }
     rl.close();
-    console.log("\nBye!");
+    if( interactive ) process.stdout.write( "\n" );
+    // piped: a failing line fails the run, so a script of lines can check a project
+    else if( failed ) process.exitCode = 1;
+}
+
+function printHelp( root: string, cwd: string, hasConfig: boolean ): void
+{
+    const n = ( x: bigint ) => x.toLocaleString( "en-US" );
+    console.log([
+        "Each line runs as one program: your declarations so far, then the line.",
+        "",
+        "  expressions    1 + 2, factorial( 5 )        shows the value and what it cost",
+        "  declarations   const, let, function, struct, import, contract",
+        "                                              kept for the lines after",
+        "  statements     if, for, while, trace, assert, fail, x = ...",
+        "                                              run; what they change in a let is kept",
+        "  tests          test name() { ... }          runs at once, is not kept",
+        "  contracts      contract C { ... }           type-checked; methods run under `pebble test`",
+        "",
+        "  Functions, contracts and tests can use constants and other declarations, not lets.",
+        "",
+        "  :help     this help",
+        "  :list     the declarations kept",
+        "  :reset    forget them",
+        "  :quit     exit (also Ctrl+D, or Ctrl+C twice)",
+        "",
+        `Imports resolve from ${cwd}` + ( hasConfig ? `; the project is ${root}.` : "." ),
+        `A line can spend ${n( DEFAULT_REPL_BUDGET.cpu )} cpu and ${n( DEFAULT_REPL_BUDGET.mem )} mem, a mainnet transaction's limit.`,
+    ].join( "\n" ) );
+}
+
+function printList( session: ReplSession ): void
+{
+    const decls = session.declarations;
+    if( decls.length === 0 ) { console.log( chalk.dim( "no declarations" ) ); return; }
+    const width = String( decls[ decls.length - 1 ].line ).length;
+    for( const d of decls )
+    {
+        const lines = d.text.split( "\n" );
+        console.log( chalk.dim( String( d.line ).padStart( width ) + " | " ) + lines[0] );
+        for( const l of lines.slice( 1 ) ) console.log( chalk.dim( " ".repeat( width ) + " | " ) + l );
+    }
+}
+
+function printResult( r: ReplResult ): void
+{
+    for( const log of r.logs ) console.log( chalk.magenta( "trace:" ), log );
+    for( const d of r.diagnostics ) printDiagnostic( d );
+    if( r.failure !== undefined ) printFailure( r.failure );
+    if( r.value !== undefined ) console.log( colorValue( r.value.text, r.value.node.kind ) );
+    for( const c of r.contracts ) console.log( chalk.dim( `contract ${c}: type-checked; its methods run under \`pebble test\`` ) );
+    for( const t of r.tests ) printTest( t );
+    // a declaration is quiet; what runs shows its cost
+    if( r.budget !== undefined && ( r.value !== undefined || r.failure !== undefined || r.declared.length === 0 ) )
+    console.log( chalk.dim( `cpu: ${r.budget.cpu} | mem: ${r.budget.mem}` ) );
+}
+
+function colorValue( text: string, kind: string ): string
+{
+    switch( kind )
+    {
+        case "int": return chalk.yellow( text );
+        case "bool": return chalk.blue( text );
+        case "bytes": return chalk.cyan( text );
+        case "string": return chalk.green( text );
+        default: return text;
+    }
+}
+
+function printDiagnostic( d: ReplDiagnostic ): void
+{
+    const label = d.category === "error" ? chalk.red( "error" ) : d.category === "warning" ? chalk.yellow( "warning" ) : chalk.blue( "info" );
+    console.log( `${label}: ${d.message}` );
+    if( d.position !== undefined ) printPosition( d.position );
+    if( d.note !== undefined ) console.log( chalk.dim( "  note: " ) + d.note );
+}
+
+function printFailure( f: ReplFailure ): void
+{
+    const message = f.outOfBudget
+        ? `out of budget: a line can spend ${DEFAULT_REPL_BUDGET.cpu.toLocaleString( "en-US" )} cpu and ${DEFAULT_REPL_BUDGET.mem.toLocaleString( "en-US" )} mem`
+        : f.message;
+    console.log( `${chalk.red( "error" )}: ${message}` );
+    if( f.position !== undefined ) printPosition( f.position );
+    for( const frame of f.stack )
+    {
+        if( frame.name === undefined ) continue;
+        const where = frame.position === undefined ? "" : " " + chalk.dim( describePosition( frame.position ) );
+        console.log( `  in ${frame.name}${where}` );
+    }
+}
+
+function printTest( t: ReplTestResult ): void
+{
+    const runs = t.kind === "property" ? chalk.dim( ` (${t.runs} runs)` ) : "";
+    const cost = chalk.dim( `  [cpu: ${t.budget.cpu}, mem: ${t.budget.mem}]` );
+    if( t.skippedReason !== undefined ) { console.log( `${chalk.yellow( "SKIP" )} ${t.name}: ${t.skippedReason}` ); return; }
+    if( t.passed ) { console.log( `${chalk.green( "PASS" )} ${t.name}${runs}${cost}` ); return; }
+    console.log( `${chalk.red( "FAIL" )} ${t.name}${runs}${cost}` );
+    for( const log of t.logs ) console.log( chalk.magenta( "  trace:" ), log );
+    if( t.inputs !== undefined && t.inputs.length > 0 ) console.log( `  with ${t.inputs.join( ", " )}` );
+    if( t.message !== undefined ) console.log( `  ${chalk.red( "error" )}: ${t.message}` );
+    if( t.position !== undefined ) printPosition( t.position );
+}
+
+/** where a position is, in words */
+function describePosition( p: ReplPosition ): string
+{
+    if( p.in === "file" ) return `at ${p.path}:${p.line}:${p.column}`;
+    if( p.in === "session" ) return `entered on line ${p.sessionLine}`;
+    return `at ${p.line}:${p.column}`;
+}
+
+/** the line of text with the position underlined */
+function printPosition( p: ReplPosition ): void
+{
+    if( p.in !== "input" ) console.log( chalk.dim( "  " + describePosition( p ) ) );
+    if( p.lineText.length === 0 ) return;
+    const gutter = String( p.line );
+    console.log( chalk.dim( `  ${gutter} | ` ) + p.lineText );
+    console.log( chalk.dim( `  ${" ".repeat( gutter.length )} | ` ) + " ".repeat( p.column - 1 ) + chalk.red( "^".repeat( Math.max( 1, p.length ) ) ) );
 }

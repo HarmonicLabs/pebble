@@ -39,6 +39,13 @@ jobs:
           node packages/pebble-cli/dist/index.js test examples/linear-vesting --config examples/linear-vesting/pebble.config.json
           node packages/pebble-cli/dist/index.js test examples/two-party-escrow --config examples/two-party-escrow/pebble.config.json
 
+      # `pebble repl` with piped input: the session in the READMEs (from a
+      # fresh checkout of examples/uplc-cape) must print what they show, plus
+      # the REPL's own behaviour (errors, budget, commands, writes nothing)
+      - name: REPL (README walkthrough)
+        shell: bash
+        run: cd packages/pebble-cli && npm test
+
       # buildooor locates a failing script with the compiler's source map: a
       # refund before the escrow's deadline must name the failing line. Local
       # evaluation only, no node.
