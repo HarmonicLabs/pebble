@@ -57,7 +57,7 @@ export enum DiagnosticCode {
     Unnamed_object_litteral_is_not_assignable_to_0 = 252,
     Unnamed_object_litteral_is_not_assignable_to_0_The_fields_do_not_match_the_the_type_definition = 253,
     Field_0_is_not_part_of_the_1_constructor_for_2_struct = 254,
-    Field_0_is_missing_but_required_by_the_1_constructor_of_the_2_struct = 254,
+    Field_0_is_missing_but_required_by_the_1_constructor_of_the_2_struct = 297,
     Named_object_litteral_is_not_assignable_to_0 = 255,
     _0_is_not_defined = 256,
     Cannot_infer_struct_type_from_constructor_0_Declare_it_with_a_using_keyword_declaration = 257,
@@ -86,9 +86,9 @@ export enum DiagnosticCode {
     Type_0_cannot_be_encoded_as_data = 280,
     Type_0_cannot_be_encoded_as_data_but_it_has_a_runtime_encoding_Use_runtime_keyword_modifier_for_the_declaration = 281,
     Default_method_implementatitons_are_not_supported_default_implementation_will_be_ignored = 282,
-    Interface_implementations_cannot_be_exported = 282,
+    Interface_implementations_cannot_be_exported = 298,
     Method_implementations_are_only_allowed_for_types_declared_locally = 283,
-    Method_0_is_already_implemented = 283,
+    Method_0_is_already_implemented = 299,
     While_compiling_function_expression_expected_type_was_not_a_function = 284,
     Could_not_infer_function_signature_parameter_type_is_missing = 285,
     Could_not_infer_function_signature_return_type_is_missing = 286,
@@ -99,7 +99,7 @@ export enum DiagnosticCode {
     Contract_parameters_cannot_have_an_initializer_expression = 291,
     _context_can_only_be_destructured_in_a_constant_declaration = 292,
     _context_can_only_be_accessed_in_a_contract_method = 293,
-    _this_in_a_contract_context_can_only_be_used_to_read_parameters_in_a_contract_method = 293,
+    _this_in_a_contract_context_can_only_be_used_to_read_parameters_in_a_contract_method = 300,
     _0_is_not_available_in_this_contract_method_context = 294,
     _context_can_only_be_destructured_as_an_unnamed_object = 295,
     _0_is_not_a_contract_parameter = 296,
@@ -172,7 +172,7 @@ export enum DiagnosticCode {
     Only_a_single_variable_is_allowed_in_a_for_of_statement = 1363,
     Rest_parameters_are_not_supported_in_pebble_cosider_using_a_concrete_parameter_with_default_value = 1364,
     A_test_can_only_be_specified_at_the_top_level_of_the_file_it_cannot_be_defined_in_functions_etc = 1365,
-    Tests_must_be_specified_in_a_block_statement = 1365,
+    Tests_must_be_specified_in_a_block_statement = 1393,
     Pattern_expected = 1366,
     This_case_will_never_be_evaluated_because_all_patterns_will_be_catched_before = 1367,
     Statement_expected = 1368,
@@ -193,11 +193,12 @@ export enum DiagnosticCode {
     A_match_statement_can_only_be_used_within_a_function_body = 1383,
     A_value_of_type_0_cannot_be_deconstructed = 1384,
     The_argument_of_a_match_statement_branch_must_be_deconstructed = 1385,
-    A_value_of_type_0_cannot_be_deconstructed_by_named_object = 1385,
+    A_value_of_type_0_cannot_be_deconstructed_by_named_object = 1394,
     A_value_of_type_0_cannot_be_deconstructed_as_unnamed_object = 1386,
     A_value_of_type_0_has_multiple_constructors = 1387,
     Unknown_0_constructor_1 = 1388,
     Constructor_0_was_already_specified = 1389,
+    An_expression_cannot_be_a_statement_a_value_that_is_not_used_is_never_computed_Use_it_in_an_assert_for_example_or_remove_it = 1395,
     A_value_of_type_0_cannot_be_deconstructed_as_an_array = 1390,
     Expression_is_not_callable = 1391,
     Unexpected_argument = 1392,
@@ -222,7 +223,7 @@ export enum DiagnosticCode {
     This_expression_is_not_constructable = 2351,
     A_function_whose_declared_type_is_not_void_must_return_a_value = 2355,
     The_operand_of_an_increment_or_decrement_operator_must_be_a_variable = 2357,
-    The_left_hand_side_of_an_assignment_expression_must_be_a_variable_or_a_property_access = 2364,
+    The_left_hand_side_of_an_assignment_must_be_a_variable_a_field_or_an_element_cannot_be_changed_in_place = 2364,
     Operator_0_cannot_be_applied_to_types_1_and_2 = 2365,
     A_super_call_must_be_the_first_statement_in_the_constructor = 2376,
     Constructors_for_derived_classes_must_contain_a_super_call = 2377,
@@ -247,6 +248,7 @@ export enum DiagnosticCode {
     Type_0_has_no_property_1 = 2460,
     The_0_operator_cannot_be_applied_to_type_1 = 2469,
     In_const_enum_declarations_member_initializer_must_be_constant_expression = 2474,
+    The_left_hand_side_of_a_for_of_statement_cannot_use_a_type_annotation = 2483,
     _0_is_referenced_directly_or_indirectly_in_its_own_base_expression = 2506,
     Object_is_possibly_null = 2531,
     Cannot_assign_to_0_because_it_is_a_constant = 2540,
@@ -273,6 +275,7 @@ export enum DiagnosticCode {
     Type_0_cannot_be_converted_to_type_1 = 2812,
     Non_null_opeartor_used_on_expression_of_type_0_which_is_not_optional_this_will_be_omitted_during_compilation = 2813,
     File_0_not_found = 6054,
+    _0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_never_happens_Use_it_or_remove_it = 6133,
     Import_path_0_is_part_of_a_circular_dependency = 6055,
     Numeric_separators_are_not_allowed_here = 6188,
     Multiple_consecutive_numeric_separators_are_not_permitted = 6189,
@@ -362,7 +365,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 252: return "Unnamed object litteral is not assignable to {0}.";
         case 253: return "Unnamed object litteral is not assignable to {0}. The fields do not match the the type definition.";
         case 254: return "Field '{0}' is not part of the '{1}' constructor for '{2}' struct.";
-        case 254: return "Field '{0}' is missing, but required by the '{1}' constructor of the '{2}' struct.";
+        case 297: return "Field '{0}' is missing, but required by the '{1}' constructor of the '{2}' struct.";
         case 255: return "Named object litteral is not assignable to {0}.";
         case 256: return "'{0}' is not defined";
         case 257: return "Cannot infer struct type from constructor '{0}'. Declare it with a 'using' keyword declaration.";
@@ -391,9 +394,9 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 280: return "Type '{0}' cannot be encoded as data";
         case 281: return "Type '{0}' cannot be encoded as data, but it has a runtime encoding. Use `runtime` keyword modifier for the declaration.";
         case 282: return "Default method implementatitons are not supported. default implementation will be ignored.";
-        case 282: return "Interface implementations cannot be exported.";
+        case 298: return "Interface implementations cannot be exported.";
         case 283: return "Method implementations are only allowed for types declared locally.";
-        case 283: return "Method '{0}' is already implemented.";
+        case 299: return "Method '{0}' is already implemented.";
         case 284: return "While compiling function expression; expected type was not a function.";
         case 285: return "Could not infer function signature, parameter type is missing.";
         case 286: return "Could not infer function signature, return type is missing.";
@@ -404,7 +407,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 291: return "Contract parameters cannot have an initializer expression";
         case 292: return "`context` can only be destructured in a constant declaration.";
         case 293: return "`context` can only be accessed in a contract method.";
-        case 293: return "`this`, in a contract context, can only be used to read parameters in a contract method.";
+        case 300: return "`this`, in a contract context, can only be used to read parameters in a contract method.";
         case 294: return "`{0}` is not available in this contract method `context`.";
         case 295: return "`context` can only be destructured as an unnamed object.";
         case 296: return "'{0}' is not a contract parameter.";
@@ -477,7 +480,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 1363: return "Only a single variable is allowed in a for...of statement";
         case 1364: return "Rest parameters are not supported in pebble, cosider using a concrete parameter with default value '[]'";
         case 1365: return "A test can only be specified at the top level of the file (it cannot be defined in functions etc.)";
-        case 1365: return "Tests must be specified in a block statement";
+        case 1393: return "Tests must be specified in a block statement";
         case 1366: return "Pattern expected.";
         case 1367: return "This case will never be evaluated because all patterns will be catched before";
         case 1368: return "Statement expected.";
@@ -498,11 +501,12 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 1383: return "A 'match' statement can only be used within a function body.";
         case 1384: return "A value of type '{0}' cannot be deconstructed.";
         case 1385: return "The argument of a 'match' statement branch must be deconstructed.";
-        case 1385: return "A value of type '{0}' cannot be deconstructed by named object.";
+        case 1394: return "A value of type '{0}' cannot be deconstructed by named object.";
         case 1386: return "A value of type '{0}' cannot be deconstructed as unnamed object.";
         case 1387: return "A value of type '{0}' has multiple constructors";
         case 1388: return "Unknown '{0}' constructor '{1}'";
         case 1389: return "Constructor '{0}' was already specified";
+        case 1395: return "An expression cannot be a statement: a value that is not used is never computed. Use it (in an assert, for example), or remove it.";
         case 1390: return "A value of type '{0}' cannot be deconstructed as an array.";
         case 1391: return "Expression is not callable.";
         case 1392: return "Unexpected argument.";
@@ -527,7 +531,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 2351: return "This expression is not constructable.";
         case 2355: return "A function whose declared type is not 'void' must return a value.";
         case 2357: return "The operand of an increment or decrement operator must be a variable.";
-        case 2364: return "The left-hand side of an assignment expression must be a variable or a property access.";
+        case 2364: return "The left-hand side of an assignment must be a variable: a field or an element cannot be changed in place.";
         case 2365: return "Operator '{0}' cannot be applied to types '{1}' and '{2}'.";
         case 2376: return "A 'super' call must be the first statement in the constructor.";
         case 2377: return "Constructors for derived classes must contain a 'super' call.";
@@ -552,6 +556,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 2460: return "Type '{0}' has no property '{1}'.";
         case 2469: return "The '{0}' operator cannot be applied to type '{1}'.";
         case 2474: return "In 'const' enum declarations member initializer must be constant expression.";
+        case 2483: return "The left-hand side of a 'for...of' statement cannot use a type annotation.";
         case 2506: return "'{0}' is referenced directly or indirectly in its own base expression.";
         case 2531: return "Object is possibly 'null'.";
         case 2540: return "Cannot assign to '{0}' because it is a constant.";
@@ -578,6 +583,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 2812: return "Type '{0}' cannot be converted to type '{1}'.";
         case 2813: return "Non-null opeartor used on expression of type '{0}', which is not optional, this will be omitted during compilation.";
         case 6054: return "File '{0}' not found.";
+        case 6133: return "'{0}' is never used, so it is never computed: a failure in its value (an assert in a function it calls) never happens. Use it, or remove it.";
         case 6055: return "Import path '{0}' is part of a circular dependency.";
         case 6188: return "Numeric separators are not allowed here.";
         case 6189: return "Multiple consecutive numeric separators are not permitted.";

@@ -22,6 +22,13 @@ void function main() {
             "utf8"
         )
     );
+    // a code shared by two messages shows only the first of them
+    const byCode = new Map();
+    for (const [text, code] of Object.entries(messages)) {
+        if (byCode.has(code)) throw new Error(`diagnostic code ${code} is used by two messages: ${JSON.stringify(byCode.get(code))} and ${JSON.stringify(text)}`);
+        byCode.set(code, text);
+    }
+
     Object.keys(messages).forEach(text => {
         let key = makeKey(text);
         if (first)

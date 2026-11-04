@@ -65,6 +65,7 @@ import { TirSimpleVarDecl } from "../tir/statements/TirVarDecl/TirSimpleVarDecl"
 import { deriveContractTypes, DerivedContractTypes } from "./internal/_deriveContractBody/_deriveContractTypes";
 import { AstRedeemerOfTypeExpr } from "../../ast/nodes/types/AstRedeemerOfTypeExpr";
 import { splitStatements } from "../../repl/replSyntax";
+import { warnUnusedFailingValues } from "./internal/warnUnusedFailingValues";
 
 const enum SrcCompilationState {
     Parsed = 0,
@@ -309,6 +310,7 @@ export class AstCompiler extends DiagnosticEmitter
         }
 
         await this.compileFile( filePath, true );
+        if( !this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) ) warnUnusedFailingValues( this.program, this );
         // no contract check, no throw — just collect diagnostics
         const typeMap = new SourceTypeMap( this.program );
         typeMap.buildFromProgram();
@@ -340,21 +342,9 @@ export class AstCompiler extends DiagnosticEmitter
             throw new Error("AstCompiler.compile: entry file does not exist: " + filePath );
 
         const entrySrc = await this.compileFile( filePath, true );
-        if( this.diagnostics.length > 0 || !entrySrc ) {
-            let msg: DiagnosticMessage;
-            const fstErrorMsg = this.diagnostics[0].toString();
-            const nDiags = this.diagnostics.length;
-            for( msg of this.diagnostics ) {
-                //*
-                this.io.stdout.write( msg.toString() + "\n" );
-                /*/
-                console.log( msg );
-                console.log( msg.toString() );
-                //*/
-            }
-            return this.program;
-            // throw new Error("AstCompiler.compile: failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
-        }
+        // warnings do not stop the compilation; the `Compiler` prints the diagnostics (printing
+        // them here too showed every error twice)
+        if( this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) || !entrySrc ) return this.program;
 
         const mainFuncExpr = this.program.functions.get( this.program.contractTirFuncName );
         if( this.program.contractTirFuncName === "" || !mainFuncExpr ) {
@@ -370,7 +360,8 @@ export class AstCompiler extends DiagnosticEmitter
             entrySrc.range.atStart(),
             "main"
         );
-        
+
+        warnUnusedFailingValues( this.program, this );
         return this.program;
     }
 

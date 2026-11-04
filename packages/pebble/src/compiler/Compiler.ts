@@ -134,15 +134,10 @@ export class Compiler
     {
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.compile();
-        if( this.diagnostics.length > 0 ) {
-            let msg: DiagnosticMessage;
-            const fstErrorMsg = this.diagnostics[0].toString();
-            const nDiags = this.diagnostics.length;
-            for( msg of this.diagnostics ) {
-                this.io.stdout.write( msg.toString() + "\n" );
-            }
-            // return new Uint8Array();
-            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
+        const errors = this.diagnostics.filter( d => d.category === DiagnosticCategory.Error );
+        for( const msg of this.diagnostics ) this.io.stdout.write( msg.toString() + "\n" );
+        if( errors.length > 0 ) {
+            throw new Error("compilation failed with " + errors.length + " error diagnostic messages; first message: " + errors[0].toString() );
         }
         return this._compileBackend( cfg, program, collectDebugInfo );
     }
@@ -189,10 +184,9 @@ export class Compiler
         // Now: preserve the diagnostics, and throw when any is an ERROR
         // (warnings are kept but do not fail the export).
         const errs = this.diagnostics.filter( d => d.category === DiagnosticCategory.Error );
+        // warnings are shown too, and do not fail the export
+        for( const msg of this.diagnostics ) this.io.stdout.write( msg.toString() + "\n" );
         if( errs.length > 0 ) {
-            for( const msg of this.diagnostics ) {
-                this.io.stdout.write( msg.toString() + "\n" );
-            }
             throw new Error(
                 "compilation failed with " + errs.length +
                 " error diagnostic messages; first message: " + errs[0].toString()
@@ -211,15 +205,7 @@ export class Compiler
         };
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.run();
-        if( this.diagnostics.length > 0 ) {
-            let msg: DiagnosticMessage;
-            const fstErrorMsg = this.diagnostics[0].toString();
-            const nDiags = this.diagnostics.length;
-            while( msg = this.diagnostics.shift()! ) {
-                this.io.stdout.write( msg.toString() + "\n" );
-            }
-            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
-        }
+        this._throwOnErrors();
         const compiled = this._compileBackend( cfg, program );
         await this._writeOutputs( cfg, compiled );
         const uplcProgram = parseUPLC( compiled.bytes );
@@ -690,21 +676,33 @@ export class Compiler
         };
         const astCompiler = new AstCompiler( cfg, this.io, this.diagnostics );
         const program = await astCompiler.runRepl();
-        if( this.diagnostics.length > 0 ) {
-            let msg: DiagnosticMessage;
-            const fstErrorMsg = this.diagnostics[0].toString();
-            const nDiags = this.diagnostics.length;
-            while( msg = this.diagnostics.shift()! ) {
-                this.io.stdout.write( msg.toString() + "\n" );
-            }
-            throw new Error("compilation failed with " + nDiags + " diagnostic messages; first message: " + fstErrorMsg );
-        }
+        this._throwOnErrors();
         // a REPL line writes nothing: with real filesystem access it would overwrite the
         // project's `out.flat` at every line
         const uplcProgram = parseUPLC( this._compileBackend( cfg, program ).bytes );
         // the repl-wrapper is always a 0-arg function, which now
         // compiles to `Delay(body)`; force it so the body executes.
         return Machine.eval( new Force( uplcProgram.body ) );
+    }
+
+    /**
+     * for `run` and `runRepl`: with an error, prints the diagnostics, removes them and throws;
+     * warnings alone are printed and kept
+     */
+    private _throwOnErrors(): void
+    {
+        const firstError = this.diagnostics.find( d => d.category === DiagnosticCategory.Error );
+        if( firstError === undefined )
+        {
+            for( const msg of this.diagnostics ) this.io.stdout.write( msg.toString() + "\n" );
+            return;
+        }
+        let msg: DiagnosticMessage;
+        const nDiags = this.diagnostics.length;
+        while( msg = this.diagnostics.shift()! ) {
+            this.io.stdout.write( msg.toString() + "\n" );
+        }
+        throw new Error("compilation failed with " + nDiags + " diagnostic messages; first error: " + firstError.toString() );
     }
 
     /** compiles to UPLC; writes nothing (see `_writeOutputs`) */

@@ -147,6 +147,36 @@ source, in `pebble test`, in buildooor and in any tool using
 - The VS Code extension (pebble-lsp) uses the same runs: a debugger that steps forwards and
   backwards.
 
+### Diagnostics
+
+- New warning 6133: a `const` whose value could fail and that is never used. A value that is
+  not used is never computed, so `const ok = checkSigned( tx, owner );` checks nothing: the
+  asserts in `checkSigned` never run. The warning covers a `fail`, a division, and calls to
+  the functions and `type` methods of the program's own code that assert, fail or divide,
+  themselves or through the functions they call.
+- Warnings no longer stop a compilation. `pebble compile` failed on any diagnostic, so a
+  program with only a warning (an `is` that is always true, a `!` on a value that is not
+  optional) did not compile. Warnings are printed and the script is written.
+- `pebble compile` and `pebble export` printed each error twice, then crashed with an uncaught
+  exception and its stack trace. They print each error once, then `compilation failed: N
+  errors`, and exit with code 1.
+- A call written as a statement (`check( tx );`, `xs.length();`) gets error 1395, which says
+  why it is not allowed: its value would never be computed. It used to get "'=' expected." and
+  then "Statement expected.". An assignment to a field or an element (`p.x = 5;`, `xs[0] = 1;`,
+  `p.x++;`) gets error 2364: only variables can be assigned.
+- `++` or `--` inside an expression (`return x++;`) crashed the parser with a JavaScript
+  error. It now gets "Assignments are statements, not expressions.".
+- `for( const x: int of xs )` gets "The left-hand side of a 'for...of' statement cannot use a
+  type annotation." at the type. It used to get the initializer error, at the end of the loop
+  header.
+- A block still open at the end of the file gets "'}' expected.", not "Statement expected.".
+- A statement that already has its own error no longer gets "Statement expected." as well,
+  and a declaration whose initializer has an error no longer gets "Variable declaration must
+  have an initializer".
+- Six error codes each belonged to two messages, and only the first message of each pair was
+  shown (254, 282, 283, 293, 1365, 1385). The second message of each pair has its own code now
+  (297 to 300, 1393, 1394), and generating the messages fails on a duplicate code.
+
 ### Fixes
 
 - ⚠ Security: a loop that reassigns one variable could be left out of the compiled script,

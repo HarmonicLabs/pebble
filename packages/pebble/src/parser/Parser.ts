@@ -1915,10 +1915,13 @@ export class Parser extends DiagnosticEmitter
         const decls: VarDecl[] = [];
         let decl: VarDecl | undefined = undefined;
         do {
+            const diagnosticsBefore = this.diagnostics.length;
             decl = this._parseVarDecl( flags );
             if( !decl ) return undefined;
             if( !isFor && !decl.initExpr )
             {
+                // an initializer that failed to parse has its own diagnostic
+                if( this.diagnostics.length === diagnosticsBefore )
                 this.error(
                     DiagnosticCode.Variable_declaration_must_have_an_initializer,
                     decl.range
@@ -2688,7 +2691,11 @@ export class Parser extends DiagnosticEmitter
                 case Token.Plus_Plus:
                 case Token.Minus_Minus: {
 
-                    throw new Error("increments and decrements are assingment statements, not expressions");
+                    // `return x++;`: it threw (a crash, where a diagnostic belongs)
+                    return this.error(
+                        DiagnosticCode.Assignments_are_statements_not_expressions,
+                        tn.range()
+                    );
 
                     /*
                     if(!( expr instanceof Identifier ))
@@ -3673,6 +3680,8 @@ export class Parser extends DiagnosticEmitter
         // at previous token
 
         const state = tn.mark();
+        // a statement that failed with its own diagnostic needs no "Statement expected." too
+        const diagnosticsBefore = this.diagnostics.length;
         const token = tn.next();
         let statement: BodyStmt | undefined = undefined;
         switch (token) {
@@ -3823,8 +3832,9 @@ export class Parser extends DiagnosticEmitter
                 break;
             }
         }
-        if( !statement ) { // has been reported
+        if( !statement ) {
             tn.reset(state);
+            if( this.diagnostics.length === diagnosticsBefore )
             this.error(
                 DiagnosticCode.Statement_expected,
                 tn.range()
@@ -3853,6 +3863,7 @@ export class Parser extends DiagnosticEmitter
     {
         const tn = this.tn;
         const startPos = tn.tokenPos;
+        const startState = tn.mark();
 
         if( !tn.skipIdentifier() )
         return this.error(
@@ -3912,6 +3923,25 @@ export class Parser extends DiagnosticEmitter
                     tn.range( startPos, tn.pos )
                 );
             }
+            // `f( x );`, `xs.length();`: Pebble has no expression statements;
+            // `p.x = 1;`, `xs[0] = 1;`: it assigns variables only
+            case Token.OpenParen:
+            case Token.Dot:
+            case Token.OpenBracket: {
+                tn.reset( startState );
+                // calls and accesses, up to a postfix `++`, `=` or anything else
+                const target = this.parseExpr( Precedence.UnaryPostfix + 1 );
+                const range = tn.range( startPos, tn.pos );
+                if( target && ASSIGNMENT_TOKENS.has( tn.peek() ) )
+                return this.error(
+                    DiagnosticCode.The_left_hand_side_of_an_assignment_must_be_a_variable_a_field_or_an_element_cannot_be_changed_in_place,
+                    range
+                );
+                return this.error(
+                    DiagnosticCode.An_expression_cannot_be_a_statement_a_value_that_is_not_used_is_never_computed_Use_it_in_an_assert_for_example_or_remove_it,
+                    range
+                );
+            }
             default: {
                 return this.error(
                     DiagnosticCode._0_expected,
@@ -3935,6 +3965,13 @@ export class Parser extends DiagnosticEmitter
             !tn.skip( Token.CloseBrace )
         )
         {
+            // the input ended inside the block: what is missing is its `}` (it used to say
+            // "Statement expected." at the end of the last statement)
+            if( tn.peek() === Token.EndOfFile )
+            {
+                this.error( DiagnosticCode._0_expected, tn.range( tn.pos, tn.pos ), "}" );
+                return undefined;
+            }
             let state = tn.mark();
             let statement = this.parseStatement({ topLevel, isExport: false });
             if (!statement) {
@@ -4078,17 +4115,18 @@ export class Parser extends DiagnosticEmitter
                 tn.range()
             );
 
+            // reported, then parsed as if it were not there (nothing else fails because of it)
             const decl = decls[0];
-            if(
-                decl.initExpr !== undefined ||
-                decl.type !== undefined
-            )
-            {
-                return this.error(
-                    DiagnosticCode.The_variable_declaration_of_a_for_of_statement_cannot_have_an_initializer,
-                    tn.range()
-                );
-            }
+            if( decl.type !== undefined )
+            this.error(
+                DiagnosticCode.The_left_hand_side_of_a_for_of_statement_cannot_use_a_type_annotation,
+                decl.type.range ?? decl.range
+            );
+            if( decl.initExpr !== undefined )
+            this.error(
+                DiagnosticCode.The_variable_declaration_of_a_for_of_statement_cannot_have_an_initializer,
+                decl.initExpr.range ?? decl.range
+            );
             
             const iterable = this.parseExpr();
             if( !iterable ) return undefined;
@@ -4879,6 +4917,28 @@ export interface ParseVarOpts {
 }
 
 /** the contract method purpose keywords (`top`/`nested` may precede any of them) */
+/** the tokens that follow an assignment's target */
+const ASSIGNMENT_TOKENS: ReadonlySet<Token> = new Set([
+    Token.Equals,
+    Token.Plus_Equals,
+    Token.Minus_Equals,
+    Token.Asterisk_Asterisk_Equals,
+    Token.Asterisk_Equals,
+    Token.Slash_Equals,
+    Token.Percent_Equals,
+    Token.LessThan_LessThan_Equals,
+    Token.GreaterThan_GreaterThan_Equals,
+    Token.GreaterThan_GreaterThan_GreaterThan_Equals,
+    Token.Ampersand_Equals,
+    Token.Caret_Equals,
+    Token.Bar_Equals,
+    Token.Ampersand_Ampersand_Equals,
+    Token.Bar_Bar_Equals,
+    Token.Question_Question_Equals,
+    Token.Plus_Plus,
+    Token.Minus_Minus,
+]);
+
 function isContractPurposeToken( tok: Token ): boolean
 {
     return (
