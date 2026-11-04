@@ -64,6 +64,7 @@ import { NamespaceDecl, NamespaceMember } from "../../ast/nodes/statements/decla
 import { TirSimpleVarDecl } from "../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { deriveContractTypes, DerivedContractTypes } from "./internal/_deriveContractBody/_deriveContractTypes";
 import { AstRedeemerOfTypeExpr } from "../../ast/nodes/types/AstRedeemerOfTypeExpr";
+import { splitStatements } from "../../repl/replSyntax";
 
 const enum SrcCompilationState {
     Parsed = 0,
@@ -357,8 +358,6 @@ export class AstCompiler extends DiagnosticEmitter
 
         const mainFuncExpr = this.program.functions.get( this.program.contractTirFuncName );
         if( this.program.contractTirFuncName === "" || !mainFuncExpr ) {
-            console.log( [...this.program.functions.keys()])
-            console.error( mainFuncExpr, `"${this.program.contractTirFuncName}"` );
             this.error(
                 DiagnosticCode.Contract_is_missing,
                 undefined
@@ -2992,11 +2991,8 @@ function _wrapSourceTextForRepl( text: string, funcName: string ): string
         }
     }
 
-    // If there are no body ranges, nothing to wrap
-    if( ranges.every( r => r.isDecl ) )
-    {
-        return text;
-    }
+    // always wrapped, declarations only too: the function is the program
+    // (without it, `function f() {}` alone was "ERROR 101: Contract is missing")
 
     // Build the new source text
     const declarations: string[] = [];
@@ -3019,8 +3015,10 @@ function _wrapSourceTextForRepl( text: string, funcName: string ): string
 
         const firstWord = last.match( /^([a-zA-Z_]\w*)/ );
         const isStmtKeyword = firstWord && _stmtKeywords.has( firstWord[1] );
+        // `return x = 5;` is not Pebble ("ERROR 2810: Assignments are statements")
+        const isAssignment = splitStatements( last )[0]?.kind === "assignment";
 
-        if( !isStmtKeyword && !last.startsWith("return") )
+        if( !isStmtKeyword && !isAssignment && !last.startsWith("return") )
         {
             bodyParts[ bodyParts.length - 1 ] = "return " + last + ";";
         }

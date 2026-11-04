@@ -4,9 +4,49 @@ All notable changes to the **pebble compiler** (`@harmoniclabs/pebble`) are docu
 
 ## v0.6.0
 
-Milestone 3: sourcemaps. A failing script now says where it failed in the Pebble
+Milestone 3: the REPL and sourcemaps. `pebble repl` works with the files of the
+project it starts in, and a failing script now says where it failed in the Pebble
 source, in `pebble test`, in buildooor and in any tool using
 `@harmoniclabs/plutus-machine` 3.1.0.
+
+### REPL
+
+- `pebble repl` (pebble-cli) reads the project of the working directory: the nearest
+  `pebble.config.json` (or `--config`) gives the options, and imports resolve from the
+  working directory. It writes nothing.
+
+  ```text
+  pebble> import { factorial } from "./src/factorial.pebble";
+  pebble> factorial(5)
+  120
+  cpu: 2766005 | mem: 11221
+  ```
+
+- Each line runs as one program: the declarations entered so far, then the line.
+  `const`, `let`, `function`, `struct`, `import` and `contract` are kept for the lines
+  after; redeclaring a name replaces it (a `let` is shadowed, so its type may change).
+  Functions and contracts can use the session's constants. A statement that changes a
+  `let` (`total += x`, a loop) is kept, so later lines see the change. A line that
+  fails changes nothing.
+- Values show with their Pebble type: `P{ x: 1, y: 2 }`, `[1, 2, 3]`, `#abcd`.
+  Declarations show nothing, but are computed on their line, so `const z = 1 / 0;`
+  fails there.
+- Errors point at what was typed: every diagnostic of the line, with the line underlined;
+  a failing `assert` or builtin shows where it failed (also inside a function entered
+  earlier, or in an imported file) and the open calls.
+- `test name() { ... }` runs at once and reports PASS or FAIL with the location. A
+  contract is type-checked; its methods need a script context, and naming the contract in
+  an expression explains that they run under `pebble test`.
+- A line can spend the mainnet per-transaction limit, 10,000,000,000 cpu and 16,500,000
+  mem: an endless loop stops with "out of budget" instead of hanging the REPL.
+- Commands `:help`, `:list` (the declarations kept), `:reset` and `:quit`. Ctrl+C
+  drops the input being typed; twice on an empty line (or Ctrl+D) exits. History is kept
+  in `~/.pebble_repl_history` (`PEBBLE_REPL_HISTORY` moves it; empty turns it off).
+- Piped input runs every line in order (it used to stop after the first): the output
+  reads as a session, and the exit code is 1 if a line failed.
+- `ReplSession` is the REPL without a terminal, for other tools: `eval( line )` returns
+  the value, the diagnostics and failure with positions in the line, the logs, the
+  budget and the tests' results.
 
 ### Sourcemaps
 
@@ -89,6 +129,17 @@ source, in `pebble test`, in buildooor and in any tool using
 
 ### Fixes
 
+- A variable declared in a block that shadowed one of its function kept the outer value:
+  `let x = 1; { let x = 5; return x; }` returned 1 (with another type, the outer value of
+  the wrong type). Blocks are compiled inline, where both had the same name; a shadowing
+  declaration now gets its own.
+- `for( const x of [ 1, 2, 3 ] )` typed `x` as `T`: the list literal took the loop's
+  `List<T>` hint as its type (`total += x` did not type-check, and a list of bytes literals
+  failed in the backend).
+- A source made of declarations alone failed with "ERROR 101: Contract is missing" in
+  `Compiler.runRepl`, after printing every function the compiler knew; an assignment as
+  its last statement became `return x = 5;` ("ERROR 2810"). The function list was printed
+  by every compilation that reached that error.
 - A second compilation in the same process (the language server, `pebble test` over several
   files, any tool) got a source map listing the first one's source again, with terms mapped to
   it: `_compTimeDropN` handed out its shared `drop` templates uncloned, and the first

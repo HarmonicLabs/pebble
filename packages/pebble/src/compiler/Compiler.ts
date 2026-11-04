@@ -662,6 +662,10 @@ export class Compiler
         };
     }
 
+    /**
+     * runs the entry file as one REPL line: its statements wrapped in a function, the last
+     * expression returned. `ReplSession` keeps a session across lines (what `pebble repl` uses)
+     */
     async runRepl( config?: Partial<CompilerOptions> )
     {
         const cfg = {
@@ -688,64 +692,14 @@ export class Compiler
         return Machine.eval( new Force( uplcProgram.body ) );
     }
 
-    /**
-     * compiles to UPLC; writes nothing (see `_writeOutputs`)
-     *
-     * @param collectDebugInfo also collect debug information (see `compiler/debug`);
-     * the program is the same either way
-     */
+    /** compiles to UPLC; writes nothing (see `_writeOutputs`) */
     private _compileBackend(
         cfg: CompilerOptions,
         program: TypedProgram,
         collectDebugInfo: boolean = false
     ): CompiledProgram
     {
-        // Run the whole backend under a fresh per-compilation context. All
-        // node-level caches (hoisted/letted naming, hoisted->letted lowering,
-        // the mapToType helper cache) live on this context, so they cannot
-        // leak into or be perturbed by any other compilation — and they are
-        // dropped automatically when this scope exits, even on throw. The
-        // content-addressed `IRHash` has no global state at all, so there is
-        // nothing else to reset.
-        const compilationCtx = new CompilationCtx();
-        const debug = collectDebugInfo ? new DebugCollector() : undefined;
-        compilationCtx.debug = debug;
-        return withCompilationCtx( compilationCtx, () => {
-            // the statements as written: `compileTypedProgram` rewrites them into expressions
-            if( debug !== undefined ) collectDebugStructure( program, debug );
-            const ir = compileTypedProgram(
-                cfg,
-                program
-            );
-            const marks: UplcMarks = new Map();
-            const uplc = compileIRToUPLC( ir, cfg, marks );
-            const uplcProgram = new UPLCProgram(
-                cfg.targetUplcVersion,
-                uplc
-            );
-            const bytes = compileUPLC( uplcProgram );
-
-            // the map costs a walk of the program; most callers never ask for it
-            let sourceMap: UPLCSourceMap | undefined = undefined;
-            let debugTable: DebugTable | undefined = undefined;
-            return {
-                bytes,
-                sourceMap: () => sourceMap ??= buildSourceMap({
-                    program: uplc,
-                    marks,
-                    serialized: bytes,
-                    version: uplcProgram.version,
-                    compiler: "pebble " + COMPILER_VERSION,
-                    sourcesContent: cfg.sourceMapContent === true,
-                    root: cfg.root,
-                }),
-                debugTable: debug === undefined ? undefined : () => debugTable ??= buildDebugTable({
-                    program: uplc,
-                    marks,
-                    debug
-                }),
-            };
-        });
+        return compileProgramBackend( cfg, program, collectDebugInfo );
     }
 
     /**
@@ -764,7 +718,67 @@ export class Compiler
     }
 }
 
-interface CompiledProgram {
+/**
+ * The backend: a checked program (its `contractTirFuncName` set) to UPLC. Writes nothing.
+ *
+ * @param collectDebugInfo also collect debug information (see `compiler/debug`);
+ * the program is the same either way
+ */
+export function compileProgramBackend(
+    cfg: CompilerOptions,
+    program: TypedProgram,
+    collectDebugInfo: boolean = false
+): CompiledProgram
+{
+    // Run the whole backend under a fresh per-compilation context. All
+    // node-level caches (hoisted/letted naming, hoisted->letted lowering,
+    // the mapToType helper cache) live on this context, so they cannot
+    // leak into or be perturbed by any other compilation — and they are
+    // dropped automatically when this scope exits, even on throw. The
+    // content-addressed `IRHash` has no global state at all, so there is
+    // nothing else to reset.
+    const compilationCtx = new CompilationCtx();
+    const debug = collectDebugInfo ? new DebugCollector() : undefined;
+    compilationCtx.debug = debug;
+    return withCompilationCtx( compilationCtx, () => {
+        // the statements as written: `compileTypedProgram` rewrites them into expressions
+        if( debug !== undefined ) collectDebugStructure( program, debug );
+        const ir = compileTypedProgram(
+            cfg,
+            program
+        );
+        const marks: UplcMarks = new Map();
+        const uplc = compileIRToUPLC( ir, cfg, marks );
+        const uplcProgram = new UPLCProgram(
+            cfg.targetUplcVersion,
+            uplc
+        );
+        const bytes = compileUPLC( uplcProgram );
+
+        // the map costs a walk of the program; most callers never ask for it
+        let sourceMap: UPLCSourceMap | undefined = undefined;
+        let debugTable: DebugTable | undefined = undefined;
+        return {
+            bytes,
+            sourceMap: () => sourceMap ??= buildSourceMap({
+                program: uplc,
+                marks,
+                serialized: bytes,
+                version: uplcProgram.version,
+                compiler: "pebble " + COMPILER_VERSION,
+                sourcesContent: cfg.sourceMapContent === true,
+                root: cfg.root,
+            }),
+            debugTable: debug === undefined ? undefined : () => debugTable ??= buildDebugTable({
+                program: uplc,
+                marks,
+                debug
+            }),
+        };
+    });
+}
+
+export interface CompiledProgram {
     /** the flat-encoded program */
     bytes: Uint8Array;
     /** built on the first call */
