@@ -121,10 +121,10 @@ export function inheritRange( replacement: IRTerm, replaced: IRTerm | undefined 
     }
     // debug information: the replacement computes the same value, and starts what it started
     if( from.varValue !== undefined ) to.varValue = unionBindings( to.varValue, from.varValue );
-    // a letted value copied where it is used keeps its own range; the use is another place
-    // its evaluation stands for
+    // a value computed where it is used keeps its own range; the use is another place its
+    // evaluation stands for
     if(
-        replaced.kind === IRNodeKind.Letted &&
+        standsForUse( replaced, replacement ) &&
         collectingDebugInfo() &&
         isSourceRange( from.range ) &&
         isSourceRange( to.range ) &&
@@ -142,6 +142,19 @@ export function inheritRange( replacement: IRTerm, replaced: IRTerm | undefined 
         to.tracePoints = [ ...from.tracePoints, ...( to.tracePoints ?? [] ) ];
         from.tracePoints = undefined;
     }
+}
+
+/**
+ * `replaced` is a use of the value `replacement` computes: a letted value copied in, a
+ * variable replaced with its value (an inlined binding), a binding `[(λx. body) value]`
+ * replaced with its body or its value
+ */
+function standsForUse( replaced: IRTerm, replacement: IRTerm ): boolean
+{
+    if( replaced.kind === IRNodeKind.Letted || replaced.kind === IRNodeKind.Var ) return true;
+    if( replaced.kind !== IRNodeKind.App ) return false;
+    const app = replaced as any;
+    return app.arg === replacement || ( app.fn?.kind === IRNodeKind.Func && app.fn.body === replacement );
 }
 
 /**

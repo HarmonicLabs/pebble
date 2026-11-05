@@ -369,8 +369,6 @@ export class DebugRun
             failFrame = open[ open.length - 1 ];
             failStmt = failFrame?.lastStmt;
         }
-        // its own terms may all have been copied into others
-        if( failFrame !== undefined && failStmt !== undefined && !failFrame.touched.has( failStmt ) ) touch( failFrame, failStmt, n - 1 );
         return { frames, failStmt, failFrame };
     }
 
@@ -475,20 +473,15 @@ export class DebugRun
             }
         }
         if( failsHere ) return true;
-        this.endCall( frame, steps, first, push );
+        this.endCall( frame, steps, first );
         return false;
     }
 
-    /**
-     * A call that returned ran a `return`: when the optimizer left none of its own terms (the
-     * value computed where the call's result is used), the function's trailing `return` shows
-     * at the call's exit; the `return` that ends a call carries the value it returned.
-     */
+    /** the `return` that ends a call carries the value it returned */
     private endCall(
         frame: MutableFrame,
         steps: DebugStep[],
-        first: number,
-        push: ( stmt: DebugStmt, state: number, failed: boolean, cost: [ number, number ] | undefined ) => void
+        first: number
     ): void
     {
         if( frame.fn.kind !== "function" || frame.exitState < 0 ) return;
@@ -499,10 +492,6 @@ export class DebugRun
             for( const c of f.children ) if( c.fn.kind === "loop" ) collect( c );
         };
         collect( frame );
-        const ranReturn = [ ...ownFrames ].some( f => [ ...f.touched.keys() ].some( s => s.kind === "return" ) );
-        const last = frame.fn.stmts[ frame.fn.stmts.length - 1 ];
-        if( last !== undefined && last.kind === "return" && last.isStop && !ranReturn )
-        push( last, frame.exitState, false, undefined );
         // the call's last step, if it is a `return`
         let k = steps.length - 1;
         while( k >= first && !ownFrames.has( steps[k].frame as MutableFrame ) ) k--;

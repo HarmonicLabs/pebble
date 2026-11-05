@@ -102,6 +102,12 @@ source, in `pebble test`, in buildooor and in any tool using
   replaces a variable with an expression, the map gets a copy of the trace for that place
   (`of`, see the plutus-machine README) whose program computes it from the expression's values;
   the compile note counts it once.
+- The debugger: a statement whose terms all got copied into others (`return acc;` after a loop,
+  its value inlined where the call's result is used) had no step, and the debugger made one up
+  at the call's exit. The optimizer kept the place a variable use stood for only when it copied
+  a letted value in; it keeps it too when it replaces a variable with its value and a binding
+  with its body, so the step comes from the terms that ran. The made-up `return` and the touch
+  of an untouched failing statement are gone.
 - A helper the optimizer reduces to a builtin (`function double( x: int ): int { trace x;
   return x * 2; }` becomes `multiplyInteger 2`) has no lambda left: its traces run whenever
   that value is applied, once per call, reading the argument for the parameter (map trace
