@@ -10,14 +10,12 @@ export interface ApplicationTerms {
 
 export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefined
 {
-    // `unshift` always targets the absolute front and `push` the absolute
-    // back, so accumulating the two separately and joining once at the end
-    // is exactly equivalent to interleaving them on a single array — but
-    // linear instead of quadratic in the spine length. Spines grow with the
-    // program, and this helper runs at nearly every node of every rewrite
-    // pass, so the quadratic showed up as super-linear compile work.
-    const front: IRTerm[] = []; // prepended args, in reverse order
-    const back: IRTerm[] = [];  // appended args, in order
+    // walking from the outermost application in, each node met holds the last arguments not
+    // seen yet: an application its argument, a `case` applying its continuation the fields
+    // of its `constr` (`[(case (constr 0 [x y]) [f]) z]` is `f x y z`). They are collected
+    // last first and reversed once at the end: linear in the spine length (spines grow with
+    // the program, and this helper runs at nearly every node of every rewrite pass)
+    const reversed: IRTerm[] = [];
     while(
         term instanceof IRApp
         || (
@@ -31,7 +29,7 @@ export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefine
         // || term instanceof IRHoisted
     ) {
         if( term instanceof IRApp ) {
-            front.push( term.arg );
+            reversed.push( term.arg );
             term = term.fn;
             continue;
         }
@@ -41,18 +39,17 @@ export function getApplicationTerms( term: IRTerm ): ApplicationTerms | undefine
             && term.constrTerm instanceof IRConstr
             && Number( term.constrTerm.index ) === 0
         ) {
-            for( const f of term.constrTerm.fields ) back.push( f );
+            const fields = term.constrTerm.fields;
+            for( let i = fields.length - 1; i >= 0; i-- ) reversed.push( fields[i] );
             term = term.continuations[0];
             continue;
         }
         // if( term instanceof IRLetted ) term = term.value;
         // else if( term instanceof IRHoisted ) term = term.hoisted;
     }
-    if( front.length === 0 && back.length === 0 ) return undefined;
-    front.reverse();
-    const args: IRTerm[] = back.length === 0 ? front : front.concat( back );
+    if( reversed.length === 0 ) return undefined;
     return {
         func: term,
-        args,
+        args: reversed.reverse(),
     };
 }

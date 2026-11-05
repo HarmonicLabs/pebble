@@ -2,7 +2,7 @@ import { testOptions, COMPILER_VERSION, CompilerOptions } from "../../IR/toUPLC/
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
-import { Application, parseUPLC, UPLCConst, UPLCTerm } from "@harmoniclabs/uplc";
+import { Application, Force, parseUPLC, UPLCConst, UPLCTerm } from "@harmoniclabs/uplc";
 import { CEKConst, CEKError, evaluateWithSourceMap, Machine, UPLCSourceMap } from "@harmoniclabs/plutus-machine";
 
 /**
@@ -23,7 +23,10 @@ async function exported( src: string, cfg: Partial<CompilerOptions>, functionNam
     return { bytes, map: sourceMap, body: parseUPLC( bytes ).body };
 }
 
-const applied = ( body: UPLCTerm, args: number[] ) => args.reduce<UPLCTerm>( ( t, a ) => new Application( t, UPLCConst.int( a ) ), body );
+// a function without parameters compiles to a `delay`
+const applied = ( body: UPLCTerm, args: number[] ) => args.length === 0
+    ? new Force( body )
+    : args.reduce<UPLCTerm>( ( t, a ) => new Application( t, UPLCConst.int( a ) ), body );
 const resultOf = ( r: any ) => r instanceof CEKError ? "error" : String( ( r as CEKConst ).value );
 
 /** each source declares `f`; the inputs it is called with */
@@ -90,6 +93,18 @@ export function f( x: int ): int {
     trace decoded;
     return 1;
 }`, [ [ 42 ] ] ],
+    // the message program reads a field of a constant through letted values; compiled on its
+    // own, `removeUnusedVarsAndReturnRoot` dropped an argument of an over-applied binding and the
+    // message evaluated to a lambda ("cannot force Lambda")
+    [ "a decoded field of a constant, in a function without parameters", `
+struct Two { A { a: int } B { b: int } }
+export function f(): int {
+    const t: Two = Two.B{ b: 42 };
+    const d = t as data;
+    const B{ b: decoded } = d as Two.B;
+    trace decoded;
+    return 1;
+}`, [ [] ] ],
 ];
 
 describe("removeTraces", () => {

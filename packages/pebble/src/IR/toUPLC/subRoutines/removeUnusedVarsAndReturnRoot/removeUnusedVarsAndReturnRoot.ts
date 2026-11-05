@@ -61,25 +61,40 @@ function _removeUnusedVars( term: IRTerm, ctx: RemoveUnusedVarsCtx ): IRTerm
         return term;
     }
 
+    // the arguments do not always match the parameters one to one:
+    // - more arguments than parameters: `func` returns a function, which gets the rest
+    //   (`[[(λa. λb. body) A] B]`); those arguments stay, after the ones kept here
+    // - fewer: `func` is applied to its first parameters only, and is still a function of the
+    //   others, used or not; only a parameter that has an argument can go
     const originalParams = func.params.slice();
-    const filteredArgs: IRTerm[] = [];
-    for( let i = 0; i < originalParams.length; i++ ) {
+    const nApplied = Math.min( originalParams.length, args.length );
+    const keptArgs: IRTerm[] = [];
+    const removedParams: symbol[] = [];
+    for( let i = 0; i < nApplied; i++ ) {
         const p = originalParams[i];
-        if( !unusedVars.includes( p ) ) filteredArgs.push( args[i] );
+        if( unusedVars.includes( p ) ) removedParams.push( p );
+        else keptArgs.push( args[i] );
     }
+    const extraArgs = args.slice( nApplied );
 
     // remove vars here
-    filterParamsInplace( func.params, unusedVars );
+    filterParamsInplace( func.params, removedParams );
 
-    for( const funcArg of filteredArgs ) {
+    for( const funcArg of keptArgs ) {
         // arguments passed have the same context of the function called
         _removeUnusedVars( funcArg, ctx );
     }
+    for( const funcArg of extraArgs ) {
+        // so do the arguments of the function it returns
+        _removeUnusedVars( funcArg, ctx );
+    }
 
-    const someArgsWereUsed = filteredArgs.length > 0;
-    const newTerm = someArgsWereUsed
-        ? _ir_apps( func, ...(filteredArgs as [IRTerm, ...IRTerm[]]) )
-        : func.body; // all unused, remove function, just keep the body
+    // all parameters removed: the body, applied to the arguments of the function it is
+    const fn = func.params.length > 0 ? func : func.body;
+    const allArgs = keptArgs.concat( extraArgs );
+    const newTerm = allArgs.length > 0
+        ? _ir_apps( fn, ...(allArgs as [IRTerm, ...IRTerm[]]) )
+        : fn;
 
     const parent = term.parent;
     if( parent ) _modifyChildFromTo( parent, term, newTerm );

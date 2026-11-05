@@ -187,6 +187,14 @@ source, in `pebble test`, in buildooor and in any tool using
   kept unless the statements after it certainly compute its result, or the loop cannot fail
   and certainly ends (a `for...of`, or a `for` counting to a bound its body does not change).
   No example's script changes.
+- The pass removing unused variables lost arguments when a function did not get exactly one
+  argument per parameter. A function returning a function (`[[(λa. λb. …) A] B]`, as letted
+  and hoisted values are bound) lost `B` when `a` was unused, so the program was left a
+  lambda where a value was expected. A function applied to its first arguments only lost the
+  parameters still waiting for theirs. It showed in the message of a removed trace, compiled
+  on its own (`trace decoded;` in a function without parameters failed with "cannot force
+  Lambda"). The arguments of an application wrapping a `case` that applies a function were
+  also read in the wrong order. No example's script changes.
 - `fail "message";` never printed its message: it compiled to `trace( message, error )`, whose
   `error` argument fails before `trace` runs. The failure now waits for the message.
 - A variable declared in a block that shadowed one of its function kept the outer value:

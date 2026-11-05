@@ -21,10 +21,6 @@ import type { UplcMarks } from "../IR/sourceMap/uplcMarks";
 import type { StrippedTrace } from "../IR/sourceMap/irTraces";
 import { IRDelayed } from "../IR/IRNodes/IRDelayed";
 import { IRNodeKind } from "../IR/IRNodeKind";
-import { IRLetted } from "../IR/IRNodes/IRLetted";
-import { IRHoisted } from "../IR/IRNodes/IRHoisted";
-import type { IRTerm } from "../IR/IRTerm";
-import { _modifyChildFromTo } from "../IR/toUPLC/_internal/_modifyChildFromTo";
 import { config } from "process";
 import { TypedProgram } from "./tir/program/TypedProgram";
 import { TirFuncExpr } from "./tir/expressions/TirFuncExpr";
@@ -815,9 +811,7 @@ function compileTracePrograms( traces: readonly StrippedTrace[], cfg: CompilerOp
     return traces.map( t => {
         const recipe = t.recipe;
         if( recipe === undefined ) return undefined;
-        // the values the message reads, computed in place: a message is computed once, on the
-        // side, and the backend miscompiled some chains of letted values taken out of a function
-        const message = inlineLettedValues( recipe.ir.clone() );
+        const message = recipe.ir.clone();
         // the backend expects a program rooted at a function, or a `delay` (a function without
         // parameters): a message that takes nothing is delayed (`TraceReplay` forces it)
         const ir = message.kind === IRNodeKind.Func ? message : new IRDelayed( message );
@@ -833,20 +827,6 @@ function compileTracePrograms( traces: readonly StrippedTrace[], cfg: CompilerOp
             return undefined;
         }
     });
-}
-
-/** `term` with every letted value outside hoisted terms replaced by the value itself */
-function inlineLettedValues( term: IRTerm ): IRTerm
-{
-    if( term instanceof IRLetted ) return inlineLettedValues( term.value.clone() );
-    if( term instanceof IRHoisted ) return term;
-    const children = term.children();
-    for( const child of children )
-    {
-        const inlined = inlineLettedValues( child );
-        if( inlined !== child ) _modifyChildFromTo( term as any, child, inlined );
-    }
-    return term;
 }
 
 export interface CompiledProgram {
