@@ -20,6 +20,7 @@ import { TirBytesT } from "../types/TirNativeType/native/bytes";
 import { TirDataT } from "../types/TirNativeType/native/data";
 import { TirIntT } from "../types/TirNativeType/native/int";
 import { TirLinearMapT } from "../types/TirNativeType/native/linearMap";
+import { _inlineFromData } from "./TirFromDataExpr";
 import { TirListT } from "../types/TirNativeType/native/list";
 import { TirValueT } from "../types/TirNativeType/native/value";
 import { TirStringT } from "../types/TirNativeType/native/string";
@@ -286,42 +287,21 @@ function _showLinearMapIR( mapT: TirLinearMapT, exprIR: IRTerm ): IRTerm
 
     if( !hoisted )
     {
-        // LinearMap is List<PairData> at the IR level. Iterate similarly to
-        // _showListIR, but on each entry call showK(fst(entry)) ++ ": " ++
-        // showV(snd(entry)). Both sides go through `unBData / unIData / etc.`
-        // implicitly because the Pebble runtime stores keys/values as data.
-        //
-        // For show purposes we treat the entry as an opaque pair-of-data and
-        // recover the value bytes via `_inlineFromData(...)`-like dispatch.
-        // To keep this turn focused, we invoke `_showIR` with `data` and
-        // accept that K/V are shown via their data encoding (compact). A
-        // future polish pass can recover the original K/V types and call
-        // `_showIR(K)` / `_showIR(V)` directly.
+        // LinearMap is List<PairData> at the IR level: iterate as `_showListIR` does, each entry
+        // shown as `showK( key ) ++ ": " ++ showV( value )`, the key and the value decoded from
+        // their data with their types first (they printed as their data's CBOR, `{01: 41ab}`)
         const xsOuter = Symbol("show_map_outer");
         const recSelf = Symbol("show_map_self");
         const xs      = Symbol("show_map_xs");
         const first   = Symbol("show_map_first");
 
-        // key/value extraction at the IR level: an entry is a Pair<Data,Data>;
-        // fst gets the data-encoded key, snd the data-encoded value. We then
-        // just call _showIR(data, ...) on both, which is `serialiseData ++ hex`.
         const showEntry = ( entryIR: IRTerm ): IRTerm => _ir_apps(
             IRNative.appendByteString,
-            _showIR( /* data */  /* fall back to data show */
-                /* Pebble stores K and V as data inside LinearMap */
-                /* see TirLinearMapT.toUplcConstType */
-                /* TirDataT */
-                /* hack: reach the singleton via a fresh instance */
-                new TirDataT(),
-                _ir_apps( IRNative.fstPair, entryIR ),
-            ),
+            _showIR( keyT, _inlineFromData( keyT, _ir_apps( IRNative.fstPair, entryIR ) ) ),
             _ir_apps(
                 IRNative.appendByteString,
                 _hoisted_litBytes( ": " ).clone(),
-                _showIR(
-                    new TirDataT(),
-                    _ir_apps( IRNative.sndPair, entryIR ),
-                )
+                _showIR( valT, _inlineFromData( valT, _ir_apps( IRNative.sndPair, entryIR.clone() ) ) )
             )
         );
 

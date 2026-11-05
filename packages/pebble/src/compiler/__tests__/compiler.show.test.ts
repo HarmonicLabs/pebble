@@ -1,3 +1,8 @@
+import { Application, constT, parseUPLC, UPLCConst } from "@harmoniclabs/uplc";
+import { Machine } from "@harmoniclabs/plutus-machine";
+import { DataB, DataI } from "@harmoniclabs/plutus-data";
+import { Pair } from "@harmoniclabs/pair";
+import { toUtf8 } from "@harmoniclabs/uint8array-utils";
 import { testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
@@ -104,6 +109,22 @@ function main( v: Value ): bytes {
 }`;
         const compiler = await compileSrc( src );
         expect( compiler.diagnostics ).toEqual( [] );
+    });
+
+    test("LinearMap.show() shows keys and values with their types", async () => {
+        // they printed as the CBOR of their data: `{01: 41ab, 16: 42cdef}`
+        const compiler = await compileSrc( `
+function main( m: LinearMap<int, bytes> ): bytes {
+    return m.show();
+}` );
+        expect( compiler.diagnostics ).toEqual( [] );
+        const body = parseUPLC( ( compiler.io as any ).outputs.get( "out/out.flat" ) ).body;
+        const map = UPLCConst.listOf( constT.pairOf( constT.data, constT.data ) )([
+            new Pair( new DataI( 1 ), new DataB( "ab" ) ),
+            new Pair( new DataI( 22 ), new DataB( "cdef" ) ),
+        ] as any );
+        const result = Machine.eval( new Application( body, map ) ).result as any;
+        expect( toUtf8( result.value ) ).toBe( "{1: ab, 22: cdef}" );
     });
 
     test("data-encoded struct .show() compiles via auto-derive", async () => {

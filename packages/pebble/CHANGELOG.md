@@ -244,6 +244,8 @@ source, in `pebble test`, in buildooor and in any tool using
   on its own (`trace decoded;` in a function without parameters failed with "cannot force
   Lambda"). The arguments of an application wrapping a `case` that applies a function were
   also read in the wrong order. No example's script changes.
+- `show()` of a `LinearMap` printed each key and value as the CBOR of its data
+  (`{01: 41ab, 16: 42cdef}`): they are decoded with their types first (`{1: ab, 22: cdef}`).
 - `fail "message";` never printed its message: it compiled to `trace( message, error )`, whose
   `error` argument fails before `trace` runs. The failure now waits for the message.
 - A variable declared in a block that shadowed one of its function kept the outer value:
