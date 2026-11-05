@@ -283,6 +283,44 @@ source, in `pebble test`, in buildooor and in any tool using
 - A REPL line no longer writes `out/out.flat`.
 - `pebble test` without `compilerVersion` in the config uses the running compiler,
   as `pebble compile` does.
+- A missing import was reported twice, once without a location, and an import of a path
+  above the project root twice, the second time as "File '' not found". Each is reported
+  once, at the import.
+- `import { b as c }` bound `b`: the alias was parsed, then ignored, so `c` was "not
+  defined". It binds `c`.
+- An exported function or `const` whose declaration had an error was declared in its file
+  but not exported, so every file importing it reported "Module has no exported member". It
+  is exported all the same, with its type when the declaration gives one.
+- An empty file was "not found".
+- The range of a declared name (a `const`, a `let`, a parameter, a destructured field, a
+  contract) started at the token before it, so an error on a name underlined `const x` or
+  `( r`. It is the name.
+- The parser printed token names to the console on three syntax errors (a contract member it
+  does not know, `data` without `struct`, a `for` loop's updates), next to the diagnostic.
+
+### Editors: `check()`
+
+`Compiler.check()` is what the language server runs on every change. It now answers for the
+text as it is while it is being written, and for every file of the project.
+
+- `check()` goes past errors: every file and statement the parser kept is type-checked,
+  whatever errors the others have. A file with a parse error was not checked at all (no types,
+  no other errors), nor was a file importing one with errors, and a function with an error in
+  its body had no types. `compile()` is unchanged: it stops at the first file with errors.
+  Test discovery keeps the old behaviour (`check({ pastErrors: false })`).
+- `CheckResult.symbols` indexes the declarations of the checked files and the uses of each:
+  functions, parameters, constants, variables, structs with their constructors and fields,
+  methods, type aliases, enums, tests and imports. That is what an editor needs for go to
+  definition, references, rename and completion: `symbolAt`, `definitionOf` (through
+  imports), `references` (an alias, `import { a as b }`, is a name of its own),
+  `declarationsOf` and `visibleAt` (the names visible at a position, the innermost first).
+- The type map (`CheckResult.sourceTypeMap`) knows the file of each entry. It held the
+  entries of every file the check compiled with their offsets only, so a position in the
+  entry was answered with a type from an imported file at the same offset (in the
+  masterpiece contract, at 477 of its 2,059 identifiers). `typeAt( file, offset )` and
+  `entriesOf( file )` answer for any file; `typeAtOffset` and `allEntries`, for the entry.
+- `tokenize( text )` gives the tokens of a text with their ranges, read the way the parser
+  reads them, for tools that look at the text around a position.
 
 ## v0.5.0
 

@@ -279,7 +279,6 @@ export class Parser extends DiagnosticEmitter
                 }
                 // positions on (expected) `struct` keyword
                 if( tn.peek() !== Token.Struct ) {
-                    console.error( Token[ tn.peek() ]);
                     return this.error(
                         DiagnosticCode._0_expected,
                         tn.range(), "struct"
@@ -506,7 +505,6 @@ export class Parser extends DiagnosticEmitter
 
                 default: {
                     tn.reset( prevState );
-                    console.log( Token[ nextToken ] );
                     return this.error(
                         DiagnosticCode._0_expected,
                         tn.range(), "contract member declaration"
@@ -2090,7 +2088,7 @@ export class Parser extends DiagnosticEmitter
             if( tn.skip( Token.Dot_Dot_Dot) ) isRest = true;
 
             // field
-            fieldName = this.parseIdentifier( startRange )!;
+            fieldName = this.parseIdentifier()!;
             if( isRest ) {
                 rest = fieldName;
                 tn.skip( Token.Comma ); // skip comma if present
@@ -2299,20 +2297,13 @@ export class Parser extends DiagnosticEmitter
         );
     }
 
-    parseIdentifier(
-        startRange?: SourceRange | undefined
-    ): Identifier | undefined
+    /** the identifier at the current position, with its own range */
+    parseIdentifier(): Identifier | undefined
     {
         const tn = this.tn;
-        startRange = startRange ?? tn.range();
-        if( tn.skipIdentifier() )
-        {
-            return new Identifier(
-                tn.readIdentifier(),
-                SourceRange.join( startRange, tn.range() )
-            );
-        }
-        return undefined;
+        if( !tn.skipIdentifier() ) return undefined;
+        const name = tn.readIdentifier();
+        return new Identifier( name, tn.range() );
     }
 
     /**
@@ -4192,8 +4183,6 @@ export class Parser extends DiagnosticEmitter
 
 
             if( !tn.skip( Token.CloseParen ) ) {
-                const next = tn.peek();
-                console.error( 'next token after for updates:', Token[ next ] );
                 return this.error(
                     DiagnosticCode._0_expected,
                     tn.range(), ")"

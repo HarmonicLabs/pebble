@@ -190,6 +190,7 @@ export function _compileCaseExprMatcher(
     // make two mutually-exclusive arms reusing a binder name collide as
     // "duplicate identifier").
     const armCtx = ctx.newBranchChildScope();
+    armCtx.scope.range = matcher.range;
 
     const pattern = _compileVarDecl( armCtx, matcher.pattern, patternType );
     if( !pattern ) return undefined;

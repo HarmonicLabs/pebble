@@ -41,6 +41,7 @@ import { sampleForType, TypedSample } from "./test/fuzz/typedFuzzers";
 import { TirType } from "./tir/types/TirType";
 
 export { CheckResult, SourceTypeMap, TypeEntry, MemberInfo } from "./SourceTypeMap";
+export { SymbolIndex, PebbleSymbol, PebbleSymbolRef, PebbleSymbolKind } from "./SymbolIndex";
 export {
     TestBudget,
     TestError,
@@ -250,7 +251,8 @@ export class Compiler
     private async _discoverTests( cfg: CompilerOptions ): Promise<TestDescriptor[]>
     {
         const discovery = new AstCompiler( cfg, this.io, this.diagnostics );
-        const discoveryResult = await discovery.check();
+        // a file with errors is not run: its tests are not discovered past them
+        const discoveryResult = await discovery.check({ pastErrors: false });
 
         return discoveryResult.program.tests
         .map( t => {

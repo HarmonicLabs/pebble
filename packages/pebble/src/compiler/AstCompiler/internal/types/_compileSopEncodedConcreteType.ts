@@ -12,6 +12,7 @@ import { TirType } from "../../../tir/types/TirType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileDataEncodedConcreteType } from "./_compileDataEncodedConcreteType";
 import { getDataFuncSignature } from "./getDataFuncSignature";
+import { referenceSymbol } from "../../utils/symbols";
 
 
 export function _compileSopEncodedConcreteType(
@@ -99,6 +100,7 @@ export function _compileSopEncodedConcreteType(
             DiagnosticCode._0_is_not_defined,
             typeExpr.name.range, typeExpr.name.text
         );
+        referenceSymbol( ctx.program, typeExpr.name.range, possibleTirNames.symbol );
 
         if( possibleTirNames.isGeneric )
         {

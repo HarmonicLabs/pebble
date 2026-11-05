@@ -23,6 +23,7 @@ import { isTirOptType } from "../../tir/types/TirNativeType/native/Optional/isTi
 import { TirSopOptT } from "../../tir/types/TirNativeType/native/Optional/sop";
 import { TirStringT } from "../../tir/types/TirNativeType/native/string";
 import { TirVoidT } from "../../tir/types/TirNativeType/native/void";
+import { referenceSymbol } from "./symbols";
 
 export function getPropAccessReturnType(
     ctx: AstCompilationCtx,
@@ -38,7 +39,7 @@ export function getPropAccessReturnType(
     ) {
         if( objType instanceof TirTypeParam ) return undefined;
 
-        const result = findPropInImpls( ctx, objType.methodsNamesPtr, propName );
+        const result = findPropInImpls( ctx, objType.methodsNamesPtr, propId );
         if( result ) return result;
 
         objType = objType.aliased;
@@ -80,7 +81,7 @@ export function getPropAccessReturnType(
         return new TirFuncT([], data_t );
     }
 
-    if( isTirStructType( objType ) ) return getStructPropAccessReturnType( ctx, objType, propName );
+    if( isTirStructType( objType ) ) return getStructPropAccessReturnType( ctx, objType, propId );
     if( objType instanceof TirVoidT ) return undefined;
     if( objType instanceof TirBoolT ) return undefined;
     if( objType instanceof TirIntT ) return undefined;
@@ -192,14 +193,20 @@ const stringMethods: { [x: string]: TirFuncT | undefined } = Object.freeze({
 function getStructPropAccessReturnType(
     ctx: AstCompilationCtx,
     structType: TirStructType,
-    propName: string
+    propId: Identifier
 ): TirType | undefined
 {
+    const propName = propId.text;
     if( structType.constructors.length === 1 )
     {
         const constr = structType.constructors[0];
         const field = constr.fields.find( f => f.name === propName );
-        if( field ) return field.type;
+        if( field )
+        {
+            const symbols = ctx.program.symbols;
+            if( symbols ) referenceSymbol( ctx.program, propId.range, symbols.fieldOf( symbols.structOf( structType ), constr.name, propName ) );
+            return field.type;
+        }
     }
 
     // constructor accessor methods for multi-constructor data structs
@@ -216,7 +223,7 @@ function getStructPropAccessReturnType(
         }
     }
 
-    const userImpl = findPropInImpls( ctx, structType.methodNamesPtr, propName );
+    const userImpl = findPropInImpls( ctx, structType.methodNamesPtr, propId );
     if( userImpl ) return userImpl;
 
     // Universal `.show(): bytes` fallback for structs with no user-declared
@@ -238,14 +245,15 @@ function getStructPropAccessReturnType(
 function findPropInImpls(
     ctx: AstCompilationCtx,
     methodsNamesPtr: Map<AstFuncName, TirFuncName>,
-    propName: string
+    propId: Identifier
 ): TirType | undefined
 {
-    const tirFuncName = methodsNamesPtr.get( propName );
+    const tirFuncName = methodsNamesPtr.get( propId.text );
     if( !tirFuncName ) return undefined;
 
     const funcExpr = ctx.program.functions.get( tirFuncName );
     if( !funcExpr ) return undefined;
+    referenceSymbol( ctx.program, propId.range, ctx.program.symbols?.functionOf( tirFuncName ) );
 
     const fullSig = funcExpr.sig();
     const methodSig = new TirFuncT(

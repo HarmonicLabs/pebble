@@ -1,3 +1,4 @@
+import type { SymbolIndex } from "../../SymbolIndex";
 import type { SourceRange } from "../../../ast/Source/SourceRange";
 import { DiagnosticEmitter } from "../../../diagnostics/DiagnosticEmitter";
 import { DiagnosticMessage } from "../../../diagnostics/DiagnosticMessage";
@@ -170,6 +171,16 @@ export class TypedProgram extends DiagnosticEmitter
 
     /** main */
     public contractTirFuncName: string = "";
+
+    /**
+     * built by `check()`, for editors: a file or statement with an error is left out and the
+     * rest is still compiled, so that it is typed while the text is incomplete. Such a program
+     * may have holes, and is never lowered.
+     */
+    public checkOnly: boolean = false;
+
+    /** the declarations and their uses, collected by `check()` for editors */
+    public symbols: SymbolIndex | undefined = undefined;
 
     /**
      * Source names that stand for a variable of another name: a contract method's

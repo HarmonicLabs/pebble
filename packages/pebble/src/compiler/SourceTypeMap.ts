@@ -1,4 +1,5 @@
 import { SourceRange } from "../ast/Source/SourceRange";
+import { SymbolIndex } from "./SymbolIndex";
 import { DiagnosticMessage } from "../diagnostics/DiagnosticMessage";
 import { isInternalName } from "./internalVar";
 import { TirAliasType } from "./tir/types/TirAliasType";
@@ -57,6 +58,8 @@ import { TirTypeParam } from "./tir/types/TirTypeParam";
 import { isTirOptType } from "./tir/types/TirNativeType/native/Optional/isTirOptType";
 
 export interface TypeEntry {
+    /** the file the range is in (`Source.absoluteProjPath`) */
+    source: string;
     start: number;
     end: number;
     type: TirType;
@@ -75,20 +78,32 @@ export interface CheckResult {
     diagnostics: DiagnosticMessage[];
     program: TypedProgram;
     sourceTypeMap: SourceTypeMap;
+    /** the declarations of the checked files, and the uses of each */
+    symbols: SymbolIndex;
 }
 
+/**
+ * The types of the expressions and declarations of a checked program, by position. It holds
+ * every file the check compiled (the entry and what it imports), each entry knowing its file:
+ * offsets of different files say nothing about each other.
+ */
 export class SourceTypeMap
 {
-    private entries: TypeEntry[] = [];
-    private sorted = false;
+    /** file (`Source.absoluteProjPath`) -> its entries */
+    private readonly entries = new Map<string, TypeEntry[]>();
+    /** files whose entries are sorted */
+    private readonly sorted = new Set<string>();
 
     constructor(
-        readonly program: TypedProgram
+        readonly program: TypedProgram,
+        /** the file `typeAtOffset` and `allEntries` answer for: the checked entry */
+        readonly entry: string | undefined = undefined
     ) {}
 
     buildFromProgram(): void
     {
-        this.entries = [];
+        this.entries.clear();
+        this.sorted.clear();
         for( const [name, func] of this.program.functions )
         {
             if( func instanceof TirFuncExpr )
@@ -100,33 +115,42 @@ export class SourceTypeMap
         {
             this.walkVarDecl( cnst );
         }
-        this.sorted = false;
     }
 
-    private addEntry( start: number, end: number, type: TirType, name?: string, kind?: "expression" | "type-reference" ): void
+    private addEntry( range: SourceRange, type: TirType, name?: string, kind?: "expression" | "type-reference" ): void
     {
-        if( start >= 0 && end > start )
+        const source = range.source?.absoluteProjPath;
+        if( typeof source !== "string" || !( range.start >= 0 && range.end > range.start ) ) return;
+        let entries = this.entries.get( source );
+        if( !entries ) this.entries.set( source, entries = [] );
+        entries.push({ source, start: range.start, end: range.end, type, name, kind });
+        this.sorted.delete( source );
+    }
+
+    /** the files that have entries */
+    files(): string[]
+    {
+        return [ ...this.entries.keys() ];
+    }
+
+    /** the entries of `file`, by start; among equal starts, the smallest range first */
+    entriesOf( file: string ): readonly TypeEntry[]
+    {
+        const entries = this.entries.get( file );
+        if( !entries ) return [];
+        if( !this.sorted.has( file ) )
         {
-            this.entries.push({ start, end, type, name, kind });
+            entries.sort(( a, b ) => a.start - b.start || (a.end - a.start) - (b.end - b.start) );
+            this.sorted.add( file );
         }
+        return entries;
     }
 
-    private ensureSorted(): void
+    /** the most specific (smallest) entry of `file` containing `offset` */
+    typeAt( file: string, offset: number ): TypeEntry | undefined
     {
-        if( !this.sorted )
-        {
-            // sort by start ascending, then by range size ascending (smallest/most specific first for ties)
-            this.entries.sort(( a, b ) => a.start - b.start || (a.end - a.start) - (b.end - b.start) );
-            this.sorted = true;
-        }
-    }
-
-    typeAtOffset( offset: number ): TypeEntry | undefined
-    {
-        this.ensureSorted();
-        // find the most specific (smallest range) entry containing the offset
         let best: TypeEntry | undefined = undefined;
-        for( const entry of this.entries )
+        for( const entry of this.entriesOf( file ) )
         {
             if( entry.start > offset ) break; // sorted by start, so no more matches
             if( offset >= entry.start && offset < entry.end )
@@ -140,10 +164,16 @@ export class SourceTypeMap
         return best;
     }
 
+    /** `typeAt` in the checked entry */
+    typeAtOffset( offset: number ): TypeEntry | undefined
+    {
+        return this.entry === undefined ? undefined : this.typeAt( this.entry, offset );
+    }
+
+    /** the entries of the checked entry (`entriesOf` for any file) */
     allEntries(): readonly TypeEntry[]
     {
-        this.ensureSorted();
-        return this.entries;
+        return this.entry === undefined ? [] : this.entriesOf( this.entry );
     }
 
     membersOfType( type: TirType ): MemberInfo[]
@@ -314,7 +344,7 @@ export class SourceTypeMap
         // their range covers the whole contract body and pollutes typeAtOffset
         if( !func.name || !func.name.startsWith("§") )
         {
-            this.addEntry( func.range.start, func.range.end, func.type, func.name );
+            this.addEntry( func.range, func.type, func.name );
         }
         for( const param of func.params )
         {
@@ -329,7 +359,7 @@ export class SourceTypeMap
 
         // all expressions have range and type
         try {
-            this.addEntry( expr.range.start, expr.range.end, expr.type );
+            this.addEntry( expr.range, expr.type );
         } catch {}
 
         // recurse into sub-expressions
@@ -345,7 +375,7 @@ export class SourceTypeMap
         else if( expr instanceof TirVariableAccessExpr )
         {
             // leaf — name is the variable name
-            this.addEntry( expr.range.start, expr.range.end, expr.type, expr.resolvedValue.variableInfos.name );
+            this.addEntry( expr.range, expr.type, expr.resolvedValue.variableInfos.name );
         }
         else if( expr instanceof TirFuncExpr )
         {
@@ -516,14 +546,14 @@ export class SourceTypeMap
                 const displayName = decl.sourceName ?? ( isInternalName( decl.name ) ? undefined : decl.name );
                 if( displayName !== undefined )
                 {
-                    this.addEntry( decl.range.start, decl.range.end, decl.type, displayName );
+                    this.addEntry( decl.range, decl.type, displayName );
                 }
             }
             // add entry for explicit type annotation as a type reference
             if( decl.typeAnnotationRange )
             {
                 this.addEntry(
-                    decl.typeAnnotationRange.start, decl.typeAnnotationRange.end,
+                    decl.typeAnnotationRange,
                     decl.type, undefined, "type-reference"
                 );
             }
@@ -535,7 +565,7 @@ export class SourceTypeMap
             if( decl.constrNameRange )
             {
                 this.addEntry(
-                    decl.constrNameRange.start, decl.constrNameRange.end,
+                    decl.constrNameRange,
                     decl.type, decl.constrName, "type-reference"
                 );
             }
@@ -543,7 +573,7 @@ export class SourceTypeMap
             if( decl.typeAnnotationRange )
             {
                 this.addEntry(
-                    decl.typeAnnotationRange.start, decl.typeAnnotationRange.end,
+                    decl.typeAnnotationRange,
                     decl.type, undefined, "type-reference"
                 );
             }
@@ -552,7 +582,7 @@ export class SourceTypeMap
             {
                 for( const [ fieldName, labelInfo ] of decl.fieldLabelRanges )
                 {
-                    this.addEntry( labelInfo.range.start, labelInfo.range.end, labelInfo.type, fieldName );
+                    this.addEntry( labelInfo.range, labelInfo.type, fieldName );
                 }
             }
             if( decl.initExpr ) this.walkExpr( decl.initExpr );
@@ -567,7 +597,7 @@ export class SourceTypeMap
             if( decl.typeAnnotationRange )
             {
                 this.addEntry(
-                    decl.typeAnnotationRange.start, decl.typeAnnotationRange.end,
+                    decl.typeAnnotationRange,
                     decl.type, undefined, "type-reference"
                 );
             }
@@ -576,7 +606,7 @@ export class SourceTypeMap
             {
                 for( const [ fieldName, labelInfo ] of decl.fieldLabelRanges )
                 {
-                    this.addEntry( labelInfo.range.start, labelInfo.range.end, labelInfo.type, fieldName );
+                    this.addEntry( labelInfo.range, labelInfo.type, fieldName );
                 }
             }
             if( decl.initExpr ) this.walkExpr( decl.initExpr );
@@ -587,7 +617,7 @@ export class SourceTypeMap
         }
         else if( decl instanceof TirArrayLikeDeconstr )
         {
-            this.addEntry( decl.range.start, decl.range.end, decl.type );
+            this.addEntry( decl.range, decl.type );
             if( decl.initExpr ) this.walkExpr( decl.initExpr );
             for( const elem of decl.elements )
             {

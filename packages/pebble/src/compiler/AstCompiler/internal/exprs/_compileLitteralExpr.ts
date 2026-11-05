@@ -44,6 +44,7 @@ import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "./_compileExpr";
+import { referenceSymbol } from "../../utils/symbols";
 
 export function _compileLitteralExpr(
     ctx: AstCompilationCtx,
@@ -228,6 +229,16 @@ export function _compileLitteralNamedObjExpr(
             DiagnosticCode._0_is_not_defined,
             expr.name.range, constructorName
         );
+    }
+
+    const symbols = ctx.program.symbols;
+    if( symbols )
+    {
+        const struct = symbols.structOf( structType );
+        if( expr.typeName ) referenceSymbol( ctx.program, expr.typeName.range, struct );
+        referenceSymbol( ctx.program, expr.name.range, symbols.constructorOf( struct, constructorName ) );
+        for( const fieldName of expr.fieldNames )
+            referenceSymbol( ctx.program, fieldName.range, symbols.fieldOf( struct, constructorName, fieldName.text ) );
     }
 
     const fieldValues = __commonCompileStructFieldValues(

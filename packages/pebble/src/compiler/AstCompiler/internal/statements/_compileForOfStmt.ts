@@ -9,7 +9,7 @@ import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { wrapManyStatements } from "../../utils/wrapManyStatementsOrReturnSame";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { _compileStatement } from "./_compileStatement";
-import { _compileVarDecl } from "./_compileVarStmt";
+import { _compileVarDecl, _firstDeclStmtRange } from "./_compileVarStmt";
 
 export function _compileForOfStmt(
     ctx: AstCompilationCtx,
@@ -31,12 +31,14 @@ export function _compileForOfStmt(
     );
 
     const loopCtx = ctx.newLoopChildScope();
+    loopCtx.scope.range = stmt.range;
 
     const varDecl = stmt.elemDeclaration.declarations[0];
     const tirVarDecl = _compileVarDecl(
         loopCtx,
         varDecl,
-        elemsType
+        elemsType,
+        _firstDeclStmtRange( stmt.elemDeclaration, varDecl )
     );
     if( !tirVarDecl ) return undefined;
     if( !canAssignTo( tirVarDecl.type, elemsType ) ) return ctx.error(

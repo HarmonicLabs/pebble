@@ -18,6 +18,7 @@ export function _compileForStmt(
 ): [ TirForStmt ] | undefined
 {
     const loopScope = ctx.newLoopChildScope();
+    loopScope.scope.range = stmt.range;
 
     const _tirInit = stmt.init ? _compileVarStmt( loopScope, stmt.init ) : undefined;
     if( !_tirInit ) return undefined;

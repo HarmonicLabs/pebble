@@ -11,6 +11,7 @@ import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo } from "../../../tir/types/utils/canAssignTo";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
+import { referenceSymbol } from "../../utils/symbols";
 
 export function _compileAssignmentStmt(
     ctx: AstCompilationCtx,
@@ -29,6 +30,7 @@ export function _compileAssignmentStmt(
             DiagnosticCode._0_is_not_defined,
             stmt.varIdentifier.range, stmt.varIdentifier.text
         );
+        referenceSymbol( ctx.program, stmt.varIdentifier.range, resolvedValue.variableInfos.symbol, true );
         const { variableInfos, isDefinedOutsideFuncScope } =  resolvedValue;
         if( resolvedValue.crossesFunctionBoundary ) return ctx.error(
             DiagnosticCode.Lambdas_can_only_capture_const_bindings_0_is_a_mutable_let_Copy_it_into_a_const_before_the_lambda,
@@ -87,6 +89,7 @@ export function _compileExplicitAssignmentStmt(
         DiagnosticCode._0_is_not_defined,
         stmt.range, stmt.varIdentifier.text
     );
+    referenceSymbol( ctx.program, stmt.varIdentifier.range, resovleResult.variableInfos.symbol, true );
     const { variableInfos, isDefinedOutsideFuncScope } = resovleResult;
     if( variableInfos.isConstant ) return ctx.error(
         DiagnosticCode.Cannot_assign_to_0_because_it_is_a_constant,

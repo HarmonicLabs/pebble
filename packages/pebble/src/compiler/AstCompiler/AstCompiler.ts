@@ -5,7 +5,9 @@ import { ExportStarStmt } from "../../ast/nodes/statements/ExportStarStmt";
 import { getStructType } from "../tir/types/utils/canAssignTo";
 import { ExportImportStmt } from "../../ast/nodes/statements/ExportImportStmt";
 import { ImportStarStmt } from "../../ast/nodes/statements/ImportStarStmt";
-import { ImportStmt } from "../../ast/nodes/statements/ImportStmt";
+import { ImportDecl, ImportStmt } from "../../ast/nodes/statements/ImportStmt";
+import { declareSymbol, referenceSymbol } from "./utils/symbols";
+import { PebbleSymbol, SymbolIndex } from "../SymbolIndex";
 import { Source, SourceKind } from "../../ast/Source/Source";
 import { SourceRange } from "../../ast/Source/SourceRange";
 import { DiagnosticEmitter } from "../../diagnostics/DiagnosticEmitter";
@@ -56,7 +58,7 @@ import { NamedDeconstructVarDecl } from "../../ast/nodes/statements/declarations
 import { _deriveContractBody } from "./internal/_deriveContractBody/_deriveContractBody";
 import { DiagnosticCategory } from "../../diagnostics/DiagnosticCategory";
 import { VarStmt } from "../../ast/nodes/statements/VarStmt";
-import { _compileSimpleVarDecl } from "./internal/statements/_compileVarStmt";
+import { _firstDeclStmtRange, _compileSimpleVarDecl } from "./internal/statements/_compileVarStmt";
 import { _compileTestStmt } from "./internal/statements/_compileTestStmt";
 import { SourceTypeMap, CheckResult } from "../SourceTypeMap";
 import { isIdentifier } from "../../utils/text";
@@ -280,8 +282,12 @@ export class AstCompiler extends DiagnosticEmitter
      *
      * returns `CheckResult` with diagnostics, the typed program,
      * and a `SourceTypeMap` for querying types at source positions.
+     *
+     * `pastErrors` (default): for editors, every file and statement the parser kept is compiled,
+     * whatever errors the others have (`TypedProgram.checkOnly`). `false`: compilation stops at
+     * the first file with errors, as when compiling (test discovery).
      */
-    async check(): Promise<CheckResult>
+    async check( { pastErrors = true }: { pastErrors?: boolean } = {} ): Promise<CheckResult>
     {
         const filePath = this.cfg.entry;
         if( !filePath )
@@ -293,7 +299,8 @@ export class AstCompiler extends DiagnosticEmitter
             return {
                 diagnostics: this.diagnostics.slice(),
                 program: this.program,
-                sourceTypeMap: new SourceTypeMap( this.program )
+                sourceTypeMap: new SourceTypeMap( this.program ),
+                symbols: new SymbolIndex()
             };
         }
 
@@ -306,19 +313,23 @@ export class AstCompiler extends DiagnosticEmitter
             return {
                 diagnostics: this.diagnostics.slice(),
                 program: this.program,
-                sourceTypeMap: new SourceTypeMap( this.program )
+                sourceTypeMap: new SourceTypeMap( this.program ),
+                symbols: new SymbolIndex()
             };
         }
 
+        this.program.checkOnly = pastErrors;
+        this.program.symbols = new SymbolIndex();
         await this.compileFile( filePath, true );
         if( !this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) ) warnUnusedFailingValues( this.program, this );
         // no contract check, no throw — just collect diagnostics
-        const typeMap = new SourceTypeMap( this.program );
+        const typeMap = new SourceTypeMap( this.program, filePath );
         typeMap.buildFromProgram();
         return {
             diagnostics: this.diagnostics.slice(),
             program: this.program,
-            sourceTypeMap: typeMap
+            sourceTypeMap: typeMap,
+            symbols: this.program.symbols
         };
     }
 
@@ -379,7 +390,7 @@ export class AstCompiler extends DiagnosticEmitter
         );
         
         // if there were errors
-        if( this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) ) return;
+        if( this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) && !this.program.checkOnly ) return;
 
         await this._compileParsedSource( src, isEntryFile );
 
@@ -558,6 +569,12 @@ export class AstCompiler extends DiagnosticEmitter
 
             if( stmt instanceof TestStmt )
             {
+                declareSymbol( this.program, topLevelScope, {
+                    name: stmt.testName.text,
+                    kind: "test",
+                    nameRange: stmt.testName.range,
+                    range: stmt.range,
+                });
                 if( isEntryFile )
                 {
                     const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
@@ -608,7 +625,8 @@ export class AstCompiler extends DiagnosticEmitter
                         topLevelScope,
                         srcExports,
                         exportRange,
-                        isEntryFile
+                        isEntryFile,
+                        dI === 0 ? _firstDeclStmtRange( stmt, decl ) : undefined
                     );
                 }
 
@@ -727,6 +745,7 @@ export class AstCompiler extends DiagnosticEmitter
 
         const uniqueTypeAstName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + typeAstName + "_" + srcUid;
         const typeMethodsMap = possibleTirTypes.methodsNames;
+        if( stmt.typeIdentifier instanceof AstNamedTypeExpr ) referenceSymbol( this.program, stmt.typeIdentifier.name.range, possibleTirTypes.symbol );
 
         for( const method of stmt.methodImplementations )
         {
@@ -744,6 +763,14 @@ export class AstCompiler extends DiagnosticEmitter
 
             const astMethodName = method.methodName.text;
             const tirMethodName = uniqueTypeAstName + "." + astMethodName;
+            const methodSymbol = declareSymbol( this.program, topLevelScope, {
+                name: astMethodName,
+                kind: "method",
+                nameRange: method.methodName.range,
+                range: method.range,
+                container: possibleTirTypes.symbol,
+            });
+            if( methodSymbol ) this.program.symbols?.registerFunction( tirMethodName, methodSymbol );
 
             if( typeMethodsMap.has( astMethodName ) )
             {
@@ -824,7 +851,9 @@ export class AstCompiler extends DiagnosticEmitter
         topLevelScope: AstScope,
         srcExports: AstScope | undefined = undefined,
         exportRange: SourceRange | undefined = undefined,
-        isEntryFile: boolean = false
+        isEntryFile: boolean = false,
+        /** see `_firstDeclStmtRange` */
+        stmtRange: SourceRange | undefined = undefined
     ): void
     {
         const astName = decl.name.text;
@@ -834,9 +863,14 @@ export class AstCompiler extends DiagnosticEmitter
         const tirVarDecl = _compileSimpleVarDecl(
             declContext,
             decl,
-            undefined // type hint (extracted from init expr if explicit, or inferred from expression)
+            undefined, // type hint (extracted from init expr if explicit, or inferred from expression)
+            stmtRange
         );
-        if( !tirVarDecl ) return undefined;
+        if( !tirVarDecl )
+        {
+            if( exportRange && srcExports ) this._exportFailedDeclaration( astName, topLevelScope, srcExports );
+            return undefined;
+        }
         if( !tirVarDecl.initExpr ) return this.error(
             DiagnosticCode._const_declarations_must_be_initialized,
             tirVarDecl.range,
@@ -881,12 +915,26 @@ export class AstCompiler extends DiagnosticEmitter
             // key by the source name (what importers reference); the infos
             // carry the unique tir name so accesses resolve to the right
             // entry of `program.constants`.
+            if( scopeInfos?.symbol ) scopeInfos.symbol.exported = true;
             srcExports.variables.set( astName, {
                 name: tirConstName,
                 type: uniqueVarDecl.type,
-                isConstant: true
+                isConstant: true,
+                symbol: scopeInfos?.symbol
             });
         }
+    }
+
+    /**
+     * an exported declaration that failed is exported as `topLevelScope` declares it, with its
+     * type or as failed: its error is reported, and an importer does not report it missing
+     */
+    private _exportFailedDeclaration( astName: string, topLevelScope: AstScope, srcExports: AstScope ): void
+    {
+        const infos = topLevelScope.variables.get( astName );
+        if( infos?.symbol ) infos.symbol.exported = true;
+        if( infos ) srcExports.defineValue( infos, astName );
+        else srcExports.defineFailedValue( astName );
     }
 
     private _collectTopLevelFuncDeclSig(
@@ -926,13 +974,25 @@ export class AstCompiler extends DiagnosticEmitter
 
         const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
 
+        // declared before its body compiles, so that the body's own calls find this one, visible
+        // in the whole file
+        const symbol = declareSymbol( this.program, topLevelScope, {
+            name: astFuncName,
+            kind: "function",
+            nameRange: astFuncExpr.name.range,
+            range: stmt.range,
+            exported: exportRange !== undefined,
+        });
+
         // the signature first: a function whose body has an error is still declared, with its
         // type, so a call to it does not report it undefined (without a return type, the
         // signature needs the body: it is declared as failed)
         const sig = astFuncExpr.signature.returnType ? getDataFuncSignature( declContext, astFuncExpr.signature ) : undefined;
+        if( symbol && sig instanceof TirFuncT ) symbol.type = sig;
         if( astFuncExpr.signature.returnType && !( sig instanceof TirFuncT ) )
         {
             topLevelScope.defineFailedValue( astFuncName );
+            if( exportRange && srcExports ) this._exportFailedDeclaration( astFuncName, topLevelScope, srcExports );
             return undefined;
         }
         const funcExpr = _compileFuncExpr(
@@ -943,8 +1003,9 @@ export class AstCompiler extends DiagnosticEmitter
         );
         if( !funcExpr )
         {
-            if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: astFuncName, type: sig });
+            if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: astFuncName, type: sig, symbol });
             else topLevelScope.defineFailedValue( astFuncName );
+            if( exportRange && srcExports ) this._exportFailedDeclaration( astFuncName, topLevelScope, srcExports );
             return undefined;
         }
 
@@ -968,10 +1029,12 @@ export class AstCompiler extends DiagnosticEmitter
             astFuncName,
             tirFuncName
         );
+        if( symbol ) symbol.type = funcExpr.type;
         topLevelScope.defineValue({
             isConstant: true,
             name: astFuncName,
             type: funcExpr.type,
+            symbol,
         });
 
         if( exportRange && srcExports )
@@ -1089,11 +1152,20 @@ export class AstCompiler extends DiagnosticEmitter
         // identifier lookup at call sites finds it. The `genericTemplateName`
         // field signals to `_compileCallExpr` that this is a template.
         topLevelScope.functions.set( astFuncName, tirFuncName );
+        const symbol = declareSymbol( this.program, topLevelScope, {
+            name: astFuncName,
+            kind: "function",
+            nameRange: astFuncExpr.name.range,
+            range: astFuncExpr.range,
+            exported: exportRange !== undefined,
+            type: placeholderFuncType,
+        });
         topLevelScope.defineValue({
             name: astFuncName,
             type: placeholderFuncType,
             isConstant: true,
             genericTemplateName: astFuncName,
+            symbol,
         });
 
         if( exportRange && srcExports )
@@ -1113,6 +1185,7 @@ export class AstCompiler extends DiagnosticEmitter
                 type: placeholderFuncType,
                 isConstant: true,
                 genericTemplateName: astFuncName,
+                symbol,
             });
         }
     }
@@ -1437,6 +1510,45 @@ export class AstCompiler extends DiagnosticEmitter
         return derived;
     }
 
+    /**
+     * A struct, its constructors and their fields in the symbol index. A constructor named by the
+     * struct's own name (`struct Point { x: int }`) is the struct: its uses name the struct, and
+     * its fields are the struct's.
+     */
+    private _declareStructSymbols( stmt: StructDecl, srcUid: string, topLevelScope: AstScope, exported: boolean ): PebbleSymbol | undefined
+    {
+        const symbols = this.program.symbols;
+        if( !symbols ) return undefined;
+        const struct = declareSymbol( this.program, topLevelScope, {
+            name: stmt.name.text,
+            kind: "struct",
+            nameRange: stmt.name.range,
+            range: stmt.range,
+            exported,
+        });
+        if( !struct ) return undefined;
+        symbols.registerStruct( stmt.name.text, srcUid, struct );
+        for( const constr of stmt.constrs )
+        {
+            const isTheStruct = constr.name.text === stmt.name.text && constr.name.range.start === stmt.name.range.start;
+            const container = isTheStruct ? struct : declareSymbol( this.program, topLevelScope, {
+                name: constr.name.text,
+                kind: "constructor",
+                nameRange: constr.name.range,
+                range: constr.range,
+                container: struct,
+            }) ?? struct;
+            for( const field of constr.fields ) declareSymbol( this.program, topLevelScope, {
+                name: field.name.text,
+                kind: "field",
+                nameRange: field.name.range,
+                range: field.range,
+                container,
+            });
+        }
+        return struct;
+    }
+
     private _collectTypeDeclarations(
         stmts: TopLevelStmt[],
         srcUid: string,
@@ -1546,6 +1658,13 @@ export class AstCompiler extends DiagnosticEmitter
                 ].filter( str => typeof str === "string" )) as Set<string>,
                 methodsNames: tirTypes.methodsNames,
                 isGeneric,
+                symbol: declareSymbol( this.program, topLevelScope, {
+                    name: stmt.name.text,
+                    kind: stmt instanceof EnumDecl ? "enum" : "type",
+                    nameRange: stmt.name.range,
+                    range: stmt.range,
+                    exported,
+                }),
             } as PossibleTirTypes);
 
             // define on scope
@@ -1693,6 +1812,7 @@ export class AstCompiler extends DiagnosticEmitter
                 methodsNames,
                 isGeneric,
                 isGenericStruct: isGeneric,
+                symbol: this._declareStructSymbols( stmt, srcUid, topLevelScope, exported ),
             } as PossibleTirTypes);
 
             // define on scope
@@ -2127,6 +2247,7 @@ export class AstCompiler extends DiagnosticEmitter
         mergeMap( from.interfaces, into.interfaces );
         mergeMap( from.namespaces, into.namespaces );
         mergeMap( from.contracts,  into.contracts  );
+        for( const name of from.failedValues ) into.defineFailedValue( name );
     }
 
     /**
@@ -2157,6 +2278,11 @@ export class AstCompiler extends DiagnosticEmitter
             move( from.interfaces, into.interfaces );
             move( from.namespaces, into.namespaces );
             move( from.contracts,  into.contracts  );
+            if( from.failedValues.has( srcName ) )
+            {
+                found = true;
+                into.defineFailedValue( dstName );
+            }
 
             if( !found ) this.error(
                 DiagnosticCode.Module_0_has_no_exported_member_1,
@@ -2170,6 +2296,35 @@ export class AstCompiler extends DiagnosticEmitter
                 dstName
             );
         }
+    }
+
+    /**
+     * `import { a }` or `import { a as b }` in the symbol index: a declaration of the local name,
+     * whose target is the exported declaration. With an alias, the exported name in the import
+     * names that declaration, like any use of it.
+     */
+    private _declareImportSymbol(
+        importDecl: ImportDecl,
+        localName: string,
+        exportedName: string,
+        exporterPath: string,
+        stmtRange: SourceRange
+    ): PebbleSymbol | undefined
+    {
+        const symbols = this.program.symbols;
+        if( !symbols ) return undefined;
+        const target = symbols.topLevel( exporterPath, exportedName );
+        const local = importDecl.asIdentifier ?? importDecl.identifier;
+        if( importDecl.asIdentifier ) referenceSymbol( this.program, importDecl.identifier.range, target );
+        const symbol = declareSymbol( this.program, undefined, {
+            name: localName,
+            kind: "import",
+            nameRange: local.range,
+            range: stmtRange,
+            type: target?.type,
+        });
+        if( symbol && target && symbol !== target ) symbol.target = target;
+        return symbol;
     }
 
     private _consumeImportsAddSymsInScope(
@@ -2199,15 +2354,15 @@ export class AstCompiler extends DiagnosticEmitter
                 && srcExports
             )
             {
-                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
-                const importedSymbols = this.program.getExportedSymbols( importAbsPath );
+                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath );
+                const importedSymbols = importAbsPath === undefined ? undefined : this.program.getExportedSymbols( importAbsPath );
                 if( !importedSymbols )
                 {
                     if( deferTo ) deferTo.push( stmt );
                     else this.error(
                         DiagnosticCode.File_0_not_found,
                         stmt.fromPath.range,
-                        importAbsPath
+                        importAbsPath ?? stmt.fromPath.string
                     );
                     void stmts.splice( i, 1 );
                     i--;
@@ -2225,8 +2380,8 @@ export class AstCompiler extends DiagnosticEmitter
             }
             if( stmt instanceof ImportStarStmt )
             {
-                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
-                const importedSymbols = this.program.getExportedSymbols( importAbsPath );
+                const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath );
+                const importedSymbols = importAbsPath === undefined ? undefined : this.program.getExportedSymbols( importAbsPath );
                 if( !importedSymbols )
                 {
                     if( deferTo )
@@ -2238,7 +2393,7 @@ export class AstCompiler extends DiagnosticEmitter
                         this.error(
                             DiagnosticCode.File_0_not_found,
                             stmt.fromPath.range,
-                            importAbsPath
+                            importAbsPath ?? stmt.fromPath.string
                         );
                     }
                     void stmts.splice( i, 1 );
@@ -2264,33 +2419,35 @@ export class AstCompiler extends DiagnosticEmitter
                 stmt instanceof ImportStmt
             )) continue;
 
-            const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath ) ?? "";
-            const importedSymbols = this.program.getExportedSymbols( importAbsPath );
-            if( !importedSymbols )
+            const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath );
+            const importedSymbols = importAbsPath === undefined ? undefined : this.program.getExportedSymbols( importAbsPath );
+            if( importAbsPath === undefined || !importedSymbols )
             {
-                if( deferTo )
-                {
-                    deferTo.push( stmt );
-                    void stmts.splice( i, 1 );
-                    i--;
-                    continue;
-                }
-                return this.error(
+                if( deferTo ) deferTo.push( stmt );
+                // the other imports are still consumed
+                else this.error(
                     DiagnosticCode.File_0_not_found,
                     stmt.fromPath.range,
-                    importAbsPath // stmt.fromPath.string
+                    importAbsPath ?? stmt.fromPath.string
                 );
+                void stmts.splice( i, 1 );
+                i--;
+                continue;
             }
 
             for( const importDecl of stmt.members )
             {
+                // the exported name, and the name it has here (`import { a as b }`)
                 const declName = importDecl.identifier.text;
+                const localName = importDecl.asIdentifier?.text ?? declName;
                 const isValue = importedSymbols.variables.has( declName );
                 const isType = importedSymbols.types.has( declName );
                 const isFunction = importedSymbols.functions.has( declName );
                 const isInterface = importedSymbols.interfaces.has( declName );
                 const isNamespace = importedSymbols.namespaces.has( declName );
                 const isContract = importedSymbols.contracts.has( declName );
+                // declared there, but its declaration failed (its error is reported there)
+                const isFailed = importedSymbols.failedValues.has( declName );
 
                 if(!(
                     isValue
@@ -2299,6 +2456,7 @@ export class AstCompiler extends DiagnosticEmitter
                     || isInterface
                     || isNamespace
                     || isContract
+                    || isFailed
                 )) {
                     // exporter only ran its types pass (we are on a
                     // cycle-closing edge): values/functions are not
@@ -2323,12 +2481,14 @@ export class AstCompiler extends DiagnosticEmitter
                     continue;
                 }
 
+                const importSymbol = this._declareImportSymbol( importDecl, localName, declName, importAbsPath, stmt.range );
+
                 // define on source top level scope
-                if( isValue ) srcImportsScope.variables.set( declName, importedSymbols.variables.get( declName )! );
+                if( isValue ) srcImportsScope.variables.set( localName, { ...importedSymbols.variables.get( declName )!, symbol: importSymbol } );
                 if( isFunction )
                 {
                     const tirFuncName = importedSymbols.functions.get( declName )!;
-                    srcImportsScope.functions.set( declName, tirFuncName );
+                    srcImportsScope.functions.set( localName, tirFuncName );
                     // also define as a value so that `resolveValue` can find it
                     // (mirrors what `_collectTopLevelFuncDeclSig` does for local functions)
                     const funcExpr = this.program.functions.get( tirFuncName );
@@ -2336,8 +2496,9 @@ export class AstCompiler extends DiagnosticEmitter
                     {
                         srcImportsScope.defineValue({
                             isConstant: true,
-                            name: declName,
+                            name: localName,
                             type: funcExpr.type,
+                            symbol: importSymbol,
                         });
                         // expressify resolves top-level function accesses by
                         // the LOCAL name through `program.functions` (local
@@ -2347,14 +2508,14 @@ export class AstCompiler extends DiagnosticEmitter
                         // re-export (`export { double as twice } from`) —
                         // needs the same aliasing or the call site dies at
                         // expressify with "variable not found in context".
-                        if( !this.program.functions.has( declName ) )
-                            this.program.functions.set( declName, funcExpr );
+                        if( !this.program.functions.has( localName ) )
+                            this.program.functions.set( localName, funcExpr );
                     }
                 }
                 if( isType )
                 {
                     const possible = importedSymbols.types.get( declName )!;
-                    srcImportsScope.types.set( declName, possible );
+                    srcImportsScope.types.set( localName, importSymbol ? { ...possible, symbol: importSymbol } : possible );
                     // imported structs get their constructors registered for
                     // bare literal construction, like local declarations
                     const importedT =
@@ -2370,9 +2531,10 @@ export class AstCompiler extends DiagnosticEmitter
                         );
                     }
                 }
-                if( isInterface ) srcImportsScope.interfaces.set( declName, importedSymbols.interfaces.get( declName )! );
-                if( isNamespace ) srcImportsScope.defineNamespace( importedSymbols.namespaces.get( declName )! );
-                if( isContract ) srcImportsScope.defineContract( importedSymbols.contracts.get( declName )! );
+                if( isInterface ) srcImportsScope.interfaces.set( localName, importedSymbols.interfaces.get( declName )! );
+                if( isNamespace ) srcImportsScope.defineNamespace({ ...importedSymbols.namespaces.get( declName )!, name: localName });
+                if( isContract ) srcImportsScope.defineContract({ ...importedSymbols.contracts.get( declName )!, name: localName });
+                if( isFailed ) srcImportsScope.defineFailedValue( localName );
             }
 
             // remove from array so we don't process it again
@@ -2393,14 +2555,26 @@ export class AstCompiler extends DiagnosticEmitter
         absoluteProjPath: string
     ): Promise<Source | undefined>
     {
+        const src = await this._sourceAt( absoluteProjPath );
+        if( !src ) return this.error(
+            DiagnosticCode.File_0_not_found,
+            undefined, absoluteProjPath
+        );
+        return src;
+    }
+
+    /**
+     * the source at `absoluteProjPath`, `undefined` if there is no such file. Reports nothing:
+     * a missing import is reported where the import is consumed, at its range
+     */
+    private async _sourceAt( absoluteProjPath: string ): Promise<Source | undefined>
+    {
         const cached = this.parsedAstSources.get( absoluteProjPath ) ?? this._sourceCache.get( absoluteProjPath );
         if( cached ) return cached;
 
         const srcText = await this._readFile( absoluteProjPath );
-        if( !srcText ) return this.error(
-            DiagnosticCode.File_0_not_found,
-            undefined, absoluteProjPath
-        );
+        // an empty file is a file
+        if( typeof srcText !== "string" ) return undefined;
 
         const src = new Source(
             SourceKind.User,
@@ -2446,7 +2620,8 @@ export class AstCompiler extends DiagnosticEmitter
         Parser.parseSource( src, this.diagnostics );
         this.parsedAstSources.set( src.absoluteProjPath, src );
 
-        if( this.diagnostics.length > 0 ) return false;
+        // `check()` compiles what the parser kept
+        if( this.diagnostics.length > 0 && !this.program.checkOnly ) return false;
 
         // get all imports to parse recursively
         const imports = src.statements.filter( isImportStmtLike );
@@ -2454,19 +2629,19 @@ export class AstCompiler extends DiagnosticEmitter
         const srcPath = resolveStack.dependent.absoluteProjPath;
         const paths = this.importPathsFromStmts( imports, srcPath );
         const importedSources = await Promise.all(
-            paths.map( this.getAbsoulteProjPathSource.bind( this ) )
+            paths.map( p => this._sourceAt( p ) )
         );
-        
+
         for( const src of importedSources )
         {
-            if( !src ) continue; // error already reported in `importPathsFromStmts`
+            if( !src ) continue; // reported where the import is consumed
 
             const nextStack = new ResolveStackNode( resolveStack, src );
             // recursively parse imported files
-            if( !await this.compileAllDeps( nextStack ) ) return false;
+            if( !await this.compileAllDeps( nextStack ) && !this.program.checkOnly ) return false;
         }
 
-        this._compileParsedSource( src, isEntryFile );
+        await this._compileParsedSource( src, isEntryFile );
 
         return true;
     }
@@ -2496,8 +2671,8 @@ export class AstCompiler extends DiagnosticEmitter
         for( const p of paths )
         {
             if( resolveStack.includesInternalPath( p ) ) continue; // in-cycle
-            const depSrc = await this.getAbsoulteProjPathSource( p );
-            if( !depSrc ) continue;
+            const depSrc = await this._sourceAt( p );
+            if( !depSrc ) continue; // reported where the import is consumed
             await this.compileAllDeps( new ResolveStackNode( resolveStack, depSrc ) );
         }
 
@@ -2507,28 +2682,19 @@ export class AstCompiler extends DiagnosticEmitter
         info.typesPassRunning = false;
     }
 
+    /** the files `stmts` import; a path that resolves to none is reported where the import is consumed */
     private importPathsFromStmts(
         stmts: ImportStmtLike[],
         requestingPath: string
     ): string[]
     {
-        return stmts
-        .map( imp => {
-            const absoluteProjPath = getAbsolutePath(
-                imp.fromPath.string,
-                requestingPath
-            );
-            if( !absoluteProjPath )
-            {
-                this.error(
-                    DiagnosticCode.File_0_not_found,
-                    imp.fromPath.range, imp.fromPath.string
-                );
-                return "";
-            }
-            return absoluteProjPath;
-        })
-        .filter( path => path !== "" );
+        const paths: string[] = [];
+        for( const imp of stmts )
+        {
+            const absoluteProjPath = getAbsolutePath( imp.fromPath.string, requestingPath );
+            if( absoluteProjPath ) paths.push( absoluteProjPath );
+        }
+        return paths;
     }
 
     private _reportCircularDependency(

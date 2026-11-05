@@ -28,6 +28,8 @@ import { _compileDataEncodedConcreteType } from "../types/_compileDataEncodedCon
 import { _compileSopEncodedConcreteType } from "../types/_compileSopEncodedConcreteType";
 import { getDataFuncSignature } from "../types/getDataFuncSignature";
 import { _hasDuplicateTypeParams } from "./_hasDuplicateTypeParams";
+import { declareSymbol } from "../../utils/symbols";
+import type { PebbleSymbol } from "../../../SymbolIndex";
 
 /*
 - add "self" as first parameter
@@ -131,12 +133,14 @@ export function _compileFuncExpr(
     const returnTypeIsGeneric = !returnType.isConcrete();
 
     const funcCtx = ctx.newFunctionChildScope( returnType, isMethod );
+    funcCtx.scope.range = expr.range;
     if( returnTypeIsGeneric ) funcCtx.functionCtx!.inferReturnType = true;
     // define value in case of recursion
     funcCtx.scope.defineValue({
         name: expr.name.text,
         type: expectedFuncType,
         isConstant: true,
+        symbol: _declareFuncSymbol( ctx, expr, expectedFuncType, isMethod ),
     });
 
     // if( _hasDuplicateTypeParams( ctx, expr.typeParams ) ) return undefined;
@@ -227,6 +231,7 @@ function _compileFuncExprInferReturnType(
     const tempFuncType = new TirFuncT( paramTypes, tempReturnType );
 
     const funcCtx = ctx.newFunctionChildScope( tempReturnType, isMethod );
+    funcCtx.scope.range = expr.range;
     // mark the context as inferring so _compileReturnStmt
     // skips the return type assignability check
     funcCtx.functionCtx!.inferReturnType = true;
@@ -234,6 +239,7 @@ function _compileFuncExprInferReturnType(
         name: expr.name.text,
         type: tempFuncType,
         isConstant: true,
+        symbol: _declareFuncSymbol( ctx, expr, undefined, isMethod ),
     });
 
     // Inferred-return-type variant: generics are not supported here because
@@ -328,6 +334,21 @@ function _returnTypeOfStmt( stmt: TirStmt ): TirType | undefined
     ) return _returnTypeOfStmt( stmt.body );
 
     return undefined;
+}
+
+/**
+ * a named function in the symbol index (the binding its body calls itself through). A top-level
+ * function, or a method, is declared before its body compiles: this finds it
+ */
+function _declareFuncSymbol( ctx: AstCompilationCtx, expr: FuncExpr, type: TirType | undefined, isMethod: boolean ): PebbleSymbol | undefined
+{
+    return declareSymbol( ctx.program, ctx.scope, {
+        name: expr.name.text,
+        kind: isMethod ? "method" : "function",
+        nameRange: expr.name.range,
+        range: expr.range,
+        type,
+    });
 }
 
 function _getDestructuredParamsAsVarDecls(

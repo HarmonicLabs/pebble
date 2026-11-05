@@ -1,4 +1,6 @@
 import { AstFuncType } from "../../../ast/nodes/types/AstNativeTypeExpr";
+import { SourceRange } from "../../../ast/Source/SourceRange";
+import type { PebbleSymbol } from "../../SymbolIndex";
 import { TypedProgram, TypeParamConstraint } from "../../tir/program/TypedProgram";
 import { TirType } from "../../tir/types/TirType";
 import { TirTypeParam } from "../../tir/types/TirTypeParam";
@@ -80,6 +82,8 @@ export interface IVariableInfos {
      * i.e. it may contain `TirTypeParam` nodes for each declared type param.
      */
     genericTemplateName?: string;
+    /** the declaration, in the program's symbol index (`TypedProgram.symbols`, a check) */
+    symbol?: PebbleSymbol;
 }
 
 /**
@@ -112,6 +116,8 @@ export interface PossibleTirTypes {
      * intentionally keep the per-position sop/data split.
      */
     isGenericStruct?: boolean;
+    /** the declaration, in the program's symbol index (a check); here, an import of it */
+    symbol?: PebbleSymbol;
 }
 
 /**
@@ -203,6 +209,12 @@ export class AstScope
 
     private _isReadonly = false;
     readonly infos: ScopeInfos;
+    /**
+     * the source this scope covers (a block, a function, a loop, a branch): a name declared in
+     * it can be used from its declaration to the end of it. `undefined` for scopes the source
+     * does not delimit (a file's top level: the whole file)
+     */
+    range: SourceRange | undefined = undefined;
     
     constructor(
         parent: AstScope | undefined,
@@ -604,6 +616,7 @@ export class AstScope
         for( const [ name, sym ] of this.contracts )
             cloned.contracts.set( name, sym );
 
+        cloned.range = this.range;
         return cloned;
     }
 }

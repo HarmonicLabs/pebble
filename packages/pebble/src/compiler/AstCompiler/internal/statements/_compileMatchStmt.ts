@@ -108,6 +108,7 @@ export function _compileMatchStmt(
     {
         const matchCase = stmt.elseCase;
         const branchCtx = ctx.newBranchChildScope();
+        branchCtx.scope.range = matchCase.range;
         const branchBody = wrapManyStatements(
             _compileStatement(
                 branchCtx,
@@ -180,6 +181,8 @@ export function _compileTirMatchStmtCase(
             constrNamesAlreadySpecified.push( memberName );
 
             const branchCtx = ctx.newBranchChildScope();
+
+            branchCtx.scope.range = matchCase.range;
             const branchBody = wrapManyStatements(
                 _compileStatement( branchCtx, matchCase.body ),
                 matchCase.body.range
@@ -230,6 +233,8 @@ export function _compileTirMatchStmtCase(
             );
 
             const branchCtx = ctx.newBranchChildScope();
+
+            branchCtx.scope.range = matchCase.range;
             const branchBody = wrapManyStatements(
                 _compileStatement( branchCtx, matchCase.body ),
                 matchCase.body.range
@@ -266,6 +271,8 @@ export function _compileTirMatchStmtCase(
             );
 
             const branchCtx = ctx.newBranchChildScope();
+
+            branchCtx.scope.range = matchCase.range;
 
             // narrow the matched variable (if it's a plain identifier) to the matched constructor
             if( matchedVarName )
@@ -313,6 +320,8 @@ export function _compileTirMatchStmtCase(
 
             const branchCtx = ctx.newBranchChildScope();
 
+            branchCtx.scope.range = matchCase.range;
+
             const branchArg = _compileNamedDeconstructVarDecl(
                 branchCtx,
                 pattern,
@@ -348,6 +357,8 @@ export function _compileTirMatchStmtCase(
             );
 
             const branchCtx = ctx.newBranchChildScope();
+
+            branchCtx.scope.range = matchCase.range;
 
             const branchArg = _compileNamedDeconstructVarDecl(
                 branchCtx,
@@ -392,6 +403,8 @@ export function _compileTirMatchStmtCase(
         );
 
         const branchCtx = ctx.newBranchChildScope();
+
+        branchCtx.scope.range = matchCase.range;
 
         const branchArg = _compileSingleDeconstructVarDecl(
             branchCtx,
@@ -440,6 +453,8 @@ export function _compileTirMatchStmtCase(
         );
 
         const branchCtx = ctx.newBranchChildScope();
+
+        branchCtx.scope.range = matchCase.range;
 
         const branchArg = _compileArrayLikeDeconstr(
             branchCtx,

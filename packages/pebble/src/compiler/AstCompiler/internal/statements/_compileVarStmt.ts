@@ -26,6 +26,8 @@ import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { getUniqueInternalName } from "../../../internalVar";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
+import { declareSymbol, referenceSymbol } from "../../utils/symbols";
+import type { PebbleSymbol } from "../../../SymbolIndex";
 import { _compileSopEncodedConcreteType } from "../types/_compileSopEncodedConcreteType";
 
 export function _compileVarStmt(
@@ -37,30 +39,41 @@ export function _compileVarStmt(
     for( let i = 0; i < stmt.declarations.length; i++ )
     {
         const decl = stmt.declarations[i];
-        const tirDecl = _compileVarDecl( ctx, decl, undefined );
+        const tirDecl = _compileVarDecl( ctx, decl, undefined, i === 0 ? _firstDeclStmtRange( stmt, decl ) : undefined );
         if( !tirDecl ) return undefined;
         tirVarDecls[i] = tirDecl;
     }
     return tirVarDecls;
 }
+/**
+ * The range of the TIR declaration a statement's first declaration compiles to: from the
+ * statement's start, so that it includes the keyword (`const x = 1`), to the declaration's end.
+ * It is the statement where a debugger stops, and where a source map points.
+ */
+export function _firstDeclStmtRange( stmt: VarStmt, decl: VarDecl ): SourceRange
+{
+    return new SourceRange( decl.range.source, Math.min( stmt.range.start, decl.range.start ), decl.range.end );
+}
 export function _compileVarDecl(
     ctx: AstCompilationCtx,
     decl: VarDecl,
     typeHint: TirType | undefined, // coming from deconstructing
+    /** the TIR declaration's range, if not the declaration's: a statement's first, see `_compileVarStmt` */
+    stmtRange?: SourceRange,
 ): TirVarDecl | undefined
 {
     if( decl instanceof SimpleVarDecl ) {
-        return _compileSimpleVarDecl( ctx, decl, typeHint );
+        return _compileSimpleVarDecl( ctx, decl, typeHint, stmtRange );
     }
 
     if( decl instanceof NamedDeconstructVarDecl )
-        return _compileNamedDeconstructVarDecl( ctx, decl, typeHint );
+        return _compileNamedDeconstructVarDecl( ctx, decl, typeHint, stmtRange );
 
     if( decl instanceof SingleDeconstructVarDecl )
-        return _compileSingleDeconstructVarDecl( ctx, decl, typeHint );
+        return _compileSingleDeconstructVarDecl( ctx, decl, typeHint, stmtRange );
 
     if( decl instanceof ArrayLikeDeconstr )
-        return _compileArrayLikeDeconstr( ctx, decl, typeHint );
+        return _compileArrayLikeDeconstr( ctx, decl, typeHint, stmtRange );
 
     const tsEnsureExhautstiveCheck: never = decl;
     console.error( decl );
@@ -70,6 +83,8 @@ export function _compileSimpleVarDecl(
     ctx: AstCompilationCtx,
     decl: SimpleVarDecl,
     typeHint: TirType | undefined, // coming from deconstructing
+    /** the TIR declaration's range, if not the declaration's: a statement's first, see `_compileVarStmt` */
+    stmtRange?: SourceRange,
     // useful to infer variable type by usage
     // sameLevelStmts: readonly PebbleStmt[],
     // stmtIdx: number
@@ -83,10 +98,12 @@ export function _compileSimpleVarDecl(
         // its error is reported: the name is still declared, with the type the declaration
         // gives it if any, so a use does not report it undefined (a top-level `const`, read by
         // the functions after it)
+        const symbol = _declareVarSymbol( ctx, decl, declared.type );
         if( declared.type !== undefined ) ctx.scope.defineValue({
             name: _tirNameOfDeclared( ctx, astName ),
             type: declared.type,
-            isConstant: decl.isConst()
+            isConstant: decl.isConst(),
+            symbol
         }, astName );
         else ctx.scope.defineFailedValue( astName );
         return undefined;
@@ -97,7 +114,8 @@ export function _compileSimpleVarDecl(
     const success = ctx.scope.defineValue({
         name: tirName,
         type: finalVarType,
-        isConstant: decl.isConst()
+        isConstant: decl.isConst(),
+        symbol: _declareVarSymbol( ctx, decl, finalVarType )
     }, astName );
     if( !success )
     return ctx.error(
@@ -110,10 +128,21 @@ export function _compileSimpleVarDecl(
         finalVarType,
         initExpr,
         decl.isConst(),
-        decl.range,
+        stmtRange ?? decl.range,
         typeAnnotationRange,
         decl.sourceName ?? ( tirName === astName ? undefined : astName )
     );
+}
+/** `decl` in the symbol index: a parameter where a function's scope starts, else by `const` */
+function _declareVarSymbol( ctx: AstCompilationCtx, decl: SimpleVarDecl, type: TirType | undefined ): PebbleSymbol | undefined
+{
+    return declareSymbol( ctx.program, ctx.scope, {
+        name: decl.name.text,
+        kind: ctx.scope.isFunctionBoundary ? "parameter" : decl.isConst() ? "constant" : "variable",
+        nameRange: decl.name.range,
+        range: decl.range,
+        type,
+    });
 }
 /**
  * the TIR name of a variable declared as `astName`: the same name, unless the declaration
@@ -128,6 +157,8 @@ export function _compileNamedDeconstructVarDecl(
     ctx: AstCompilationCtx,
     decl: NamedDeconstructVarDecl,
     typeHint: TirType | undefined, // coming from deconstructing
+    /** the TIR declaration's range, if not the declaration's: a statement's first, see `_compileVarStmt` */
+    stmtRange?: SourceRange,
     // useful to infer variable type by usage
     // sameLevelStmts: readonly PebbleStmt[],
     // stmtIdx: number
@@ -197,7 +228,7 @@ export function _compileNamedDeconstructVarDecl(
             finalVarType,
             initExpr,
             decl.isConst(),
-            decl.range,
+            stmtRange ?? decl.range,
             decl.name.range,
             fieldLabelRanges,
             typeAnnotationRange
@@ -214,10 +245,13 @@ export function _compileNamedDeconstructVarDecl(
             decl.name.range, decl.name.text, namedDestructableType.toString()
         );
 
+        const struct = ctx.program.symbols?.structOf( namedDestructableType );
+        referenceSymbol( ctx.program, decl.name.range, ctx.program.symbols?.constructorOf( struct, decl.name.text ) );
         const deconstructedFields = _getDeconstructedFields(
             ctx,
             decl,
-            finalConstructorDef
+            finalConstructorDef,
+            struct
         );
         if( !deconstructedFields ) return undefined;
         const [ fieds, rest, fieldLabelRanges ] = deconstructedFields;
@@ -229,7 +263,7 @@ export function _compileNamedDeconstructVarDecl(
             finalVarType,
             initExpr,
             decl.isConst(),
-            decl.range,
+            stmtRange ?? decl.range,
             decl.name.range,
             fieldLabelRanges,
             typeAnnotationRange
@@ -240,6 +274,8 @@ export function _compileSingleDeconstructVarDecl(
     ctx: AstCompilationCtx,
     decl: SingleDeconstructVarDecl,
     typeHint: TirType | undefined, // coming from deconstructing
+    /** the TIR declaration's range, if not the declaration's: a statement's first, see `_compileVarStmt` */
+    stmtRange?: SourceRange,
     // useful to infer variable type by usage
     // sameLevelStmts: readonly PebbleStmt[],
     // stmtIdx: number
@@ -269,7 +305,7 @@ export function _compileSingleDeconstructVarDecl(
             finalVarType,
             initExpr,
             decl.isConst(),
-            decl.range,
+            stmtRange ?? decl.range,
             fieldLabelRanges,
             typeAnnotationRange
         );
@@ -290,7 +326,8 @@ export function _compileSingleDeconstructVarDecl(
     const deconstructedFields = _getDeconstructedFields(
         ctx,
         decl,
-        finalStructType.constructors[0]
+        finalStructType.constructors[0],
+        ctx.program.symbols?.structOf( finalStructType )
     );
     if( !deconstructedFields ) return undefined;
     const [ fieds, rest, fieldLabelRanges ] = deconstructedFields;
@@ -301,7 +338,7 @@ export function _compileSingleDeconstructVarDecl(
         finalVarType,
         initExpr,
         decl.isConst(),
-        decl.range,
+        stmtRange ?? decl.range,
         fieldLabelRanges,
         typeAnnotationRange
     );
@@ -310,6 +347,8 @@ export function _compileArrayLikeDeconstr(
     ctx: AstCompilationCtx,
     decl: ArrayLikeDeconstr,
     typeHint: TirType | undefined, // coming from deconstructing
+    /** the TIR declaration's range, if not the declaration's: a statement's first, see `_compileVarStmt` */
+    stmtRange?: SourceRange,
     // useful to infer variable type by usage
     // sameLevelStmts: readonly PebbleStmt[],
     // stmtIdx: number
@@ -346,7 +385,14 @@ export function _compileArrayLikeDeconstr(
         const success = ctx.scope.defineValue({
             name: rest,
             type: finalVarType, // same list type
-            isConstant: decl.isConst()
+            isConstant: decl.isConst(),
+            symbol: declareSymbol( ctx.program, ctx.scope, {
+                name: decl.rest.text,
+                kind: decl.isConst() ? "constant" : "variable",
+                nameRange: decl.rest.range,
+                range: decl.range,
+                type: finalVarType,
+            })
         }, decl.rest.text );
         if( !success ) return ctx.error(
             DiagnosticCode.Duplicate_identifier_0,
@@ -360,13 +406,15 @@ export function _compileArrayLikeDeconstr(
         finalVarType,
         initExpr,
         decl.isConst(),
-        decl.range
+        stmtRange ?? decl.range
     );
 }
 export function _getDeconstructedFields(
     ctx: AstCompilationCtx,
     astDeconstruct: ISingleDeconstructVarDecl,
-    ctorDef: TirStructConstr
+    ctorDef: TirStructConstr,
+    /** the struct `ctorDef` is of, in the symbol index: the labels name its fields */
+    struct?: PebbleSymbol
 ): [
     fields: Map<string, TirVarDecl>,
     rest: string | undefined,
@@ -394,6 +442,7 @@ export function _getDeconstructedFields(
 
         const ctorFieldType = ctorDef.fields.find( f => f.name === fieldName )!.type;
         fieldLabelRanges.set( fieldName, { range: fieldIdentifier.range, type: ctorFieldType } );
+        referenceSymbol( ctx.program, fieldIdentifier.range, ctx.program.symbols?.fieldOf( struct, ctorDef.name, fieldName ) );
 
         // adds to scope "simple" var decls
         const tirVarDecl = _compileVarDecl(

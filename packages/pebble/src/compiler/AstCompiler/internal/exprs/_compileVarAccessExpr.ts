@@ -3,6 +3,7 @@ import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.gener
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
 import { TirType } from "../../../tir/types/TirType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
+import { referenceSymbol } from "../../utils/symbols";
 
 export function _compileVarAccessExpr(
     ctx: AstCompilationCtx,
@@ -26,6 +27,8 @@ export function _compileVarAccessExpr(
             expr.range, expr.text
         );
     }
+
+    referenceSymbol( ctx.program, expr.range, resolvedValue.variableInfos.symbol );
 
     // lambdas may only CAPTURE `const` bindings: a `const` is a real
     // let-binding computed once at its declaration, so accessing it from a
