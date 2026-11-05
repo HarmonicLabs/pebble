@@ -8,6 +8,8 @@ import { IRVar } from "../../IRNodes/IRVar";
 import { IRTerm } from "../../IRTerm";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
 import { iterTree } from "../_internal/iterTree";
+import { irMeta } from "../../sourceMap/irRanges";
+import type { IRTracePoint } from "../../IRNodes/BaseIRMetadata";
 
 /**
  * Eta-reduce single-parameter lambdas into (partial) applications:
@@ -55,7 +57,9 @@ export function etaReduceLambdasAndReturnRoot( term: IRTerm ): IRTerm
                 && !referencesVar( body.fn, param )
             )
             {
-                _modifyChildFromTo( node.parent, node, body.fn );
+                const reduced = body.fn;
+                _modifyChildFromTo( node.parent, node, reduced );
+                movePerCallTraces( [ body ], reduced, param );
                 changed = true;
                 return true;
             }
@@ -71,11 +75,9 @@ export function etaReduceLambdasAndReturnRoot( term: IRTerm ): IRTerm
                 && !referencesVar( body.arg, param )
             )
             {
-                _modifyChildFromTo(
-                    node.parent,
-                    node,
-                    new IRApp( new IRNative( body.fn.fn.tag ), body.arg )
-                );
+                const reduced = new IRApp( new IRNative( body.fn.fn.tag ), body.arg );
+                _modifyChildFromTo( node.parent, node, reduced );
+                movePerCallTraces( [ body, body.fn ], reduced, param );
                 changed = true;
                 return true;
             }
@@ -84,6 +86,26 @@ export function etaReduceLambdasAndReturnRoot( term: IRTerm ): IRTerm
         });
     }
     return term;
+}
+
+/**
+ * `nodes`, the lambda's body the reduction drops, ran on each call: the removed traces computed
+ * with them now run whenever the value of `reduced` is applied (`removeTraces`), and those of
+ * the value the body returned when the application returns; the lambda's parameter `param` is
+ * the value it is applied to
+ */
+function movePerCallTraces( nodes: readonly IRTerm[], reduced: IRTerm, param: symbol ): void
+{
+    const points: IRTracePoint[] = [];
+    for( const n of nodes )
+    for( const p of irMeta( n ).tracePoints ?? [] )
+    {
+        if( p.when === 0 ) points.push({ trace: p.trace, when: 5, applied: param });
+        else if( p.when === 3 && n === nodes[0] ) points.push({ trace: p.trace, when: 6, applied: param });
+    }
+    if( points.length === 0 ) return;
+    const meta = irMeta( reduced );
+    meta.tracePoints = [ ...( meta.tracePoints ?? [] ), ...points ];
 }
 
 /** commutative BINARY builtins: `op x y === op y x` */

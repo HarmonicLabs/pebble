@@ -146,13 +146,35 @@ describe("removeTraces", () => {
         ]));
     });
 
-    test("a trace whose code the optimizer removed is in the map without a place", async () => {
-        // `double` becomes a partial application of `multiplyInteger`: no call is left to trace
-        const { map } = await exported( `
-function double( x: int ): int { trace "double"; return x * 2; }
-export function f( x: int ): int { return double( x ) + double( x + 1 ); }`, { removeTraces: true } );
-        expect( map.traces ).toEqual([ expect.objectContaining({ kind: "trace", message: "double" }) ]);
-        expect( map.tracePoints ).toEqual([]);
+    test.each([
+        [ "a constant message", `trace "double";`, [ "double", "double" ] ],
+        [ "a message reading the parameter", `trace x;`, [ "2", "3" ] ],
+    ])( "a helper the optimizer reduces to a builtin, %s: its trace runs at each call", async ( _, traceStmt, logs ) => {
+        // `double` becomes `multiplyInteger 2`: no lambda is left, the trace runs when that value
+        // is applied (it used to have no place in the map, and never printed)
+        const src = `
+function double( x: int ): int { ${traceStmt} return x * 2; }
+export function f( x: int ): int { return double( x ) + double( x + 1 ); }`;
+        const traced = await exported( src, { removeTraces: false } );
+        const stripped = await exported( src, { removeTraces: true } );
+        expect( stripped.map.tracePoints?.map( p => p[2] ) ).toEqual([ 5 ]);
+        const t = Machine.eval( applied( traced.body, [ 2 ] ) );
+        const r = evaluateWithSourceMap({ term: applied( stripped.body, [ 2 ] ), map: stripped.map, program: stripped.body });
+        expect( t.logs ).toEqual( logs );
+        expect( r.logs ).toEqual( logs );
+        expect( resultOf( r.result ) ).toBe( "10" );
+    });
+
+    test("a helper tracing the value it returns: the trace runs at each call", async () => {
+        const src = `
+function double( x: int ): int { const r = x * 2; trace r; return r; }
+export function f( x: int ): int { return double( x ) + double( x + 1 ); }`;
+        const traced = await exported( src, { removeTraces: false } );
+        const stripped = await exported( src, { removeTraces: true } );
+        const t = Machine.eval( applied( traced.body, [ 2 ] ) );
+        const r = evaluateWithSourceMap({ term: applied( stripped.body, [ 2 ] ), map: stripped.map, program: stripped.body });
+        expect( t.logs ).toEqual([ "4", "6" ]);
+        expect( r.logs ).toEqual( t.logs );
     });
 });
 

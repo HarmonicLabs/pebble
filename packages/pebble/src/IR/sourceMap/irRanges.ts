@@ -238,7 +238,7 @@ function sameTracePoints( a: BaseIRMetadata["tracePoints"], b: BaseIRMetadata["t
     if( a === null || b === null ) return a === b;
     const xs = a ?? [];
     const ys = b ?? [];
-    return xs.length === ys.length && xs.every( ( p, i ) => p.trace === ys[i].trace && p.when === ys[i].when && p.branch === ys[i].branch );
+    return xs.length === ys.length && xs.every( ( p, i ) => p.trace === ys[i].trace && p.when === ys[i].when && p.branch === ys[i].branch && p.applied === ys[i].applied );
 }
 
 export function sameRange( a: SourceRange | null | undefined, b: SourceRange | null | undefined ): boolean

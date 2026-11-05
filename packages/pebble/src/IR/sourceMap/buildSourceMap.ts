@@ -85,7 +85,8 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
                 p.trace,
                 p.when,
                 p.branch ?? -1,
-                ...params.map( s => boundAt( index, i, s, args.lambdaSymbols ) ),
+                // a reduced function's parameter is the value its value is applied to
+                ...params.map( s => ( p.when === 5 || p.when === 6 ) && s === p.applied ? -2 : boundAt( index, i, s, args.lambdaSymbols ) ),
             ]);
         }
 

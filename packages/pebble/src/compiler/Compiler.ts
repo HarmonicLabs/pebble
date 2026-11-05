@@ -893,7 +893,7 @@ function evaluateCompiled(
 
 /**
  * what the compiler says about the traces it removed: kept in the map, except those whose code
- * the optimizer removed with them (a helper reduced to a builtin has no call left to trace)
+ * the optimizer removed with them (it never runs)
  */
 function removedTracesNote( map: UPLCSourceMap ): string
 {

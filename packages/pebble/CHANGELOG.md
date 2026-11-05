@@ -95,7 +95,11 @@ source, in `pebble test`, in buildooor and in any tool using
   values the program holds there (`trace acc;` after a loop prints `acc` once the loop has
   computed it), and says so when one is missing.
 - `pebble compile` and `pebble export` say how many traces they removed, and name those the
-  optimizer left no place for (a helper reduced to a builtin has no call left to trace).
+  optimizer left no place for (code it removed because it never runs).
+- A helper the optimizer reduces to a builtin (`function double( x: int ): int { trace x;
+  return x * 2; }` becomes `multiplyInteger 2`) has no lambda left: its traces run whenever
+  that value is applied, once per call, reading the argument for the parameter (map trace
+  points `when` `5` and `6`). They used to have no place, and never printed.
 
 ### Debugger
 

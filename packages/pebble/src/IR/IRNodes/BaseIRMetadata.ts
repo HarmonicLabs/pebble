@@ -19,9 +19,13 @@ export interface IRTracePoint {
     /**
      * `0` when the node is computed, `1` when it (an assert's condition) returns false, `2` when
      * it fails, `3` when it returns its value (the message is computed from that value), `4`
-     * when it (an assert's condition negated, see `assertNegated`) returns true
+     * when it (an assert's condition negated, see `assertNegated`) returns true, `5` whenever the
+     * value it computes is applied (a function the optimizer reduced to that value is called),
+     * `6` when such an application returns (the message is computed from its result)
      */
-    readonly when: 0 | 1 | 2 | 3 | 4
+    readonly when: 0 | 1 | 2 | 3 | 4 | 5 | 6
+    /** `5`, `6`: the reduced function's parameter, the value the node's value is applied to */
+    readonly applied?: symbol
     /** `2` on a case the compiler dropped failing branches from: the branch the trace was in */
     readonly branch?: number
 }
