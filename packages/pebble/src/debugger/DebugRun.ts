@@ -160,7 +160,7 @@ export class DebugRun
         const open: MutableFrame[] = [];
         // failure location, as `FailureTracker` finds it
         const owners = new Map<MachineContext, number>();
-        const conditions: { stmt: DebugStmt, ctx: MachineContext }[] = [];
+        const conditions: { stmt: DebugStmt, ctx: MachineContext, negated: boolean }[] = [];
         let lastFalseAssert: DebugStmt | undefined = undefined;
         let costTo: { frame: MutableFrame, stmt: DebugStmt } | undefined = undefined;
         /** declarations whose value was computed: they ran, if the block they are in ran */
@@ -270,7 +270,7 @@ export class DebugRun
                 if( loop !== undefined ) pushFrame( loop, j, ctx, s.env as CEKEnv, undefined );
 
                 const assertStmt = table.assertAt[i];
-                if( assertStmt !== undefined ) conditions.push({ stmt: assertStmt, ctx });
+                if( assertStmt !== undefined ) conditions.push({ stmt: assertStmt, ctx, negated: table.assertNegatedAt[i] });
 
                 const stmt = table.stmtAt[i];
                 if( stmt !== undefined )
@@ -314,7 +314,7 @@ export class DebugRun
                 while( conditions.length > 0 && conditions[ conditions.length - 1 ].ctx === ctx )
                 {
                     const c = conditions.pop()!;
-                    if( isFalse( s.term as CEKValueObj ) ) lastFalseAssert = c.stmt;
+                    if( isBool( s.term as CEKValueObj, c.negated ) ) lastFalseAssert = c.stmt;
                 }
                 while( open.length > 0 && open[ open.length - 1 ].entryCtx === ctx ) open.pop()!.exitState = j;
             }
@@ -764,9 +764,10 @@ function setDepth( frame: MutableFrame, parentDepth: number ): void
     for( const c of frame.children ) setDepth( c, frame.depth );
 }
 
-function isFalse( value: CEKValueObj ): boolean
+/** `value` is the boolean `b` */
+function isBool( value: CEKValueObj, b: boolean ): boolean
 {
-    return value instanceof CEKConst && ( value as any ).value === false;
+    return value instanceof CEKConst && ( value as any ).value === b;
 }
 
 function rangeContains( outer: SourceRange, inner: SourceRange ): boolean

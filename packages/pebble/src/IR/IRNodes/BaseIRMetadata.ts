@@ -18,9 +18,10 @@ export interface IRTracePoint {
     readonly trace: number
     /**
      * `0` when the node is computed, `1` when it (an assert's condition) returns false, `2` when
-     * it fails, `3` when it returns its value (the message is computed from that value)
+     * it fails, `3` when it returns its value (the message is computed from that value), `4`
+     * when it (an assert's condition negated, see `assertNegated`) returns true
      */
-    readonly when: 0 | 1 | 2 | 3
+    readonly when: 0 | 1 | 2 | 3 | 4
     /** `2` on a case the compiler dropped failing branches from: the branch the trace was in */
     readonly branch?: number
 }
@@ -36,6 +37,11 @@ export interface BaseIRMetadata {
     fnEntry?: IRFnEntryMeta | null
     /** set on the root of an assert condition: the range of the assert statement */
     assertCond?: SourceRange | null
+    /**
+     * with `assertCond`: the node computes the condition negated, true when the assert fails
+     * (the optimizer swapped the branches to compare with a constant, `x < 20` as `20 <= x`)
+     */
+    assertNegated?: true
     /**
      * set on a case whose branches that would fail were dropped (a missing branch fails just
      * the same): the failure it stands for when no branch matches (the assert, the match)

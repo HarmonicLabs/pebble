@@ -95,45 +95,43 @@ export class TirAssertAndContinueExpr
     {
         const irContinuation = this.continuation.toIR( ctx );
 
-        if( this.conditions.length <= 0 ) return irContinuation;
-
-        // sourcemaps: the conditions share one `error`, which has a location only when it
-        // stands for a single assert; the glue around them belongs to no assert
-        const nConditions = this.conditions.length;
-        const lastAssertRange = this.assertRanges.pop();
-        let irConditions: IRTerm = markAssertCondition( this.conditions.pop()!.toIR( ctx ), lastAssertRange );
-
-        irConditions = this.conditions.reduce(( ir, cond, i ) => withoutRange( _ir_apps(
-            IRNative._strictAnd,
-            ir,
-            markAssertCondition( cond.toIR( ctx ), this.assertRanges[i] ),
-        )), irConditions );
-
-        const error = new IRError();
-        error.meta.range = nConditions === 1 && isSourceRange( lastAssertRange ) ? lastAssertRange : null;
-        // `removeTraces`: an assert's message prints when its condition is false; the optimizer
-        // may rewrite the condition (`x > 0` checked as `x <= 0`), so a lone assert's `error`,
-        // which fails for it alone, prints the message too (the replay prints it once)
-        if( nConditions === 1 )
-        {
-            const messages = ( irMeta( irConditions ).tracePoints ?? [] ).filter( p => p.when === 1 );
-            if( messages.length > 0 ) irMeta( error ).tracePoints = messages.map( p => ({ trace: p.trace, when: 2 }) );
-        }
-        const delayedContinuation = new IRDelayed( irContinuation );
-        const delayedError = new IRDelayed( error );
-        delayedContinuation.meta.range = null;
-        delayedError.meta.range = null;
-
-        const forced = new IRForced( withoutRange( _ir_apps(
-            IRNative.strictIfThenElse,
-            irConditions,
-            delayedContinuation,
-            delayedError
-        )));
-        forced.meta.range = null;
-        return forced;
+        // the asserts one after the other, in source order: each condition is computed only
+        // when the ones before it held, and a false one fails on its own `error`, with its own
+        // message and location (merged into one condition, they were checked last first and
+        // all of them computed)
+        const conditions = this.conditions.map( ( cond, i ) => markAssertCondition( cond.toIR( ctx ), this.assertRanges[i] ) );
+        let ir = irContinuation;
+        for( let i = conditions.length - 1; i >= 0; i-- ) ir = assertThen( conditions[i], this.assertRanges[i], ir );
+        return ir;
     }
 
+}
+
+/** `continuation` when `condition` holds, else the assert's failure */
+function assertThen( condition: IRTerm, assertRange: SourceRange | undefined, continuation: IRTerm ): IRTerm
+{
+    // sourcemaps: the `error` stands for the assert; the glue around it belongs to no assert
+    const error = new IRError();
+    error.meta.range = isSourceRange( assertRange ) ? assertRange : null;
+    // `removeTraces`: the message prints when the condition is false; the optimizer may rewrite
+    // the condition (`x < 20` checked as `20 <= x`), so the `error`, which fails for this
+    // assert alone, prints it too (the replay prints it once)
+    const messages = ( irMeta( condition ).tracePoints ?? [] ).filter( p => p.when === 1 );
+    if( messages.length > 0 ) irMeta( error ).tracePoints = messages.map( p => ({ trace: p.trace, when: 2 }) );
+
+    const delayedContinuation = new IRDelayed( continuation );
+    const delayedError = new IRDelayed( error );
+    delayedContinuation.meta.range = null;
+    delayedError.meta.range = null;
+
+    const forced = new IRForced( withoutRange( _ir_apps(
+        IRNative.strictIfThenElse,
+        condition,
+        delayedContinuation,
+        delayedError
+    )));
+    forced.meta.range = null;
+    return forced;
 }
 
 function markAssertCondition( ir: IRTerm, assertRange: SourceRange | undefined ): IRTerm

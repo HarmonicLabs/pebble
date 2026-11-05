@@ -108,7 +108,10 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
         }
 
         if( isUserRange( mark.assertCond ) )
-        asserts.push([ i, sourceIndexOf( mark.assertCond ), ...positionOf( mark.assertCond ) ]);
+        asserts.push( mark.assertNegated
+            ? [ i, sourceIndexOf( mark.assertCond ), ...positionOf( mark.assertCond ), 1 as const ]
+            : [ i, sourceIndexOf( mark.assertCond ), ...positionOf( mark.assertCond ) ]
+        );
 
         if( isUserRange( mark.failRange ) )
         failures.push([ i, sourceIndexOf( mark.failRange ), ...positionOf( mark.failRange ) ]);

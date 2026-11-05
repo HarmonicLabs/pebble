@@ -13,6 +13,9 @@ import { IRTerm } from "../../IRTerm";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
 import { compileWork } from "../_internal/compileWorkCounters";
 import { getApplicationTerms } from "../utils/getApplicationTerms";
+import { inheritRange, irMeta } from "../../sourceMap/irRanges";
+import { prependTracePoints } from "../../sourceMap/irTraces";
+import type { IRTracePoint } from "../../IRNodes/BaseIRMetadata";
 import { _compTimeDropN } from "./_comptimeDropN";
 import { hoisted_isZero, hoisted_length, hoisted_not } from "./replaceNatives/nativeToIR";
 
@@ -118,7 +121,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     // replace with swapped branches
                     const newTerm = _ir_apps(
                         IRNative.strictIfThenElse,
-                        condArgs[0],
+                        rebuiltCondition( condArgs[0], conditionArg, true ),
                         elseArg,
                         thenArg
                     );
@@ -143,7 +146,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     else if( typeof lhsInt === "bigint" ) {
                         const newTerm = _ir_apps(
                             IRNative.strictIfThenElse,
-                            _ir_apps(
+                            rebuiltCondition( _ir_apps(
                                 new IRHoisted(
                                     _ir_apps(
                                         IRNative.lessThanEqualInteger,
@@ -151,7 +154,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                                     )
                                 ),
                                 rhs
-                            ),
+                            ), conditionArg, false ),
                             thenArg,
                             elseArg
                         );
@@ -161,7 +164,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     else if( typeof rhsInt === "bigint" ) {
                         const newTerm = _ir_apps(
                             IRNative.strictIfThenElse,
-                            _ir_apps(
+                            rebuiltCondition( _ir_apps(
                                 new IRHoisted(
                                     _ir_apps(
                                         IRNative.lessThanInteger,
@@ -169,7 +172,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                                     )
                                 ),
                                 lhs
-                            ),
+                            ), conditionArg, true ),
                             elseArg,
                             thenArg
                         );
@@ -194,7 +197,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     else if( typeof lhsInt === "bigint" ) {
                         const newTerm = _ir_apps(
                             IRNative.strictIfThenElse,
-                            _ir_apps(
+                            rebuiltCondition( _ir_apps(
                                 new IRHoisted(
                                     _ir_apps(
                                         IRNative.lessThanInteger,
@@ -202,7 +205,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                                     )
                                 ),
                                 rhs
-                            ),
+                            ), conditionArg, false ),
                             thenArg,
                             elseArg
                         );
@@ -212,7 +215,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     else if( typeof rhsInt === "bigint" ) {
                         const newTerm = _ir_apps(
                             IRNative.strictIfThenElse,
-                            _ir_apps(
+                            rebuiltCondition( _ir_apps(
                                 new IRHoisted(
                                     _ir_apps(
                                         IRNative.lessThanEqualInteger,
@@ -220,7 +223,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                                     )
                                 ),
                                 lhs
-                            ),
+                            ), conditionArg, true ),
                             elseArg,
                             thenArg
                         );
@@ -257,6 +260,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                                 thenArg
                             ]
                         );
+                        prependTracePoints( newTerm, valueIndependentTracePoints( conditionArg ) );
                         modifyTermAndPushToReprocess( current, newTerm );
                         continue;
                     }
@@ -281,6 +285,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                             thenArg
                         ]
                     );
+                    prependTracePoints( newTerm, valueIndependentTracePoints( conditionArg ) );
                     modifyTermAndPushToReprocess( current, newTerm );
                     continue;
                 } // if( x.isEmpty() )
@@ -652,4 +657,41 @@ function getConstBool( term: IRTerm ): boolean | undefined
     ) return term.value;
 
     return undefined;
+}
+
+/**
+ * `rebuilt` takes the place of `cond`, the condition of an if-then-else: it computes the same
+ * truth value, or (`inverted`, the branches were swapped) the opposite one. It stands for what
+ * `cond` stood for in the source map; inverted, an assert's condition is marked negated (true
+ * when the assert fails), and a removed trace printed when it is false prints when it is true.
+ */
+function rebuiltCondition( rebuilt: IRTerm, cond: IRTerm, inverted: boolean ): IRTerm
+{
+    if( rebuilt === cond ) return rebuilt;
+    const from = irMeta( cond );
+    const negatedAssert = inverted && from.assertCond !== undefined ? !from.assertNegated : undefined;
+    const points = inverted ? from.tracePoints?.map( negatedPoint ) : undefined;
+    if( inverted ) from.tracePoints = undefined;
+    inheritRange( rebuilt, cond );
+    const to = irMeta( rebuilt );
+    if( negatedAssert !== undefined && to.assertCond !== undefined ) to.assertNegated = negatedAssert ? true : undefined;
+    prependTracePoints( rebuilt, points );
+    return rebuilt;
+}
+
+/** a trace point of a condition, on the condition negated */
+function negatedPoint( p: IRTracePoint ): IRTracePoint
+{
+    if( p.when === 1 ) return { ...p, when: 4 };
+    if( p.when === 4 ) return { ...p, when: 1 };
+    return p;
+}
+
+/**
+ * the removed traces on `cond` that print whatever it computes: a condition turned into a `case`
+ * on a list has no value left to be false (its assert's `error` prints the message)
+ */
+function valueIndependentTracePoints( cond: IRTerm ): IRTracePoint[] | undefined
+{
+    return irMeta( cond ).tracePoints?.filter( p => p.when !== 1 && p.when !== 4 );
 }

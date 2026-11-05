@@ -110,7 +110,9 @@ export function inheritRange( replacement: IRTerm, replaced: IRTerm | undefined 
     if( from.assertCond !== undefined && to.assertCond === undefined )
     {
         to.assertCond = from.assertCond;
+        to.assertNegated = from.assertNegated;
         from.assertCond = undefined;
+        from.assertNegated = undefined;
     }
     if( from.failRange !== undefined && to.failRange === undefined )
     {
@@ -163,7 +165,7 @@ export function mergeRanges( kept: IRTerm, dropped: IRTerm ): void
         if( ma.fnEntry !== undefined || mb.fnEntry !== undefined )
         ma.fnEntry = mergeFnEntry( ma.fnEntry, mb.fnEntry );
 
-        if( !sameRange( ma.assertCond, mb.assertCond ) ) ma.assertCond = null;
+        if( !sameRange( ma.assertCond, mb.assertCond ) || ma.assertNegated !== mb.assertNegated ) ma.assertCond = null;
         if( !sameRange( ma.failRange, mb.failRange ) ) ma.failRange = null;
 
         // equal hashes compute equal values: the kept node computes both nodes' variables

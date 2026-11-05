@@ -16,6 +16,7 @@ import { lowestCommonAncestor } from "../../_internal/lowestCommonAncestor";
 import { isIRTerm } from "../../../utils/isIRTerm";
 import { markRecursiveHoistsAsForced } from "../markRecursiveHoistsAsForced";
 import { IRConst } from "../../../IRNodes/IRConst";
+import { IRError } from "../../../IRNodes/IRError";
 import { equalIrHash, irHashToHex } from "../../../IRHash";
 import { sanifyTree } from "../sanifyTree";
 import { compileWork } from "../../_internal/compileWorkCounters";
@@ -129,15 +130,15 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
         // partial computation (field extractors etc.) out of a closure that
         // might not run is the bug-12 class of miscompilation, so those
         // keep their lazy in-closure placement.
-        const canFloatOutOfLambda =
-            !(
-                // trivial values: inlining is strictly better
-                letted.value instanceof IRVar
-                || letted.value instanceof IRConst
-                || letted.value instanceof IRNative
-                || letted.value instanceof IRSelfCall
-            )
-            && isSafeToEagerlyEvaluate( letted.value );
+        // trivial values: inlining is strictly better (computing one again costs no more than
+        // reading a variable bound to it)
+        const valueIsTrivial = (
+            letted.value instanceof IRVar
+            || letted.value instanceof IRConst
+            || letted.value instanceof IRNative
+            || letted.value instanceof IRSelfCall
+        );
+        const canFloatOutOfLambda = !valueIsTrivial && isSafeToEagerlyEvaluate( letted.value );
 
         // decode-once field extractors (per-use-site source semantics)
         // that CAN FAIL: sharing them is only allowed where a spine
@@ -199,6 +200,8 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
             wasSingleReferenceButRecursive
             && !siteScopedPartial
             && !canFloatOutOfLambda // totals already float through placement
+            // nothing to compute once
+            && !valueIsTrivial
         ) {
             const floatTarget = outermostFloatTargetBetween(
                 term,
@@ -439,6 +442,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                 if(
                     tmpParent instanceof IRCase
                     && tmp !== tmpParent.constrTerm
+                    && !isOnlyNonFailingBranch( tmpParent, tmp )
                 ) break;
                 tmp = tmpParent as unknown as IRTerm;
                 if( tmp instanceof IRDelayed ) {
@@ -491,6 +495,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                     if(
                         p instanceof IRCase
                         && cur !== p.constrTerm
+                        && !isOnlyNonFailingBranch( p, cur )
                     ) found = cur;
                     cur = p as unknown as IRTerm;
                 }
@@ -567,7 +572,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                         {
                             const p = cur.parent;
                             if( !p ) break;
-                            if( p instanceof IRCase && cur !== ( p as IRCase ).constrTerm )
+                            if( p instanceof IRCase && cur !== ( p as IRCase ).constrTerm && !isOnlyNonFailingBranch( p, cur ) )
                                 found = cur;
                             cur = p as unknown as IRTerm;
                         }
@@ -675,6 +680,7 @@ export function handleLettedAndReturnRoot( term: IRTerm ): IRTerm
                 if(
                     curParent instanceof IRCase
                     && cur !== curParent.constrTerm
+                    && !isOnlyNonFailingBranch( curParent, cur )
                 )
                 {
                     if( chosen === undefined ) caseBranchOwner = curParent;
@@ -889,6 +895,27 @@ function allRefsUnderBinderOf( refs: IRLetted[], sym: symbol ): boolean
 }
 
 /**
+ * `branch` is a branch of `cs` and every other branch fails (an `error`, or a function returning
+ * one; a value with no branch fails too): whenever `cs` does not fail, `branch` runs. Crossing
+ * into it is not a dispatch: a value computed before `cs` instead of in `branch` changes nothing
+ * on any run that does not fail anyway. The success branch of an assert, `if( c ) fail;`, a
+ * `match` whose other arms fail, and a single-branch `case` (destructuring, an application of a
+ * function to several arguments) are such branches.
+ */
+function isOnlyNonFailingBranch( cs: IRCase, branch: IRTerm ): boolean
+{
+    for( const c of cs.continuations ) if( c !== branch && !alwaysFails( c ) ) return false;
+    return true;
+}
+
+/** `t` fails as soon as it runs: an `error`, or a function whose body is one (a branch taking fields) */
+function alwaysFails( t: IRTerm ): boolean
+{
+    while( t instanceof IRFunc ) t = t.body;
+    return t instanceof IRError;
+}
+
+/**
  * SPINE WITNESS: `true` if at least one reference is reached from `from`
  * without crossing any deferring/conditional edge — i.e. whenever `from`
  * is evaluated, that reference (and hence the letted value) is evaluated
@@ -911,7 +938,7 @@ function hasSpineWitness( from: IRTerm, refs: IRLetted[] ): boolean
         {
             const p = cur.parent as IRTerm | undefined;
             if( !p ) return false; // `from` not an ancestor: no witness
-            if( p instanceof IRCase && cur !== ( p as IRCase ).constrTerm ) return false;
+            if( p instanceof IRCase && cur !== ( p as IRCase ).constrTerm && !isOnlyNonFailingBranch( p, cur ) ) return false;
             if( ( p instanceof IRFunc || p instanceof IRRecursive ) && cur === ( p as any ).body ) return false;
             if( p instanceof IRDelayed ) return false;
             cur = p;
@@ -1106,7 +1133,7 @@ function outermostFloatTargetBetween(
             if(
                 p instanceof IRCase
                 && cur !== ( p as IRCase ).constrTerm
-                && ( p as IRCase ).continuations.length > 1
+                && !isOnlyNonFailingBranch( p, cur )
             ) pendingDispatch = !ignoreDispatch;
             else if( p instanceof IRFunc )
             {

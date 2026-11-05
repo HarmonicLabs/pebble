@@ -156,6 +156,55 @@ export function f( x: int ): int { return double( x ) + double( x + 1 ); }`, { r
     });
 });
 
+describe("consecutive asserts", () => {
+    // merged into one condition, they were checked last first, and every condition was
+    // computed: with all three false, `f( 5 )` printed "not > 30", "not > 10", "not > 20"
+    const SRC = `
+export function f( x: int ): int {
+    assert x > 10 else "not > 10";
+    assert x > 20 else "not > 20";
+    assert x > 30 else "not > 30";
+    return x;
+}`;
+    const expected: [ number, string[], string ][] = [
+        [ 5, [ "not > 10" ], "error" ],
+        [ 15, [ "not > 20" ], "error" ],
+        [ 25, [ "not > 30" ], "error" ],
+        [ 35, [], "35" ],
+    ];
+
+    test.each([ false, true ])( "are checked in source order, up to the first false one (removeTraces: %s)", async removeTraces => {
+        const { body, map } = await exported( SRC, { removeTraces } );
+        for( const [ x, logs, result ] of expected )
+        {
+            const r = removeTraces
+                ? evaluateWithSourceMap({ term: applied( body, [ x ] ), map, program: body })
+                : Machine.eval( applied( body, [ x ] ) );
+            expect({ x, logs: r.logs, result: resultOf( r.result ) }).toEqual({ x, logs, result });
+        }
+    });
+
+    test("compiling the same asserts twice gives the same program", async () => {
+        // `toIR` used to pop the last condition off the typed tree
+        const { TirAssertAndContinueExpr } = await import( "../tir/expressions/TirAssertAndContinueExpr" );
+        const { TirLitIntExpr } = await import( "../tir/expressions/litteral/TirLitIntExpr" );
+        const { TirLitTrueExpr } = await import( "../tir/expressions/litteral/TirLitTrueExpr" );
+        const { ToIRTermCtx } = await import( "../tir/expressions/ToIRTermCtx" );
+        const { showIRText } = await import( "../../IR/utils/showIR" );
+        const { SourceRange } = await import( "../../ast/Source/SourceRange" );
+        const r = SourceRange.unknown;
+        const expr = new TirAssertAndContinueExpr(
+            [ new TirLitTrueExpr( r ), new TirLitTrueExpr( r ) ],
+            new TirLitIntExpr( BigInt( 1 ), r ),
+            r,
+            [ r, r ]
+        );
+        const first = showIRText( expr.toIR( ToIRTermCtx.root() ) );
+        expect( expr.conditions.length ).toBe( 2 );
+        expect( showIRText( expr.toIR( ToIRTermCtx.root() ) ) ).toBe( first );
+    });
+});
+
 describe("fail with a message", () => {
     test("prints the message, then fails (the failure used to come first)", async () => {
         const { body } = await exported( `export function f( x: int ): int { if( x < 0 ) { fail "negative"; } return x; }`, { removeTraces: false } );

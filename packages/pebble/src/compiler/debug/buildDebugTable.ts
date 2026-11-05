@@ -30,6 +30,8 @@ export interface DebugTable {
     readonly valueAt: readonly ( readonly DebugBinding[] | undefined )[];
     /** the assert statement whose condition a term is the root of */
     readonly assertAt: readonly ( DebugStmt | undefined )[];
+    /** with `assertAt`: the term computes the condition negated, true when the assert fails */
+    readonly assertNegatedAt: readonly boolean[];
     /** for a case that lost its failing branches: the statement whose failure it stands for */
     readonly failAt: readonly ( DebugStmt | undefined )[];
     /** statements using a variable whose value a term was copied in for (they run as it does) */
@@ -60,6 +62,7 @@ export function buildDebugTable( args: BuildDebugTableArgs ): DebugTable
     const bindsAt: ( readonly DebugBinding[] | undefined )[] = new Array( n ).fill( undefined );
     const valueAt: ( readonly DebugBinding[] | undefined )[] = new Array( n ).fill( undefined );
     const assertAt: ( DebugStmt | undefined )[] = new Array( n ).fill( undefined );
+    const assertNegatedAt: boolean[] = new Array( n ).fill( false );
     const failAt: ( DebugStmt | undefined )[] = new Array( n ).fill( undefined );
     const useStmtsAt: ( readonly DebugStmt[] | undefined )[] = new Array( n ).fill( undefined );
 
@@ -82,7 +85,11 @@ export function buildDebugTable( args: BuildDebugTableArgs ): DebugTable
             }
             if( mark.loopEntry ) loopAt[i] = mark.loopEntry;
             if( mark.varValue !== undefined && mark.varValue.length > 0 ) valueAt[i] = mark.varValue;
-            if( isUserRange( mark.assertCond ) ) assertAt[i] = locate.innermost( mark.assertCond );
+            if( isUserRange( mark.assertCond ) )
+            {
+                assertAt[i] = locate.innermost( mark.assertCond );
+                assertNegatedAt[i] = mark.assertNegated === true;
+            }
             if( isUserRange( mark.failRange ) ) failAt[i] = locate.innermost( mark.failRange );
             if( mark.useRanges !== undefined )
             {
@@ -111,6 +118,7 @@ export function buildDebugTable( args: BuildDebugTableArgs ): DebugTable
         bindsAt,
         valueAt,
         assertAt,
+        assertNegatedAt,
         failAt,
         useStmtsAt,
         stmtContaining: range => isUserRange( range ) ? locate.innermost( range ) : undefined,

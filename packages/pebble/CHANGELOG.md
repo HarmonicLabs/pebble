@@ -179,6 +179,29 @@ source, in `pebble test`, in buildooor and in any tool using
 
 ### Fixes
 
+- ⚠ Output change: consecutive asserts were merged into one condition that computed every
+  condition, the last one first. With `assert x > 10 else "a"; assert x > 20 else "b";`,
+  `f( 5 )` printed "b"; with three such asserts it printed all three messages, out of order;
+  and every run paid for every condition. Each assert is now checked in turn, in source order,
+  and fails on its own: only the first false one's message prints, and the conditions after it
+  are not computed. Scripts with consecutive asserts change, most of them get smaller and
+  cheaper (bytes: escrow 814 → 794, vesting 907 → 862, stewardship 5523 → 5313, masterpiece
+  4410 → 4313; the marketplace grows, 3029 → 3099; the escrow's tests cost about a third less).
+- A condition comparing with a constant is rebuilt by the optimizer (to share
+  `lessThanInteger 10`), and the rebuilt condition lost its source information: its range,
+  the assert it checks, the removed traces it prints. It keeps them now. When the comparison is
+  turned around (`x < 20` checked as `20 <= x`, the branches swapped), the source map marks the
+  assert's condition negated: plutus-machine's `asserts` entries take an optional `negated`,
+  and trace points a `when` `4`.
+- A value read by an assert's condition and after the assert was copied into each use, as for
+  separate dispatch arms, so the path that validates could decode a field twice. A `case`
+  branch whose other branches all fail (an assert, `if( c ) fail;`, a `match` whose other arms
+  fail) is the only way on: a value computed before it is shared. It changes nothing on a run
+  that does not fail; on a run where the value fails as well as the assert, the failure is the
+  value's.
+- A builtin used once inside a function was bound outside it, by the rule that computes a value
+  once instead of on every call of a lambda: a binding and an application more, for a value
+  that costs nothing to compute.
 - ⚠ Security: a loop that reassigns one variable could be left out of the compiled script,
   along with every `assert` in it. This happened when the loop's result was overwritten
   before being read (`rest = xs;` after the loop), was read only by a `const` that is never

@@ -9,6 +9,8 @@ export interface UplcMark {
     range: SourceRange | null | undefined
     fnEntry?: IRFnEntryMeta | null
     assertCond?: SourceRange | null
+    /** with `assertCond`: the term computes the condition negated (see `BaseIRMetadata`) */
+    assertNegated?: true
     /** a case with no branch for some values: the failure that stands for */
     failRange?: SourceRange | null
     /** debug information: variables whose value the term computes */
@@ -35,7 +37,11 @@ export function recordOwnTerms( root: UPLCTerm, meta: BaseIRMetadata, marks: Upl
     {
         // the node created no term of its own (e.g. a function without parameters)
         if( rootMark.fnEntry === undefined && meta.fnEntry !== undefined ) rootMark.fnEntry = meta.fnEntry;
-        if( rootMark.assertCond === undefined && meta.assertCond !== undefined ) rootMark.assertCond = meta.assertCond;
+        if( rootMark.assertCond === undefined && meta.assertCond !== undefined )
+        {
+            rootMark.assertCond = meta.assertCond;
+            if( meta.assertNegated ) rootMark.assertNegated = true;
+        }
         if( rootMark.failRange === undefined && meta.failRange !== undefined ) rootMark.failRange = meta.failRange;
         if( meta.varValue !== undefined ) rootMark.varValue = unionBindings( rootMark.varValue, meta.varValue );
         if( rootMark.loopEntry === undefined && meta.loopEntry !== undefined ) rootMark.loopEntry = meta.loopEntry;
@@ -46,6 +52,7 @@ export function recordOwnTerms( root: UPLCTerm, meta: BaseIRMetadata, marks: Upl
     }
 
     const mark: UplcMark = { range: meta.range, fnEntry: meta.fnEntry, assertCond: meta.assertCond };
+    if( meta.assertNegated && meta.assertCond !== undefined ) mark.assertNegated = true;
     if( meta.failRange !== undefined ) mark.failRange = meta.failRange;
     if( meta.varValue !== undefined ) mark.varValue = meta.varValue;
     if( meta.loopEntry !== undefined ) mark.loopEntry = meta.loopEntry;
