@@ -206,8 +206,16 @@ export class SymbolIndex
         if( !this.refs.has( key ) ) this.refs.set( key, { range, symbol, write } );
     }
 
-    /** the symbol named at `offset` of `file`: by a use there, or by its declaration */
-    symbolAt( file: string, offset: number ): PebbleSymbol | undefined
+    /** the uses in `file`, by position */
+    referencesIn( file: string ): PebbleSymbolRef[]
+    {
+        const result: PebbleSymbolRef[] = [];
+        for( const ref of this.refs.values() ) if( sourceOf( ref.range ) === file ) result.push( ref );
+        return result.sort( byPosition );
+    }
+
+    /** the (innermost) use at `offset` of `file` */
+    referenceAt( file: string, offset: number ): PebbleSymbolRef | undefined
     {
         let best: PebbleSymbolRef | undefined = undefined;
         for( const ref of this.refs.values() )
@@ -215,7 +223,14 @@ export class SymbolIndex
             if( sourceOf( ref.range ) !== file || !contains( ref.range, offset ) ) continue;
             if( !best || span( ref.range ) < span( best.range ) ) best = ref;
         }
-        if( best ) return best.symbol;
+        return best;
+    }
+
+    /** the symbol named at `offset` of `file`: by a use there, or by its declaration */
+    symbolAt( file: string, offset: number ): PebbleSymbol | undefined
+    {
+        const ref = this.referenceAt( file, offset );
+        if( ref ) return ref.symbol;
         for( const symbol of this.declared.values() )
             if( symbol.source === file && contains( symbol.nameRange, offset ) ) return symbol;
         return undefined;

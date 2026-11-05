@@ -492,3 +492,23 @@ describe("symbol index: what editors complete", () => {
         expect( symbols.contextFieldsAt( "/src/main.pebble", main.indexOf( "param owner" ) ) ).toBeUndefined();
     });
 });
+
+describe("symbol index: uses by file", () => {
+
+    test("the uses in a file, whatever file declares what they name", async () => {
+        const lib = `export struct P { v: int }\n`;
+        const main = `import { P } from "./lib";
+
+export function f( p: P ): int { return p.v; }
+`;
+        const { symbols } = await check({ "src/main.pebble": main, "src/lib.pebble": lib });
+        const uses = symbols.referencesIn( "/src/main.pebble" ).map( r => `${r.symbol.kind} ${r.symbol.name}@${r.range.start}` );
+        expect( uses ).toEqual([
+            `import P@${at( main, "P", 1 )}`,
+            `parameter p@${at( main, "p", 1 )}`,
+            `field v@${at( main, "v" )}`,
+        ]);
+        expect( symbols.referenceAt( "/src/main.pebble", at( main, "v" ) )?.symbol.kind ).toBe( "field" );
+        expect( symbols.referenceAt( "/src/main.pebble", at( main, "f" ) ) ).toBeUndefined();
+    });
+});
