@@ -182,6 +182,8 @@ type Amount implements {
         const { diagnostics } = await exportF( prelude + `export function f( x: int ): int {\n    const ok = check( x );\n    return 1;\n}` );
         const text = diagnostics.find( d => d.code === 6133 )?.text ?? "";
         expect( text ).toContain( "'ok' is never used, so it is never computed" );
+        // the failures it stands for: not only asserts
+        expect( text ).toContain( "(an assert in a function it calls, a division by zero)" );
         // the prelude takes lines 1 to 8
         expect( text ).toContain( "main.pebble:10:5" );
     });

@@ -278,8 +278,8 @@
   "Non-null opeartor used on expression of type '{0}', which is not optional, this will be omitted during compilation.": 2813,
 
   "File '{0}' not found.": 6054,
-  "'{0}' is never used, so it is never computed: a failure in its value (an assert in a function it calls) never happens. Use it, or remove it.": 6133,
-  "'{0}' is computed only where it is read, and some ways after it do not read it: on those, a failure in its value (an assert in a function it calls) does not happen. Read it before the branches, or declare it where it is read.": 6134,
+  "'{0}' is never used, so it is never computed: a failure in its value (an assert in a function it calls, a division by zero) never happens. Use it, or remove it.": 6133,
+  "'{0}' is computed only where it is read, and some ways after it do not read it: on those, a failure in its value (an assert in a function it calls, a division by zero) does not happen. Read it before the branches, or declare it where it is read.": 6134,
   "Import path '{0}' is part of a circular dependency.": 6055,
   
   "Numeric separators are not allowed here.": 6188,

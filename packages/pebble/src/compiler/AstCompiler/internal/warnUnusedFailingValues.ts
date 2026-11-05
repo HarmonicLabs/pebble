@@ -103,12 +103,12 @@ function checkBlock( stmts: readonly any[], after: readonly any[], emitter: Diag
         const seen = new Set<object>();
         const rest = stmts.slice( i + 1 );
         if( !rest.some( s => references( s, decl.name, seen ) ) ) emitter.warning(
-            DiagnosticCode._0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_never_happens_Use_it_or_remove_it,
+            DiagnosticCode._0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_a_division_by_zero_never_happens_Use_it_or_remove_it,
             decl.range,
             decl.sourceName ?? decl.name
         );
         else if( !readOnEveryPath( [ ...rest, ...after ], decl.name, analysis.program, call => analysis.userFunctionCalled( call ) ) ) emitter.warning(
-            DiagnosticCode._0_is_computed_only_where_it_is_read_and_some_ways_after_it_do_not_read_it_on_those_a_failure_in_its_value_an_assert_in_a_function_it_calls_does_not_happen_Read_it_before_the_branches_or_declare_it_where_it_is_read,
+            DiagnosticCode._0_is_computed_only_where_it_is_read_and_some_ways_after_it_do_not_read_it_on_those_a_failure_in_its_value_an_assert_in_a_function_it_calls_a_division_by_zero_does_not_happen_Read_it_before_the_branches_or_declare_it_where_it_is_read,
             decl.range,
             decl.sourceName ?? decl.name
         );

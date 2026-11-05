@@ -275,8 +275,8 @@ export enum DiagnosticCode {
     Type_0_cannot_be_converted_to_type_1 = 2812,
     Non_null_opeartor_used_on_expression_of_type_0_which_is_not_optional_this_will_be_omitted_during_compilation = 2813,
     File_0_not_found = 6054,
-    _0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_never_happens_Use_it_or_remove_it = 6133,
-    _0_is_computed_only_where_it_is_read_and_some_ways_after_it_do_not_read_it_on_those_a_failure_in_its_value_an_assert_in_a_function_it_calls_does_not_happen_Read_it_before_the_branches_or_declare_it_where_it_is_read = 6134,
+    _0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_a_division_by_zero_never_happens_Use_it_or_remove_it = 6133,
+    _0_is_computed_only_where_it_is_read_and_some_ways_after_it_do_not_read_it_on_those_a_failure_in_its_value_an_assert_in_a_function_it_calls_a_division_by_zero_does_not_happen_Read_it_before_the_branches_or_declare_it_where_it_is_read = 6134,
     Import_path_0_is_part_of_a_circular_dependency = 6055,
     Numeric_separators_are_not_allowed_here = 6188,
     Multiple_consecutive_numeric_separators_are_not_permitted = 6189,
@@ -584,8 +584,8 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 2812: return "Type '{0}' cannot be converted to type '{1}'.";
         case 2813: return "Non-null opeartor used on expression of type '{0}', which is not optional, this will be omitted during compilation.";
         case 6054: return "File '{0}' not found.";
-        case 6133: return "'{0}' is never used, so it is never computed: a failure in its value (an assert in a function it calls) never happens. Use it, or remove it.";
-        case 6134: return "'{0}' is computed only where it is read, and some ways after it do not read it: on those, a failure in its value (an assert in a function it calls) does not happen. Read it before the branches, or declare it where it is read.";
+        case 6133: return "'{0}' is never used, so it is never computed: a failure in its value (an assert in a function it calls, a division by zero) never happens. Use it, or remove it.";
+        case 6134: return "'{0}' is computed only where it is read, and some ways after it do not read it: on those, a failure in its value (an assert in a function it calls, a division by zero) does not happen. Read it before the branches, or declare it where it is read.";
         case 6055: return "Import path '{0}' is part of a circular dependency.";
         case 6188: return "Numeric separators are not allowed here.";
         case 6189: return "Multiple consecutive numeric separators are not permitted.";
