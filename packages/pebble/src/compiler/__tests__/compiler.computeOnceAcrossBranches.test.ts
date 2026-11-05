@@ -1,3 +1,4 @@
+import { DiagnosticCategory } from "../../diagnostics/DiagnosticCategory";
 import { testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
@@ -67,8 +68,10 @@ async function evalMain( src: string ): Promise<bigint>
     });
     const c = new Compiler(ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION });
     await c.export({ functionName: "main", entry: "test.pebble", root: "/" });
-    if( c.diagnostics.length )
-        throw new Error("compile failed: " + c.diagnostics.map(d => d.toString()).join("\n"));
+    // warnings are fine: with one conjunct, `kk` is read only on the right of `&&` (6134)
+    const errors = c.diagnostics.filter( d => d.category === DiagnosticCategory.Error );
+    if( errors.length )
+        throw new Error("compile failed: " + errors.map(d => d.toString()).join("\n"));
     const uplc: UPLCTerm = parseUPLC( ioApi.outputs.get("out/out.flat")! ).body;
 
     const out = Machine.eval(

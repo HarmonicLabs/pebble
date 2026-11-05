@@ -131,7 +131,38 @@ type Amount implements {
         [ "a value used in an assignment in a loop", `export function f( xs: List<int> ): int { let acc = 0; const k = check( 2 ); for( const e of xs ) { acc = acc + e * k; } return acc; }` ],
         [ "a value used in a closure", `export function f( xs: List<int> ): boolean { const k = check( 2 ); return xs.some( e => e == k ); }` ],
         [ "an unused function value", `export function f( x: int ): int { const g = ( y: int ): int => check( y ); return 1; }` ],
+        [ "an unused division by a constant (it cannot fail)", `export function f( x: int ): int { const q = x / 128; return 1; }` ],
     ])( "does not warn about %s", async ( _, body ) => {
+        expect( await warnings( body ) ).toEqual( [] );
+    });
+
+    // computed only on the ways that read it: on the others the assert in `check` does not run
+    test.each([
+        [ "read in one branch", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { return ok; } return 1; }` ],
+        [ "read on the right of &&", `export function f( x: int ): int { const ok = check( x ); if( x > 5 && ok > 0 ) { return 1; } return 0; }` ],
+        [ "read in a branch of ?:", `export function f( x: int ): int { const ok = check( x ); return x > 5 ? ok : 0; }` ],
+        [ "passed to a function that ignores its parameter", `function ignore( a: int ): int { return 1; }\nexport function f( x: int ): int { const ok = check( x ); return ignore( ok ); }` ],
+        [ "read twice, in one branch only", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { return ok + ok; } return 0; }` ],
+    ])( "warns (6134) about a value %s", async ( _, body ) => {
+        expect( await warnings( body ) ).toEqual([ 6134 ]);
+    });
+
+    test.each([
+        [ "read on every way", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { return ok; } return ok + 1; }` ],
+        [ "read by a condition", `export function f( x: int ): int { const ok = check( x ); if( ok > 5 ) { return 1; } return 0; }` ],
+        [ "read on the way that does not fail", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { return ok; } fail; }` ],
+        [ "read through a const on every way", `export function f( x: int ): int { const ok = check( x ); const y = ok + 1; if( x > 5 ) { return y; } return y * 2; }` ],
+        // seen on the masterpiece contracts: each warned
+        [ "read in both branches of ?:", `export function f( x: int ): int { const ok = check( x ); return x > 5 ? ok : ok + 1; }` ],
+        [ "read by a closure a pattern's check computes", `export function f( x: int, xs: List<int> ): int { const ok = check( x ); const Some{ value: v } = xs.find( e => e == ok ); return v; }` ],
+        [ "passed to a function that reads its parameter", `function use( a: int ): int { return a + 1; }\nexport function f( x: int ): int { const ok = check( x ); const y = use( ok ); if( x > 5 ) { return y; } return y + 1; }` ],
+        [ "divided by a constant (it cannot fail)", `export function f( x: int ): int { const q = x / 128; if( x > 5 ) { return q; } return 0; }` ],
+        // reads in two branches meet before them: the value is computed there, on every way
+        [ "read in two `if`s", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { return ok; } if( x > 2 ) { return ok + 1; } return 0; }` ],
+        [ "read by two conjuncts of an &&", `export function f( x: int ): boolean { const ok = check( x ); return x > 5 && ok > 0 && ok < 100; }` ],
+        [ "read in both arms of nested ?:", `export function f( x: int ): int { const ok = check( x ); return x > 5 ? ok : x > 2 ? ok + 1 : 0; }` ],
+        [ "read in a nested branch and after the outer one", `export function f( x: int ): int { const ok = check( x ); if( x > 5 ) { if( x > 9 ) { return ok; } return 2; } return ok; }` ],
+    ])( "does not warn (6134) about a value %s", async ( _, body ) => {
         expect( await warnings( body ) ).toEqual( [] );
     });
 

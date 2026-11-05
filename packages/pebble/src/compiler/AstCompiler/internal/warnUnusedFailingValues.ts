@@ -2,6 +2,8 @@ import { DiagnosticEmitter } from "../../../diagnostics/DiagnosticEmitter";
 import { DiagnosticCode } from "../../../diagnostics/diagnosticMessages.generated";
 import { TirDivExpr, TirModuloExpr } from "../../tir/expressions/binary/TirBinaryExpr";
 import { TirLitFailExpr } from "../../tir/expressions/litteral/TirLitFailExpr";
+import { TirLitIntExpr } from "../../tir/expressions/litteral/TirLitIntExpr";
+import { TirParentesizedExpr } from "../../tir/expressions/TirParentesizedExpr";
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirFailExpr } from "../../tir/expressions/TirFailExpr";
 import { TirFuncExpr } from "../../tir/expressions/TirFuncExpr";
@@ -12,15 +14,20 @@ import { TirAssertStmt } from "../../tir/statements/TirAssertStmt";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
 import { TirFailStmt } from "../../tir/statements/TirFailStmt";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
+import { TirForOfStmt } from "../../tir/statements/TirForOfStmt";
+import { TirForStmt } from "../../tir/statements/TirForStmt";
+import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
+import { readOnEveryPath } from "../../TirCompiler/expressify/loopResultIsForced";
 import { TirAliasType } from "../../tir/types/TirAliasType";
 import { TirType } from "../../tir/types/TirType";
 
 /**
- * A value declared and never used is never computed: the compiler drops it, and with it
- * whatever could fail while computing it. `const ok = checkSigned( tx, owner );` checks
- * nothing. Warns about each such declaration in user code whose value could fail: a `fail`, a
- * division, or a call to a function of the program's own code that asserts, fails or divides
- * (itself or through the functions of the program's code it calls).
+ * A value declared is computed only where it is read: never, when unused (the compiler drops
+ * it, and with it whatever could fail while computing it: `const ok = checkSigned( tx, owner );`
+ * checks nothing), and only on the ways that read it otherwise (`if( c ) return ok;` checks only
+ * when `c` holds). Warns about each such declaration in user code whose value could fail: a
+ * `fail`, a division, or a call to a function of the program's own code that asserts, fails or
+ * divides (itself or through the functions of the program's code it calls).
  */
 export function warnUnusedFailingValues( program: TypedProgram, emitter: DiagnosticEmitter ): void
 {
@@ -31,7 +38,7 @@ export function warnUnusedFailingValues( program: TypedProgram, emitter: Diagnos
         if( !( fn instanceof TirFuncExpr ) || seen.has( fn ) ) continue;
         seen.add( fn );
         if( !isUserCode( fn ) ) continue;
-        visitStatement( fn.body, emitter, analysis );
+        visitStatement( fn.body, [], emitter, analysis );
     }
 }
 
@@ -67,17 +74,24 @@ function childNodes( node: any ): any[]
     return children;
 }
 
-function visitStatement( stmt: any, emitter: DiagnosticEmitter, analysis: FailureAnalysis ): void
+/** `after`: what runs after `stmt`, to the end of its function (nothing in a loop body) */
+function visitStatement( stmt: any, after: readonly any[], emitter: DiagnosticEmitter, analysis: FailureAnalysis ): void
 {
-    if( stmt instanceof TirBlockStmt ) checkBlock( stmt.stmts, emitter, analysis );
+    if( stmt instanceof TirBlockStmt )
+    {
+        checkBlock( stmt.stmts, after, emitter, analysis );
+        stmt.stmts.forEach( ( s, i ) => visitStatement( s, [ ...stmt.stmts.slice( i + 1 ), ...after ], emitter, analysis ) );
+        return;
+    }
+    const inLoop = stmt instanceof TirForStmt || stmt instanceof TirWhileStmt || stmt instanceof TirForOfStmt;
     for( const child of childNodes( stmt ) )
     {
-        // `match` cases hold their bodies
-        if( isStatement( child ) ) visitStatement( child, emitter, analysis );
+        // `match` cases hold their bodies; branches go on with what follows
+        if( isStatement( child ) ) visitStatement( child, inLoop ? [] : after, emitter, analysis );
     }
 }
 
-function checkBlock( stmts: readonly any[], emitter: DiagnosticEmitter, analysis: FailureAnalysis ): void
+function checkBlock( stmts: readonly any[], after: readonly any[], emitter: DiagnosticEmitter, analysis: FailureAnalysis ): void
 {
     for( let i = 0; i < stmts.length; i++ )
     {
@@ -87,9 +101,14 @@ function checkBlock( stmts: readonly any[], emitter: DiagnosticEmitter, analysis
         if( decl.initExpr instanceof TirFuncExpr ) continue;
         if( !analysis.mayFail( decl.initExpr ) ) continue;
         const seen = new Set<object>();
-        if( stmts.slice( i + 1 ).some( s => references( s, decl.name, seen ) ) ) continue;
-        emitter.warning(
+        const rest = stmts.slice( i + 1 );
+        if( !rest.some( s => references( s, decl.name, seen ) ) ) emitter.warning(
             DiagnosticCode._0_is_never_used_so_it_is_never_computed_a_failure_in_its_value_an_assert_in_a_function_it_calls_never_happens_Use_it_or_remove_it,
+            decl.range,
+            decl.sourceName ?? decl.name
+        );
+        else if( !readOnEveryPath( [ ...rest, ...after ], decl.name, analysis.program, call => analysis.userFunctionCalled( call ) ) ) emitter.warning(
+            DiagnosticCode._0_is_computed_only_where_it_is_read_and_some_ways_after_it_do_not_read_it_on_those_a_failure_in_its_value_an_assert_in_a_function_it_calls_does_not_happen_Read_it_before_the_branches_or_declare_it_where_it_is_read,
             decl.range,
             decl.sourceName ?? decl.name
         );
@@ -118,16 +137,19 @@ class FailureAnalysis
         if(
             node instanceof TirFailExpr
             || node instanceof TirLitFailExpr
-            || node instanceof TirDivExpr
-            || node instanceof TirModuloExpr
             || node instanceof TirAssertStmt
             || node instanceof TirFailStmt
+        ) return true;
+        // dividing by a constant other than 0 cannot fail
+        if(
+            ( node instanceof TirDivExpr || node instanceof TirModuloExpr )
+            && !isNonZeroIntLiteral( node.right )
         ) return true;
         if( seen.has( node ) ) return false;
         seen.add( node );
         if( node instanceof TirCallExpr )
         {
-            const callee = this.userFunctionCalled( node );
+            const callee = this.userFunctionCalled( node )?.fn;
             if( callee !== undefined && this.calleeMayFail( callee ) ) return true;
         }
         // the functions passed around in it may be called: they count too
@@ -145,7 +167,7 @@ class FailureAnalysis
     }
 
     /** the function of the program's own code (not the standard library's) the call calls */
-    private userFunctionCalled( call: TirCallExpr ): TirFuncExpr | undefined
+    userFunctionCalled( call: TirCallExpr ): { fn: TirFuncExpr, isMethod: boolean } | undefined
     {
         const callee = call.func;
         let fnName: string | undefined = undefined;
@@ -154,8 +176,14 @@ class FailureAnalysis
         else if( callee instanceof TirPropAccessExpr ) fnName = methodFunctionName( callee.object.type, callee.prop.text );
         if( fnName === undefined ) return undefined;
         const fn = this.program.functions.get( fnName );
-        return fn instanceof TirFuncExpr && isUserCode( fn ) ? fn : undefined;
+        return fn instanceof TirFuncExpr && isUserCode( fn ) ? { fn, isMethod: callee instanceof TirPropAccessExpr } : undefined;
     }
+}
+
+function isNonZeroIntLiteral( expr: any ): boolean
+{
+    while( expr instanceof TirParentesizedExpr ) expr = expr.expr;
+    return expr instanceof TirLitIntExpr && expr.integer !== BigInt( 0 );
 }
 
 function methodFunctionName( type: TirType, methodName: string ): string | undefined

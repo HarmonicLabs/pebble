@@ -12,6 +12,7 @@ import { TirCaseExpr } from "../../tir/expressions/TirCaseExpr";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
 import { TirFromDataExpr } from "../../tir/expressions/TirFromDataExpr";
+import { TirFuncExpr } from "../../tir/expressions/TirFuncExpr";
 import { TirInlineClosedIR } from "../../tir/expressions/TirInlineClosedIR";
 import { TirIsExpr } from "../../tir/expressions/TirIsExpr";
 import { TirNativeFunc } from "../../tir/expressions/TirNativeFunc";
@@ -35,10 +36,14 @@ import { TirForOfStmt } from "../../tir/statements/TirForOfStmt";
 import { TirForStmt } from "../../tir/statements/TirForStmt";
 import { TirIfStmt } from "../../tir/statements/TirIfStmt";
 import { TirMatchStmt } from "../../tir/statements/TirMatchStmt";
+import { TirFailStmt } from "../../tir/statements/TirFailStmt";
 import { TirReturnStmt } from "../../tir/statements/TirReturnStmt";
 import { TirStmt } from "../../tir/statements/TirStmt";
 import { TirTraceStmt } from "../../tir/statements/TirTraceStmt";
 import { TirSimpleVarDecl } from "../../tir/statements/TirVarDecl/TirSimpleVarDecl";
+import { TirNamedDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
+import { TirSopOptT } from "../../tir/types/TirNativeType/native/Optional/sop";
+import { TirDataOptT } from "../../tir/types/TirNativeType/native/Optional/data";
 import { isTirVarDecl } from "../../tir/statements/TirVarDecl/TirVarDecl";
 import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
 import { TirAliasType } from "../../tir/types/TirAliasType";
@@ -118,11 +123,122 @@ export function loopResultIsForced( stmts: readonly TirStmt[], varName: string, 
     return false;
 }
 
-/** whether computing `expr` certainly reads one of `names` */
-function strictlyReads( expr: TirExpr, names: ReadonlySet<string>, program: TypedProgram ): boolean
+/**
+ * Whether every way through `stmts` (what runs after the declaration of the user `const`
+ * `varName`, to the end of its function) computes `varName`. The letted placement computes it
+ * once, at the first point all its reads go through (where they meet, the lowest common
+ * ancestor of the references), so:
+ * - a read counts where `loopResultIsForced` counts one;
+ * - a statement or expression whose parts (the branches of an `if`, `match` or `?:`, the two
+ *   sides of `&&`, and what follows an `if` or `match`) hold reads in two or more of them
+ *   computes it, before the parts; with reads in one part only, every way must go through
+ *   that part and compute it there;
+ * - a loop or a closure reading it computes it: it is computed once before them, even when
+ *   the body never runs (the compute-once rescue).
+ * A way that fails (`fail`) needs no read: the run fails anyway.
+ */
+export function readOnEveryPath(
+    stmts: readonly TirStmt[],
+    varName: string,
+    program: TypedProgram,
+    /** the function of the program's code a call calls: an argument is read when it reads its parameter on every way */
+    userFunction: ( call: TirCallExpr ) => { fn: TirFuncExpr, isMethod: boolean } | undefined
+): boolean
 {
-    const reads = ( e: TirExpr ) => strictlyReads( e, names, program );
+    return everyWayReads( stmts.slice(), new Set([ varName ]), program, { userFunction, paramReads: new Map() } );
+}
+
+/** how a user `const`'s reads are found (see `readOnEveryPath`) */
+interface UserConstReads {
+    readonly userFunction: ( call: TirCallExpr ) => { fn: TirFuncExpr, isMethod: boolean } | undefined;
+    /** whether each function reads each parameter on every way; `false` while being found (recursion) */
+    readonly paramReads: Map<TirFuncExpr, Map<number, boolean>>;
+}
+
+function everyWayReads( queue: TirStmt[], forcing: Set<string>, program: TypedProgram, rules: UserConstReads ): boolean
+{
+    const reads = ( expr: TirExpr ) => exprComputes( expr, forcing, program, rules );
+    const holds = ( parts: readonly any[] ) => parts.some( p => readsAnyOf( p, forcing ) );
+    const branch = ( s: TirStmt | undefined ): TirStmt[] => s === undefined ? [] : s instanceof TirBlockStmt ? s.stmts.slice() : [ s ];
+    let stmt: TirStmt | undefined;
+    while( ( stmt = queue.shift() ) !== undefined )
+    {
+        if( forcing.size === 0 ) return false;
+
+        if( stmt instanceof TirReturnStmt ) return stmt.value !== undefined && reads( stmt.value );
+        if( stmt instanceof TirFailStmt ) return true;
+        if( stmt instanceof TirAssertStmt )
+        {
+            if( reads( stmt.condition ) ) return true;
+            continue;
+        }
+        if( stmt instanceof TirIfStmt )
+        {
+            if( reads( stmt.condition ) ) return true;
+            const ways = [ branch( stmt.thenBranch ), branch( stmt.elseBranch ) ];
+            // reads in two of the branches and what follows: they meet here
+            if( [ ...ways, queue ].filter( holds ).length >= 2 ) return true;
+            return ways.every( way => everyWayReads( [ ...way, ...queue ], new Set( forcing ), program, rules ) );
+        }
+        if( stmt instanceof TirMatchStmt )
+        {
+            if( reads( stmt.matchExpr ) ) return true;
+            // a value no case matches fails
+            const ways = [ ...stmt.cases.map( c => c.body ), ...( stmt.wildcardCase ? [ stmt.wildcardCase.body ] : [] ) ].map( branch );
+            if( [ ...ways, queue ].filter( holds ).length >= 2 ) return true;
+            return ways.every( way => everyWayReads( [ ...way, ...queue ], new Set( forcing ), program, rules ) );
+        }
+        if( stmt instanceof TirTraceStmt ) continue;
+        if( stmt instanceof TirBlockStmt )
+        {
+            queue.unshift( ...stmt.stmts );
+            continue;
+        }
+        if( isTirVarDecl( stmt ) )
+        {
+            const forces = stmt.initExpr !== undefined && reads( stmt.initExpr );
+            // a constructor's pattern checks the value where it is declared
+            if( forces && stmt instanceof TirNamedDeconstructVarDecl && constructorCount( stmt.type ) > 1 ) return true;
+            for( const name of stmt.introducedVars() )
+            {
+                if( forces ) forcing.add( name );
+                else forcing.delete( name );
+            }
+            continue;
+        }
+        if( stmt instanceof TirAssignmentStmt )
+        {
+            const name = stmt.varIdentifier.varName;
+            if( reads( stmt.assignedExpr ) ) forcing.add( name );
+            else forcing.delete( name );
+            continue;
+        }
+        if( stmt instanceof TirForStmt || stmt instanceof TirWhileStmt || stmt instanceof TirForOfStmt )
+        {
+            // computed before the loop, whatever its body reads it for
+            if( readsAnyOf( stmt, forcing ) ) return true;
+            // what the body assigns may hold anything after it
+            for( const name of assignedNames( stmt ) ) forcing.delete( name );
+            continue;
+        }
+
+        // `break`, `continue`: not outside a loop body
+        return false;
+    }
+    // the end of the function (a contract method, a function returning nothing)
+    return false;
+}
+
+/**
+ * whether computing `expr` certainly reads one of `names`; with `rules`, as the compiler computes
+ * a user `const`: a closure reading one counts (the value is computed before the lambda), and
+ * so does an argument of a function of the program's code that reads its parameter on every way
+ */
+function strictlyReads( expr: TirExpr, names: ReadonlySet<string>, program: TypedProgram, rules?: UserConstReads ): boolean
+{
+    const reads = ( e: TirExpr ) => strictlyReads( e, names, program, rules );
     if( expr instanceof TirVariableAccessExpr ) return names.has( expr.varName );
+    if( expr instanceof TirFuncExpr ) return rules !== undefined && readsAnyOf( expr, names );
     if(
         expr instanceof TirParentesizedExpr
         || expr instanceof TirTypeConversionExpr
@@ -133,9 +249,12 @@ function strictlyReads( expr: TirExpr, names: ReadonlySet<string>, program: Type
     if( expr instanceof TirLogicalAndExpr || expr instanceof TirLogicalOrExpr ) return reads( expr.left );
     if( isTirBinaryExpr( expr ) ) return reads( expr.left ) || reads( expr.right );
     if( isTirUnaryPrefixExpr( expr ) ) return reads( expr.operand );
-    if( expr instanceof TirTernaryExpr ) return reads( expr.condition );
+    // a branch is computed only for some values of the condition: both, or the condition
+    if( expr instanceof TirTernaryExpr ) return reads( expr.condition ) || ( reads( expr.ifTrue ) && reads( expr.ifFalse ) );
     if( expr instanceof TirIsExpr ) return reads( expr.instanceExpr );
-    if( expr instanceof TirCaseExpr ) return reads( expr.matchExpr );
+    if( expr instanceof TirCaseExpr ) return reads( expr.matchExpr ) || (
+        expr.cases.every( c => reads( c.body ) ) && ( expr.wildcardCase === undefined || reads( expr.wildcardCase.body ) )
+    );
     if( expr instanceof TirPropAccessExpr ) return reads( expr.object );
     if( expr instanceof TirElemAccessExpr ) return reads( expr.arrLikeExpr ) || reads( expr.indexExpr );
     if( expr instanceof TirCallExpr )
@@ -143,11 +262,92 @@ function strictlyReads( expr: TirExpr, names: ReadonlySet<string>, program: Type
         const tag = builtinCalled( expr, program );
         if( tag !== undefined && !LAZY_BUILTINS.has( tag ) ) return expr.args.some( reads );
         const receiver = builtinMethodReceiver( expr );
-        return receiver !== undefined && reads( receiver );
+        if( receiver !== undefined && reads( receiver ) ) return true;
+        if( rules === undefined ) return false;
+        if( expr.args.some( a => a instanceof TirFuncExpr && reads( a ) ) ) return true;
+        const called = rules.userFunction( expr );
+        if( called === undefined ) return false;
+        // a method's receiver is its first parameter
+        const passed: TirExpr[] = called.isMethod && expr.func instanceof TirPropAccessExpr ? [ expr.func.object, ...expr.args ] : expr.args;
+        return passed.some( ( a, i ) => reads( a ) && readsParam( called.fn, i, program, rules ) );
     }
     // literals (a known constructor's fields are taken apart lazily), function values, the
     // arguments of a function (inlined, an unused parameter is dropped with its argument)
     return false;
+}
+
+/**
+ * whether computing `expr` computes the user `const` whose reads are `names` (see
+ * `readOnEveryPath`): a read that nothing can skip, or reads in two of its parts, which meet
+ * here, or in one part computed whenever `expr` is, that computes it
+ */
+function exprComputes( expr: TirExpr, names: ReadonlySet<string>, program: TypedProgram, rules: UserConstReads ): boolean
+{
+    if( strictlyReads( expr, names, program, rules ) ) return true;
+    const withReads = exprParts( expr, program, rules ).filter( p => readsAnyOf( p.expr, names ) );
+    if( withReads.length >= 2 ) return true;
+    return withReads.length === 1 && withReads[0].always && exprComputes( withReads[0].expr, names, program, rules );
+}
+
+/** the parts of `expr`, and whether each is computed whenever `expr` is */
+function exprParts( expr: TirExpr, program: TypedProgram, rules: UserConstReads ): { expr: TirExpr, always: boolean }[]
+{
+    const always = ( e: TirExpr ) => ({ expr: e, always: true });
+    const sometimes = ( e: TirExpr ) => ({ expr: e, always: false });
+    if( expr instanceof TirTernaryExpr ) return [ always( expr.condition ), sometimes( expr.ifTrue ), sometimes( expr.ifFalse ) ];
+    if( expr instanceof TirLogicalAndExpr || expr instanceof TirLogicalOrExpr ) return [ always( expr.left ), sometimes( expr.right ) ];
+    if( expr instanceof TirCaseExpr ) return [
+        always( expr.matchExpr ),
+        ...expr.cases.map( c => sometimes( c.body ) ),
+        ...( expr.wildcardCase ? [ sometimes( expr.wildcardCase.body ) ] : [] ),
+    ];
+    if( isTirBinaryExpr( expr ) ) return [ always( expr.left ), always( expr.right ) ];
+    if( isTirUnaryPrefixExpr( expr ) ) return [ always( expr.operand ) ];
+    if(
+        expr instanceof TirParentesizedExpr
+        || expr instanceof TirTypeConversionExpr
+        || expr instanceof TirToDataExpr
+    ) return [ always( expr.expr ) ];
+    if( expr instanceof TirFromDataExpr ) return [ always( expr.dataExpr ) ];
+    if( expr instanceof TirIsExpr ) return [ always( expr.instanceExpr ) ];
+    if( expr instanceof TirPropAccessExpr ) return [ always( expr.object ) ];
+    if( expr instanceof TirElemAccessExpr ) return [ always( expr.arrLikeExpr ), always( expr.indexExpr ) ];
+    if( expr instanceof TirCallExpr )
+    {
+        const tag = builtinCalled( expr, program );
+        if( tag !== undefined ) return expr.args.map( a => LAZY_BUILTINS.has( tag ) ? sometimes( a ) : always( a ) );
+        const called = rules.userFunction( expr );
+        const passed: TirExpr[] = called?.isMethod && expr.func instanceof TirPropAccessExpr ? [ expr.func.object, ...expr.args ] : expr.args;
+        return [
+            ...( called?.isMethod ? [] : [ always( expr.func ) ] ),
+            // an argument is computed when the function reads its parameter on every way
+            ...passed.map( ( a, i ) => called !== undefined && readsParam( called.fn, i, program, rules ) ? always( a ) : sometimes( a ) ),
+        ];
+    }
+    return [];
+}
+
+/** whether every way through `fn`'s body reads its parameter `i` (see `readOnEveryPath`) */
+function readsParam( fn: TirFuncExpr, i: number, program: TypedProgram, rules: UserConstReads ): boolean
+{
+    let known = rules.paramReads.get( fn );
+    if( known === undefined ) rules.paramReads.set( fn, known = new Map() );
+    const memo = known.get( i );
+    if( memo !== undefined ) return memo;
+    known.set( i, false );
+    const param = fn.params[i];
+    const result = param !== undefined && everyWayReads( fn.body.stmts.slice(), new Set([ param.name ]), program, rules );
+    known.set( i, result );
+    return result;
+}
+
+/** how many constructors a value of `type` may have been built with */
+function constructorCount( type: TirType ): number
+{
+    const t = getUnaliased( type );
+    if( t instanceof TirSopOptT || t instanceof TirDataOptT ) return 2;
+    const constructors = ( t as any )?.constructors;
+    return Array.isArray( constructors ) ? constructors.length : 1;
 }
 
 /** builtins the compiler may turn into a `case` whose branches are computed only when taken */

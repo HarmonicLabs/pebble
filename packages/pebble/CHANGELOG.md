@@ -167,9 +167,15 @@ source, in `pebble test`, in buildooor and in any tool using
 
 - New warning 6133: a `const` whose value could fail and that is never used. A value that is
   not used is never computed, so `const ok = checkSigned( tx, owner );` checks nothing: the
-  asserts in `checkSigned` never run. The warning covers a `fail`, a division, and calls to
-  the functions and `type` methods of the program's own code that assert, fail or divide,
-  themselves or through the functions they call.
+  asserts in `checkSigned` never run. The warning covers a `fail`, a division (not by a
+  constant other than 0), and calls to the functions and `type` methods of the program's own
+  code that assert, fail or divide, themselves or through the functions they call.
+- New warning 6134: such a `const` read only on some ways after it. A `const` is computed
+  once, at the first point all its reads go through: read only in one branch (an `if`, a
+  `match` arm, a branch of `?:`, the right of `&&`), it is computed only there, and the asserts
+  in its value do not run on the other ways. Read in two branches it is computed before them;
+  read in a loop or a closure, before them. The docs describe it ("When a `const` is
+  computed").
 - Warnings no longer stop a compilation. `pebble compile` failed on any diagnostic, so a
   program with only a warning (an `is` that is always true, a `!` on a value that is not
   optional) did not compile. Warnings are printed and the script is written.
