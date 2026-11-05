@@ -88,14 +88,17 @@ export async function pebbleRepl( flags: ReplFlags = {} ): Promise<void>
 
     const interactive = process.stdin.isTTY === true;
     const history = interactive ? historyFile() : undefined;
+    // newest first, as readline keeps it; its `history` event gives each change
+    let historyLines: readonly string[] = loadHistory( history );
     const rl = readline.createInterface({
         input: process.stdin,
         output: interactive ? process.stdout : undefined,
         terminal: interactive,
-        history: loadHistory( history ),
+        history: historyLines.slice(),
         historySize: 1000,
         removeHistoryDuplicates: true,
     } as readline.ReadLineOptions );
+    rl.on( "history", ( lines: string[] ) => { historyLines = lines; });
 
     if( interactive )
     {
@@ -190,7 +193,7 @@ export async function pebbleRepl( flags: ReplFlags = {} ): Promise<void>
 
     if( history !== undefined )
     {
-        try { writeFileSync( history, ( rl as any ).history.slice().reverse().join( "\n" ) + "\n" ); }
+        try { writeFileSync( history, historyLines.slice().reverse().join( "\n" ) + "\n" ); }
         catch { /* a history is a convenience */ }
     }
     rl.close();

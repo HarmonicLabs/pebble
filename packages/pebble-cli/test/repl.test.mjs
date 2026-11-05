@@ -142,3 +142,23 @@ test( "the REPL writes nothing in the project", () => {
     }
     finally { rmSync( dir, { recursive: true, force: true } ); }
 });
+
+test( "an interactive session keeps its history in PEBBLE_REPL_HISTORY", {
+    // a terminal is needed: util-linux `script` gives one
+    skip: process.platform !== "linux" && "needs util-linux `script` for a terminal",
+}, () => {
+    const dir = mkdtempSync( join( tmpdir(), "pebble-history-" ) );
+    const file = join( dir, "history" );
+    try {
+        const r = spawnSync( "script", [ "-qec", `"${process.execPath}" "${cli}" repl`, "/dev/null" ], {
+            cwd: cape,
+            input: "1 + 1\r2 + 2\r:quit\r",
+            encoding: "utf8",
+            env: { ...process.env, PEBBLE_REPL_HISTORY: file, FORCE_COLOR: "0" },
+            timeout: 120_000,
+        });
+        assert.equal( r.status, 0, r.stdout + r.stderr );
+        assert.deepEqual( readFileSync( file, "utf8" ).split( "\n" ).filter( l => l.length > 0 ), [ "1 + 1", "2 + 2", ":quit" ] );
+    }
+    finally { rmSync( dir, { recursive: true, force: true } ); }
+});
