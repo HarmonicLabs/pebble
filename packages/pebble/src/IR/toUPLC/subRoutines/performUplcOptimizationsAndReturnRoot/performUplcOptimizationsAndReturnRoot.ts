@@ -16,6 +16,8 @@ import { _modifyChildFromTo } from "../../_internal/_modifyChildFromTo";
 import { CompilerOptions, CompilerUplcOptimizations, isDebugUplcOptimizations } from "../../CompilerOptions";
 import { expandFuncsAndReturnRoot, getExpandedIRFunc } from "./expandFuncsAndReturnRoot";
 import { getApplicationTerms } from "../../utils/getApplicationTerms";
+import { inheritRange } from "../../../sourceMap/irRanges";
+import { substituteInTracePoints } from "../../../sourceMap/irTraces";
 import { getUnboundedVars } from "../handleLetted/groupByScope";
 import { prettyIRInline } from "../../../utils";
 
@@ -48,6 +50,11 @@ export function performUplcOptimizationsAndReturnRoot(
             && isIdLike( t.fn )
         ) {
             const arg = t.arg;
+            const fn = t.fn as IRFunc;
+            // the identity's body is a use of `arg`: what it stood for (its range, the removed
+            // traces there, reading the parameter) goes to `arg`
+            inheritRange( arg, fn.body );
+            substituteInTracePoints( arg, fn.params[0], arg );
             if( t.parent ) _modifyChildFromTo( t.parent, t, arg );
             else root = arg;
             stack.push( arg );
