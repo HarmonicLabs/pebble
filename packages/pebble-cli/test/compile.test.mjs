@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,4 +74,11 @@ contract C {
         assert.ok( existsSync( join( dir, "out", "out.flat" ) ) );
     }
     finally { rmSync( dir, { recursive: true, force: true } ); }
+});
+
+test( "npm run build removes dist only once the dependencies are installed", () => {
+    // `rm -rf ./dist && npm i && ...` left no dist when `npm i` failed (a compiler not on npm yet)
+    const { scripts } = JSON.parse( readFileSync( join( here, "..", "package.json" ), "utf8" ) );
+    const steps = scripts.build.split( "&&" ).map( s => s.trim() );
+    assert.ok( steps.indexOf( "npm i" ) >= 0 && steps.indexOf( "npm i" ) < steps.indexOf( "rm -rf ./dist" ), scripts.build );
 });
