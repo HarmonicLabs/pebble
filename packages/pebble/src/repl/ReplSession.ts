@@ -522,27 +522,7 @@ export class ReplSession
 
     private mapDiagnostics( diagnostics: readonly DiagnosticMessage[], source: SourceBuilder, input: string, plan: LinePlan ): ReplDiagnostic[]
     {
-        // in what the session added (`return a;` after `const a: int = #ff;`): only a consequence
-        const inScaffold = ( d: DiagnosticMessage ) => (
-            d.range?.source !== undefined
-            && samePath( d.range.source.absoluteProjPath, this.bufferPath )
-            && segmentAt( source, d.range.start ) === undefined
-        );
-        const shown = diagnostics.some( d => d.category === DiagnosticCategory.Error && !inScaffold( d ) )
-            ? diagnostics.filter( d => !inScaffold( d ) )
-            : diagnostics;
-        // duplicates: the same message at the same place
-        const seen = new Set<string>();
-        const result: ReplDiagnostic[] = [];
-        for( const d of shown )
-        {
-            const mapped = this.mapDiagnostic( d, source, input, plan );
-            const key = mapped.message + "@" + JSON.stringify( mapped.position ?? null );
-            if( seen.has( key ) ) continue;
-            seen.add( key );
-            result.push( mapped );
-        }
-        return result;
+        return diagnostics.map( d => this.mapDiagnostic( d, source, input, plan ) );
     }
 
     private mapDiagnostic( d: DiagnosticMessage, source: SourceBuilder, input: string, plan: LinePlan ): ReplDiagnostic

@@ -186,6 +186,10 @@ source, in `pebble test`, in buildooor and in any tool using
   type annotation." at the type. It used to get the initializer error, at the end of the loop
   header.
 - A block still open at the end of the file gets "'}' expected.", not "Statement expected.".
+- A top-level `const` whose value had an error made each use of it an error too ("'A' is not
+  defined", once per function reading it). Its name is still declared: with its type when the
+  declaration has one, else its uses report nothing more. The REPL hid these, in the code it
+  adds around a line, when the line had an error of its own; it shows every diagnostic now.
 - A statement that already has its own error no longer gets "Statement expected." as well,
   and a declaration whose initializer has an error no longer gets "Variable declaration must
   have an initializer".

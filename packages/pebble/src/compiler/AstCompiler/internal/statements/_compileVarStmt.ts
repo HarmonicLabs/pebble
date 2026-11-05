@@ -75,11 +75,24 @@ export function _compileSimpleVarDecl(
     // stmtIdx: number
 ): TirSimpleVarDecl | undefined
 {
-    const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint );
-    if( !typeAndExpr ) return undefined;
+    const declared: { type?: TirType } = {};
+    const typeAndExpr = _getVarDeclTypeAndExpr( ctx, decl, typeHint, declared );
+    const astName = decl.name.text;
+    if( !typeAndExpr )
+    {
+        // its error is reported: the name is still declared, with the type the declaration
+        // gives it if any, so a use does not report it undefined (a top-level `const`, read by
+        // the functions after it)
+        if( declared.type !== undefined ) ctx.scope.defineValue({
+            name: _tirNameOfDeclared( ctx, astName ),
+            type: declared.type,
+            isConstant: decl.isConst()
+        }, astName );
+        else ctx.scope.defineFailedValue( astName );
+        return undefined;
+    }
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
-    const astName = decl.name.text;
     const tirName = _tirNameOfDeclared( ctx, astName );
     const success = ctx.scope.defineValue({
         name: tirName,
@@ -405,6 +418,8 @@ export function _getVarDeclTypeAndExpr(
     ctx: AstCompilationCtx,
     decl: { type: AstTypeExpr | undefined, initExpr: PebbleExpr | undefined, range: SourceRange },
     deconstructTypeHint: TirType | undefined, // coming from deconstructing
+    /** receives the type the declaration gives the variable, before the initializer is checked */
+    declared?: { type?: TirType },
     // sameLevelStmts: readonly PebbleStmt[],
     // stmtIdx: number
 ): [
@@ -424,6 +439,7 @@ export function _getVarDeclTypeAndExpr(
     //     // )
     // );
     const typeHint = declarationType ?? deconstructTypeHint;
+    if( declared !== undefined ) declared.type = typeHint;
 
     // even in deconstructions
     // we allow for `as` type assertions

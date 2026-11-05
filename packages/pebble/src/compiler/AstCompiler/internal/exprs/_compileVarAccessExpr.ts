@@ -18,6 +18,9 @@ export function _compileVarAccessExpr(
             expr.range
         );
 
+        // a declaration that failed: its own error says why
+        if( ctx.scope.resolvesToFailedValue( expr.text ) ) return undefined;
+
         return ctx.error(
             DiagnosticCode._0_is_not_defined,
             expr.range, expr.text

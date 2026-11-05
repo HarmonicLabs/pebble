@@ -170,6 +170,11 @@ export class AstScope
      * or any parent scope's narrowing/binding when resolving this variable).
      */
     readonly narrowings: Map<string, TirType> = new Map();
+    /**
+     * names declared here whose declaration failed, with no type to give them (its error is
+     * reported): using one reports nothing more (see `resolvesToFailedValue`)
+     */
+    readonly failedValues: Set<string> = new Set();
     readonly aviableConstructors: Map<string, IAvaiableConstructor> = new Map();
     /**
      * ast name -> namespace symbol
@@ -228,6 +233,27 @@ export class AstScope
 
         this.variables.set( astName, valueInfos );
         return true;
+    }
+
+    /** `astName` is declared here, but its declaration failed and gives it no type */
+    defineFailedValue( astName: string ): void
+    {
+        if( this._isReadonly || this.variables.has( astName ) ) return;
+        this.failedValues.add( astName );
+    }
+
+    /**
+     * whether `name` names a declaration that failed (`defineFailedValue`): it is not undefined,
+     * and its error is reported already
+     */
+    resolvesToFailedValue( name: string ): boolean
+    {
+        for( let scope: AstScope | undefined = this; scope !== undefined; scope = scope.parent )
+        {
+            if( scope.variables.has( name ) ) return false;
+            if( scope.failedValues.has( name ) ) return true;
+        }
+        return false;
     }
 
     /**

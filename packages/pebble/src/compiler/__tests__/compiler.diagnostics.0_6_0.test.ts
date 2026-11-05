@@ -67,6 +67,22 @@ describe("parser messages (0.6.0)", () => {
         expect( errors( diagnostics ).map( d => d.code ) ).toEqual([ code ]);
     });
 
+    test.each([
+        [ "annotated", `const A: int = #ff;\nfunction g(): int { return A; }\nexport function f(): int { return A + g(); }`, [ 2322 ] ],
+        [ "not annotated", `const A = nope + 1;\nfunction g(): int { return A; }\nexport function f(): int { return A + g(); }`, [ 256 ] ],
+    ])( "a top-level const whose value has an error (%s): that error only, not one per use", async ( _, src, codes ) => {
+        // each use reported "'A' is not defined"
+        const { ok, diagnostics } = await exportF( src );
+        expect( ok ).toBe( false );
+        expect( errors( diagnostics ).map( d => d.code ) ).toEqual( codes );
+        expect( diagnostics.map( d => d.text ).join( "\n" ) ).not.toContain( "'A' is not defined" );
+    });
+
+    test("a use of a name that was never declared is still reported", async () => {
+        const { diagnostics } = await exportF( `export function f(): int { return B + 1; }` );
+        expect( errors( diagnostics ).map( d => d.text ) ).toEqual([ expect.stringContaining( "'B' is not defined" ) ]);
+    });
+
     test("every diagnostic code is used by one message only", () => {
         const messages: Record<string, number> = JSON.parse(
             readFileSync( join( __dirname, "../../diagnostics/diagnosticMessages.json" ), "utf8" )

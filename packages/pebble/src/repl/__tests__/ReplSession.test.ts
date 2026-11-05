@@ -180,6 +180,8 @@ describe("ReplSession: errors and failures (A7)", () => {
         const s = session();
         const r = await s.eval( "const z: int = #ff;" );
         expect( r.ok ).toBe( false );
+        // not also "'z' is not defined" where the session reads it
+        expect( r.diagnostics ).toHaveLength( 1 );
         expect( r.diagnostics[0] ).toMatchObject({
             category: "error",
             message: "Type 'bytes' is not assignable to type 'int'.",
