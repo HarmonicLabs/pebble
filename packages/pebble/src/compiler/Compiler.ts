@@ -823,8 +823,8 @@ function compileTracePrograms( traces: readonly StrippedTrace[], cfg: CompilerOp
             )));
         }
         catch( e ) {
-            // a message the map cannot compute is shown as its source text
-            if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not compile a removed trace:", e );
+            // the map shows the message as its source text; a compiler bug, said so
+            console.warn( `warning: the source map has no program for the removed trace ${ JSON.stringify( t.expression ?? "" ) }: ${ e instanceof Error ? e.message : String( e ) }` );
             return undefined;
         }
     });
@@ -885,7 +885,8 @@ function evaluateCompiled(
             if( r.mapped ) return r;
         }
         catch( e ) {
-            if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not put the removed traces back:", e );
+            // the evaluation without them; a bug, said so
+            console.warn( `warning: the removed traces could not be put back: ${ e instanceof Error ? e.message : String( e ) }` );
         }
     }
     const r = Machine.eval( term );
@@ -921,8 +922,8 @@ function failureLocation( failure: ScriptFailure ): Pick<TestError, "location" |
 
 /**
  * Where a failing test evaluation failed in the source, from the program's source map;
- * empty when unknown. Locating must never break a test run, so its errors are dropped
- * (set `PEBBLE_DBG_SOURCEMAP` to see them).
+ * empty when unknown. Locating must never break a test run: an error locating it is a bug,
+ * reported as a warning, and the failure goes without a location.
  */
 function locateTestFailure(
     term: UPLCTerm,
@@ -938,7 +939,7 @@ function locateTestFailure(
             : { location: failure.location, stack: failure.stack };
     }
     catch( e ) {
-        if( process.env.PEBBLE_DBG_SOURCEMAP ) console.error( "[sourcemap] could not locate the failure:", e );
+        console.warn( `warning: the source map could not locate the failure: ${ e instanceof Error ? e.message : String( e ) }` );
         return {};
     }
 }
