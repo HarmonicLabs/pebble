@@ -93,6 +93,14 @@ export function f( x: int ): int {
     trace decoded;
     return 1;
 }`, [ [ 42 ] ] ],
+    // the optimizer substitutes the parameter with the argument: the message is computed from
+    // the argument's values (it printed "<x: not computed by the stripped script>")
+    [ "a traced parameter of a helper inlined with its argument", `
+function inc( x: int ): int { trace x; return x + 1; }
+export function f( a: int ): int { return inc( a * 2 ); }`, [ [ 5 ] ] ],
+    [ "a parameter only a trace reads", `
+function note( x: int ): int { trace x; return 1; }
+export function f( a: int ): int { return note( a * 2 ) + a; }`, [ [ 5 ] ] ],
     // the message program reads a field of a constant through letted values; compiled on its
     // own, `removeUnusedVarsAndReturnRoot` dropped an argument of an over-applied binding and the
     // message evaluated to a lambda ("cannot force Lambda")
@@ -267,6 +275,18 @@ test passes() { assert check( 1 ) == 1; }`;
         );
         const { run } = await compiler.debugTest({ entry: "main.pebble", root: "/", name: "fails" } as any );
         expect( run?.recording.logs ).toEqual([ "checking", "x must be positive" ]);
+    });
+
+    test("a trace copied for the place where its parameter was replaced is counted once", async () => {
+        const io = createMemoryCompilerIoApi({ sources: new Map([[ "main.pebble", fromUtf8( `
+function inc( x: int ): int { trace x; return x + 1; }
+export function f( a: int ): int { return inc( a * 2 ); }` ) ]]) });
+        const lines: string[] = [];
+        const compiler = new Compiler( io, { ...testOptions, silent: false, removeTraces: true, compilerVersion: COMPILER_VERSION } as CompilerOptions );
+        compiler.io.stdout = { write: ( s: any ) => { lines.push( String( s ) ); } };
+        await compiler.export({ entry: "main.pebble", root: "/", functionName: "f" } as any );
+        expect( lines.join( "" ) ).toContain( "1 traces removed (removeTraces); the source map keeps them\n" );
+        expect( lines.join( "" ) ).not.toContain( "no place left" );
     });
 
     test("compile says how many traces it removed", async () => {

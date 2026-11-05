@@ -32,6 +32,7 @@ import { IRRecursive } from "../../IRNodes/IRRecursive";
 import { IRTerm } from "../../IRTerm";
 import { IRVar } from "../../IRNodes/IRVar";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
+import { substituteInTracePoints } from "../../sourceMap/irTraces";
 
 export function inlineSingleUseLetBindingsAndReturnRoot( term: IRTerm ): IRTerm
 {
@@ -66,6 +67,8 @@ export function inlineSingleUseLetBindingsAndReturnRoot( term: IRTerm ): IRTerm
                 // body — there's no work to multiply.
                 if( value instanceof IRVar )
                 {
+                    // the binding goes: removed traces reading `p` read `value` (each case below)
+                    substituteInTracePoints( fn.body, p, value );
                     const newBody = substituteAllVar( fn.body, p, value );
                     term = replaceWithBody( term, t, newBody );
                     didChange = true;
@@ -77,12 +80,14 @@ export function inlineSingleUseLetBindingsAndReturnRoot( term: IRTerm ): IRTerm
                 if( stats.count === 0 )
                 {
                     // Dead let — replace with body, dropping the value.
+                    substituteInTracePoints( fn.body, p, value );
                     term = replaceWithBody( term, t, fn.body );
                     didChange = true;
                     break outer;
                 }
                 if( stats.count === 1 && !stats.trapped )
                 {
+                    substituteInTracePoints( fn.body, p, value );
                     substituteVar( fn.body, p, value );
                     term = replaceWithBody( term, t, fn.body );
                     didChange = true;
@@ -104,6 +109,7 @@ export function inlineSingleUseLetBindingsAndReturnRoot( term: IRTerm ): IRTerm
                     && isSyntacticValue( value )
                     && !containsFreeVar( value, p )
                 ) {
+                    substituteInTracePoints( fn.body, p, value );
                     substituteVar( fn.body, p, value );
                     term = replaceWithBody( term, t, fn.body );
                     didChange = true;

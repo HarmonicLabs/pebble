@@ -96,6 +96,12 @@ source, in `pebble test`, in buildooor and in any tool using
   computed it), and says so when one is missing.
 - `pebble compile` and `pebble export` say how many traces they removed, and name those the
   optimizer left no place for (code it removed because it never runs).
+- A computed message reading a helper's parameter printed `<x: not computed by the stripped
+  script>` when the optimizer inlined the helper with its argument (`inc( a * 2 )` called once),
+  or dropped a parameter only the trace read: no lambda bound it any more. Where the optimizer
+  replaces a variable with an expression, the map gets a copy of the trace for that place
+  (`of`, see the plutus-machine README) whose program computes it from the expression's values;
+  the compile note counts it once.
 - A helper the optimizer reduces to a builtin (`function double( x: int ): int { trace x;
   return x * 2; }` becomes `multiplyInteger 2`) has no lambda left: its traces run whenever
   that value is applied, once per call, reading the argument for the parameter (map trace

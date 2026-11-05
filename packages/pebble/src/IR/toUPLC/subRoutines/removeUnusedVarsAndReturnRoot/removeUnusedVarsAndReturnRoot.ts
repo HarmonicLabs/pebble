@@ -5,6 +5,7 @@ import { IRTerm } from "../../../IRTerm";
 import { _modifyChildFromTo } from "../../_internal/_modifyChildFromTo";
 import { getApplicationTerms } from "../../utils/getApplicationTerms";
 import { RemoveUnusedVarsCtx } from "./RemoveUnusedVarsCtx";
+import { substituteInTracePoints } from "../../../sourceMap/irTraces";
 
 export function removeUnusedVarsAndReturnRoot( term: IRTerm ): IRTerm
 {
@@ -72,7 +73,11 @@ function _removeUnusedVars( term: IRTerm, ctx: RemoveUnusedVarsCtx ): IRTerm
     const removedParams: symbol[] = [];
     for( let i = 0; i < nApplied; i++ ) {
         const p = originalParams[i];
-        if( unusedVars.includes( p ) ) removedParams.push( p );
+        if( unusedVars.includes( p ) ) {
+            removedParams.push( p );
+            // removed traces may still read it: they compute it from its argument
+            substituteInTracePoints( func.body, p, args[i] );
+        }
         else keptArgs.push( args[i] );
     }
     const extraArgs = args.slice( nApplied );

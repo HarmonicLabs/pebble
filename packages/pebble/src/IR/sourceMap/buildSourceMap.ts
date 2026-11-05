@@ -136,6 +136,7 @@ export function buildSourceMap( args: BuildSourceMapArgs ): UPLCSourceMap
     {
         map.traces = removedTraces.map( ( t, k ): UPLCSourceMapTrace => {
             const entry: UPLCSourceMapTrace = { kind: t.kind };
+            if( t.of !== undefined ) entry.of = t.of;
             if( isUserRange( t.range ) ) entry.at = [ sourceIndexOf( t.range ), ...positionOf( t.range ) ];
             if( t.message !== undefined ) entry.message = t.message;
             else

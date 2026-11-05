@@ -780,7 +780,8 @@ export function compileProgramBackend(
         let debugTable: DebugTable | undefined = undefined;
         return {
             bytes,
-            strippedTraces: strippedTraces.length,
+            // copies for one place of a trace (`StrippedTrace.of`) are the same trace
+            strippedTraces: strippedTraces.filter( t => t.of === undefined ).length,
             sourceMap: () => sourceMap ??= buildSourceMap({
                 program: uplc,
                 marks,
@@ -897,9 +898,11 @@ function evaluateCompiled(
  */
 function removedTracesNote( map: UPLCSourceMap ): string
 {
-    const traces = map.traces ?? [];
-    const placed = new Set( ( map.tracePoints ?? [] ).map( p => p[1] ) );
-    const unplaced = traces.filter( ( _, k ) => !placed.has( k ) );
+    const all = map.traces ?? [];
+    // a copy of a trace for one of its places (`of`) places that trace
+    const placed = new Set( ( map.tracePoints ?? [] ).map( p => all[ p[1] ]?.of ?? p[1] ) );
+    const traces = all.filter( t => t.of === undefined );
+    const unplaced = all.filter( ( t, k ) => t.of === undefined && !placed.has( k ) );
     let note = `${traces.length} traces removed (removeTraces); the source map keeps them\n`;
     if( unplaced.length > 0 )
     {

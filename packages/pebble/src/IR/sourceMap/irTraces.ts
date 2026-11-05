@@ -4,6 +4,9 @@ import type { IRTracePoint } from "../IRNodes/BaseIRMetadata";
 import { currentCompilationCtx } from "../CompilationCtx";
 import { IRNodeKind } from "../IRNodeKind";
 import { irMeta } from "./irRanges";
+import { _ir_apps } from "../IRNodes/IRApp";
+import { IRFunc } from "../IRNodes/IRFunc";
+import { IRVar } from "../IRNodes/IRVar";
 
 /*
  * Traces removed from the program (`removeTraces`) but kept in its source map: the program is
@@ -26,6 +29,12 @@ export interface StrippedTrace {
      * variables it reads (`params`; the message itself when there are none)
      */
     readonly recipe?: { readonly ir: IRTerm, readonly params: readonly symbol[] };
+    /**
+     * the trace this one is a copy of (its index), for one place of it: the optimizer replaced
+     * a variable the message reads there with an expression, which the copy's recipe computes
+     * (see `substituteInTracePoints`)
+     */
+    readonly of?: number;
 }
 
 /** whether this compilation removes traces */
@@ -75,6 +84,57 @@ export function prependTracePoints( node: IRTerm, points: readonly IRTracePoint[
     if( points === undefined || points.length === 0 ) return;
     const meta = irMeta( node );
     meta.tracePoints = [ ...points, ...( meta.tracePoints ?? [] ) ];
+}
+
+/**
+ * `param`, bound by a lambda the optimizer removes, stands for `value` in `scope` (the lambda's
+ * body): the removed traces there whose message reads it compute it from `value` instead. Each
+ * such point gets a copy of its trace (`StrippedTrace.of`) whose recipe takes `value`'s
+ * variables, which the place has where the parameter no longer is.
+ */
+export function substituteInTracePoints( scope: IRTerm, param: symbol, value: IRTerm ): void
+{
+    const traces = currentCompilationCtx().strippedTraces;
+    if( traces === undefined || traces.length === 0 ) return;
+    const derived = new Map<number, number>();
+    const stack: IRTerm[] = [ scope ];
+    while( stack.length > 0 )
+    {
+        const node = stack.pop()!;
+        // a lambda binding the same symbol again: another variable
+        if( node.kind === IRNodeKind.Func && ( node as any ).params.includes( param ) ) continue;
+        const meta = irMeta( node );
+        const points = meta.tracePoints;
+        if( points )
+        {
+            let changed = false;
+            const next = points.map( p => {
+                if( !( traces[ p.trace ]?.recipe?.params.includes( param ) ) ) return p;
+                changed = true;
+                let k = derived.get( p.trace );
+                if( k === undefined ) derived.set( p.trace, k = deriveTrace( traces, p.trace, param, value ) );
+                return { ...p, trace: k };
+            });
+            if( changed ) meta.tracePoints = next;
+        }
+        // letted and hoisted values are definitions shared by every use: no place of their own
+        if( node.kind === IRNodeKind.Letted || node.kind === IRNodeKind.Hoisted ) continue;
+        for( const c of node.children() ) stack.push( c );
+    }
+}
+
+/** a copy of trace `k` reading `value` where it read `param` (see `substituteInTracePoints`) */
+function deriveTrace( traces: StrippedTrace[], k: number, param: symbol, value: IRTerm ): number
+{
+    const trace = traces[k];
+    const recipe = trace.recipe!;
+    const body = _ir_apps(
+        recipe.ir.clone() as any,
+        ...recipe.params.map( s => s === param ? value.clone() : new IRVar( s ) ) as [ IRTerm, ...IRTerm[] ]
+    );
+    const params = freeSymbols( body );
+    const ir = params.length > 0 ? new IRFunc( params, body ) : body;
+    return traces.push({ ...trace, recipe: { ir, params }, of: trace.of ?? k }) - 1;
 }
 
 /** the variables `term` uses and does not bind, in order of first use */
