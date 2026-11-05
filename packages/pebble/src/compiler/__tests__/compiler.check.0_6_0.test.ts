@@ -206,6 +206,21 @@ export function f( x: int ): int {
         ]);
     });
 
+    // a statement using a name whose declaration failed fails silently (its error is at the
+    // declaration): it was not left out, so its whole function was dropped
+    test("a statement using a failed declaration leaves the rest of its function checked", async () => {
+        const main = `const BAD = nope;
+
+export function f( x: int ): int {
+    const a = BAD;
+    return x * 2;
+}
+`;
+        const { diagnostics, sourceTypeMap } = await check({ "src/main.pebble": main });
+        expect( diagnostics.map( d => d.code ) ).toEqual([ DiagnosticCode._0_is_not_defined ]);
+        expect( sourceTypeMap.typeAtOffset( main.indexOf( "x * 2" ) )?.type.toString() ).toBe( "int" );
+    });
+
     test("compile still stops at a parse error", async () => {
         const io = createMemoryCompilerIoApi({
             sources: new Map([ [ "src/main.pebble", fromUtf8( withParseError ) ] ]),

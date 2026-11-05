@@ -65,6 +65,7 @@ import { AstCompiler } from "../../AstCompiler";
 import { AstNamedTypeExpr } from "../../../../ast/nodes/types/AstNamedTypeExpr";
 import { NonNullExpr } from "../../../../ast/nodes/expr/unary/NonNullExpr";
 import { DerivedContractTypes } from "./_deriveContractTypes";
+import { declareSymbol, referenceSymbol } from "../../utils/symbols";
 
 /**
  * 
@@ -845,12 +846,15 @@ function _getRedeemerMethodBlockStatemets(
     if( redeemerTypeConstr.fields.length !== methodExpr.signature.params.length )
     throw new Error(`unreachable Internal Error: redeemer constructor ${method.expr.name.text} fields length missmatch with method parameters length`);
 
+    const body = methodExpr.bodyBlockStmt();
+    compiler.program.symbols?.registerContextFields( body.range, Object.keys( contextVarsMapping ) );
     const result = _getMatchedRedeemerBlockStatements(
         compiler,
-        methodExpr.bodyBlockStmt().stmts,
+        body.stmts,
         paramsInternalNamesMap,
         contextVarsMapping,
-        renamedVariables
+        renamedVariables,
+        body.range.end
     );
     if( !Array.isArray( result ) ) return undefined;
 
@@ -906,7 +910,9 @@ function _getMatchedRedeemerBlockStatements(
     stmts: BodyStmt[],
     paramsInternalNamesMap: Map<string, string>,
     contextVarsMapping: RenamedVariables | undefined,
-    renamedVariables: RenamedVariables
+    renamedVariables: RenamedVariables,
+    /** where the block of `stmts` ends (a method's body), for the names they declare */
+    scopeEnd?: number
 ): BodyStmt[] | undefined
 {
     const result = stmts.slice();
@@ -1007,6 +1013,15 @@ function _getMatchedRedeemerBlockStatements(
 
                 // when reading `introducedVarName`, it will be replaced with `realVarName`
                 renamedVariables[ introducedVarName ] = realVarName;
+                // so it is never declared: the symbol index has it all the same, visible from the
+                // destructuring to the end of the block
+                declareSymbol( compiler.program, undefined, {
+                    name: introducedVarName,
+                    kind: "constant",
+                    nameRange: fieldVarDecl.name.range,
+                    range: fieldVarDecl.range,
+                    visibleIn: { start: stmt.range.end, end: scopeEnd ?? result[ result.length - 1 ].range.end },
+                });
                 // debug information: the source name of `realVarName` in this method
                 if( !isInternalName( introducedVarName ) )
                 compiler.program.debugAliases.push({ name: introducedVarName, tirName: realVarName, range: fieldVarDecl.range });
@@ -1319,6 +1334,8 @@ function _exprReplaceParamsAndAssertNoLitContext(
             expr.prop.range, paramName
         );
 
+        // the param's name names it (the variable it becomes has a name of the compiler's)
+        referenceSymbol( compiler.program, expr.prop.range, compiler.program.symbols?.symbolOfTirName( internalName ) );
         return new Identifier( internalName, expr.range );
     }
     if( expr instanceof LitThisExpr )
@@ -1328,7 +1345,14 @@ function _exprReplaceParamsAndAssertNoLitContext(
     );
     if( expr instanceof Identifier ) {
         const renamed = renamedVariables[ expr.text ];
-        if( renamed ) return new Identifier( renamed, expr.range );
+        if( renamed )
+        {
+            // a name the context's destructuring introduced: the one visible here
+            const file = expr.range.source?.absoluteProjPath;
+            const symbols = compiler.program.symbols;
+            if( symbols && file ) referenceSymbol( compiler.program, expr.range, symbols.visibleAt( file, expr.range.start ).find( s => s.name === expr.text ) );
+            return new Identifier( renamed, expr.range );
+        }
         return expr;
     }
     if(
@@ -1751,6 +1775,8 @@ function _buildSpendCaseBlock(
                 stateDecl.range
             );
             compiler.registerInternalTypeDecl( perStateStructDecl );
+            const stateFile = stateDecl.name.range.source?.absoluteProjPath;
+            if( stateFile ) compiler.registerInternalStructSymbol( perStateStructDecl, compiler.program.symbols?.symbolAt( stateFile, stateDecl.name.range.start ) );
             const perStateStructName = perStateStructDecl.name.text;
 
             // synthesize: const state = StateStruct{ field1: _f1, ... };

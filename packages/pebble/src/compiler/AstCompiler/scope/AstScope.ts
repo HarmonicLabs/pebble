@@ -180,7 +180,7 @@ export class AstScope
      * names declared here whose declaration failed, with no type to give them (its error is
      * reported): using one reports nothing more (see `resolvesToFailedValue`)
      */
-    readonly failedValues: Set<string> = new Set();
+    readonly failedValues: Map<string, PebbleSymbol | undefined> = new Map();
     readonly aviableConstructors: Map<string, IAvaiableConstructor> = new Map();
     /**
      * ast name -> namespace symbol
@@ -248,10 +248,10 @@ export class AstScope
     }
 
     /** `astName` is declared here, but its declaration failed and gives it no type */
-    defineFailedValue( astName: string ): void
+    defineFailedValue( astName: string, symbol?: PebbleSymbol ): void
     {
         if( this._isReadonly || this.variables.has( astName ) ) return;
-        this.failedValues.add( astName );
+        this.failedValues.set( astName, symbol );
     }
 
     /**
@@ -266,6 +266,17 @@ export class AstScope
             if( scope.failedValues.has( name ) ) return true;
         }
         return false;
+    }
+
+    /** the declaration a failed `name` stands for, in the symbol index (a check) */
+    failedValueSymbol( name: string ): PebbleSymbol | undefined
+    {
+        for( let scope: AstScope | undefined = this; scope !== undefined; scope = scope.parent )
+        {
+            if( scope.variables.has( name ) ) return undefined;
+            if( scope.failedValues.has( name ) ) return scope.failedValues.get( name );
+        }
+        return undefined;
     }
 
     /**

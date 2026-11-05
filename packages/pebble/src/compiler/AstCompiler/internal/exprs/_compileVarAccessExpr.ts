@@ -20,7 +20,11 @@ export function _compileVarAccessExpr(
         );
 
         // a declaration that failed: its own error says why
-        if( ctx.scope.resolvesToFailedValue( expr.text ) ) return undefined;
+        if( ctx.scope.resolvesToFailedValue( expr.text ) )
+        {
+            referenceSymbol( ctx.program, expr.range, ctx.scope.failedValueSymbol( expr.text ) );
+            return undefined;
+        }
 
         return ctx.error(
             DiagnosticCode._0_is_not_defined,

@@ -72,7 +72,7 @@ export interface DeclareSymbol {
  */
 export class SymbolIndex
 {
-    /** key: file, name start, kind */
+    /** key: file, name start */
     private readonly declared = new Map<string, PebbleSymbol>();
     /** key: file, start, end */
     private readonly refs = new Map<string, PebbleSymbolRef>();
@@ -80,13 +80,18 @@ export class SymbolIndex
     private readonly members = new Map<PebbleSymbol, PebbleSymbol[]>();
     /** key: a struct's name and file uid, the same for both its TIR types (data and SoP) */
     private readonly structs = new Map<string, PebbleSymbol>();
-    /** key: TIR function name (methods, named through their type) */
-    private readonly functions = new Map<string, PebbleSymbol>();
+    /** key: a file; the files it exports everything of (`export * from`) */
+    private readonly starExports = new Map<string, string[]>();
+    /** the names `context` can be destructured into, in each contract method's body */
+    private readonly contextFields: { range: SourceRange; names: readonly string[] }[] = [];
+    /** key: a TIR name the compiler gave a declaration (a method's function, a contract param) */
+    private readonly tirNames = new Map<string, PebbleSymbol>();
 
     /**
-     * The symbol declared at `nameRange`. A declaration compiled again (a generic body, once per
-     * instantiation) gets the same symbol. A name the source does not have at `nameRange` (made
-     * up by the compiler, anonymous) declares nothing.
+     * The symbol declared at `nameRange`. A name declares one symbol: one compiled again (a
+     * generic body, once per instantiation) or declared again in another form (a contract method's
+     * parameter, then the redeemer field the compiler makes of it) gets the first one. A name the
+     * source does not have at `nameRange` (made up by the compiler, anonymous) declares nothing.
      */
     declare( info: DeclareSymbol ): PebbleSymbol | undefined
     {
@@ -95,7 +100,7 @@ export class SymbolIndex
         if( source === undefined || name.length === 0 || isInternalName( name ) ) return undefined;
         if( nameRange.source.text.slice( nameRange.start, nameRange.end ) !== name ) return undefined;
 
-        const key = `${source}:${nameRange.start}:${kind}`;
+        const key = `${source}:${nameRange.start}`;
         const existing = this.declared.get( key );
         if( existing )
         {
@@ -136,15 +141,33 @@ export class SymbolIndex
         return type === undefined ? undefined : this.structs.get( `${type.name}_${type.fileUid}` );
     }
 
-    /** `symbol` is the function the program calls `tirName` (a method) */
-    registerFunction( tirName: string, symbol: PebbleSymbol ): void
+    /** the compiler calls `symbol` `tirName` (a method's function, a contract param's variable) */
+    registerTirName( tirName: string, symbol: PebbleSymbol ): void
     {
-        this.functions.set( tirName, symbol );
+        this.tirNames.set( tirName, symbol );
     }
 
-    functionOf( tirName: string ): PebbleSymbol | undefined
+    symbolOfTirName( tirName: string ): PebbleSymbol | undefined
     {
-        return this.functions.get( tirName );
+        return this.tirNames.get( tirName );
+    }
+
+    /** in `range` (a contract method's body), `context` has the fields `names` */
+    registerContextFields( range: SourceRange, names: readonly string[] ): void
+    {
+        if( sourceOf( range ) !== undefined ) this.contextFields.push({ range, names });
+    }
+
+    /** the fields `context` has at `offset` of `file` (a contract method's body), if any */
+    contextFieldsAt( file: string, offset: number ): readonly string[] | undefined
+    {
+        let best: { range: SourceRange; names: readonly string[] } | undefined = undefined;
+        for( const entry of this.contextFields )
+        {
+            if( sourceOf( entry.range ) !== file || !contains( entry.range, offset ) ) continue;
+            if( !best || span( entry.range ) < span( best.range ) ) best = entry;
+        }
+        return best?.names;
     }
 
     /** what `symbol` contains: a struct's constructors and methods, a constructor's fields */
@@ -153,11 +176,14 @@ export class SymbolIndex
         return this.members.get( symbol ) ?? [];
     }
 
-    /** `struct`'s constructor `name`. One named by the struct's own name is the struct itself */
+    /**
+     * `struct`'s constructor `name`. One named by the struct's own name is the struct itself; a
+     * contract's datum has its states as constructors.
+     */
     constructorOf( struct: PebbleSymbol | undefined, name: string ): PebbleSymbol | undefined
     {
         if( struct === undefined ) return undefined;
-        const ctor = this.membersOf( struct ).find( m => m.kind === "constructor" && m.name === name );
+        const ctor = this.membersOf( struct ).find( m => ( m.kind === "constructor" || m.kind === "struct" ) && m.name === name );
         return ctor ?? ( struct.name === name ? struct : undefined );
     }
 
@@ -263,8 +289,33 @@ export class SymbolIndex
         return [ ...byName.values() ].sort( ( a, b ) => visibleSpan( a ) - visibleSpan( b ) );
     }
 
-    /** the top-level declaration `name` of `file` (an import's target) */
-    topLevel( file: string, name: string ): PebbleSymbol | undefined
+    /** `file` exports everything `from` exports (`export * from`) */
+    registerStarExport( file: string, from: string ): void
+    {
+        const froms = this.starExports.get( file );
+        if( froms ) froms.push( from );
+        else this.starExports.set( file, [ from ] );
+    }
+
+    /**
+     * the top-level declaration `name` of `file` (an import's target): one of its own, or one it
+     * exports from another file with `export * from`
+     */
+    topLevel( file: string, name: string, seen: Set<string> = new Set() ): PebbleSymbol | undefined
+    {
+        seen.add( file );
+        const own = this.ownTopLevel( file, name );
+        if( own ) return own;
+        for( const from of this.starExports.get( file ) ?? [] )
+        {
+            if( seen.has( from ) ) continue;
+            const found = this.topLevel( from, name, seen );
+            if( found ) return found;
+        }
+        return undefined;
+    }
+
+    private ownTopLevel( file: string, name: string ): PebbleSymbol | undefined
     {
         let found: PebbleSymbol | undefined = undefined;
         for( const symbol of this.declared.values() )

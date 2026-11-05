@@ -253,7 +253,7 @@ function findPropInImpls(
 
     const funcExpr = ctx.program.functions.get( tirFuncName );
     if( !funcExpr ) return undefined;
-    referenceSymbol( ctx.program, propId.range, ctx.program.symbols?.functionOf( tirFuncName ) );
+    referenceSymbol( ctx.program, propId.range, ctx.program.symbols?.symbolOfTirName( tirFuncName ) );
 
     const fullSig = funcExpr.sig();
     const methodSig = new TirFuncT(

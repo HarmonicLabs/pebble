@@ -16,15 +16,16 @@ export function _compileBlockStmt(
     const tirStmts: TirStmt[] = [];
     for( const blockStmt of stmt.stmts )
     {
-        const nDiagnostics = blockCtx.diagnostics.length;
         const tirStmt = _compileStatement( blockCtx, blockStmt );
         if( !Array.isArray( tirStmt ) )
         {
-            // a check (`TypedProgram.checkOnly`) leaves out a statement whose error is reported,
-            // and goes on with the next (a declaration that failed is declared all the same)
+            // a check (`TypedProgram.checkOnly`) leaves out a statement that failed, and goes on
+            // with the next (a declaration that failed is declared all the same). Its error is
+            // reported: in it, or at the declaration of a name it uses that failed (whose uses
+            // report nothing more)
             if(
                 ctx.program.checkOnly
-                && blockCtx.diagnostics.slice( nDiagnostics ).some( d => d.category === DiagnosticCategory.Error )
+                && blockCtx.diagnostics.some( d => d.category === DiagnosticCategory.Error )
             ) continue;
             return undefined;
         }

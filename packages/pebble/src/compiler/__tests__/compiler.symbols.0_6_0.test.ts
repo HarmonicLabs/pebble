@@ -340,3 +340,155 @@ test adds() {
         expect( f.nameRange.start ).toBe( at( main, "f", 0 ) );
     });
 });
+
+describe("symbol index: contracts", () => {
+
+    const main = `contract Escrow {
+
+    param owner: PubKeyHash;
+    param price: int;
+
+    state Locked {
+        deadline: int;
+
+        spend unlock( amount: int ) {
+            const { tx, state: { deadline } } = context;
+            assert tx.requiredSigners.includes( this.owner );
+            assert amount >= this.price;
+            assert deadline > 0;
+        }
+    }
+
+    mint issue() {
+        const { tx } = context;
+        assert tx.requiredSigners.includes( this.owner );
+    }
+}
+`;
+
+    test("the contract, its params, states, fields and methods; `this.x` names a param", async () => {
+        const { symbols, diagnostics } = await check({ "src/main.pebble": main });
+        expect( diagnostics ).toEqual( [] );
+        const file = "/src/main.pebble";
+        const kinds = symbols.declarationsOf( file ).map( s => `${s.kind} ${s.name}` );
+        expect( kinds ).toEqual( expect.arrayContaining([
+            "contract Escrow", "contractParam owner", "contractParam price",
+            "struct Locked", "field deadline", "contractMethod unlock", "contractMethod issue",
+        ]) );
+        const owner = symbols.symbolAt( file, at( main, "owner", 1 ) )!; // `this.owner`, in unlock
+        expect( owner.kind ).toBe( "contractParam" );
+        expect( owner.nameRange.start ).toBe( at( main, "owner", 0 ) );
+        // the param's name only, not `this.`
+        expect( symbols.references( owner ).map( r => [ r.range.start, r.range.end ] ) ).toEqual(
+            [ 1, 2 ].map( n => [ at( main, "owner", n ), at( main, "owner", n ) + "owner".length ] )
+        );
+        const escrow = symbols.symbolAt( file, at( main, "Escrow" ) )!;
+        expect( owner.container ).toBe( escrow );
+    });
+
+    test("a method's parameter, the context's destructured names, a state's fields", async () => {
+        const { symbols } = await check({ "src/main.pebble": main });
+        const file = "/src/main.pebble";
+        const amount = symbols.symbolAt( file, at( main, "amount", 1 ) )!;
+        expect( amount.nameRange.start ).toBe( at( main, "amount", 0 ) );
+        const tx = symbols.symbolAt( file, at( main, "tx", 1 ) )!;
+        expect( tx.nameRange.start ).toBe( at( main, "tx", 0 ) );
+        expect( symbols.references( tx ).map( r => r.range.start ) ).toEqual([ at( main, "tx", 1 ) ]);
+        // `state: { deadline }` names the state's field, and declares `deadline`, read by the assert
+        const field = symbols.declarationsOf( file ).find( s => s.kind === "field" && s.name === "deadline" )!;
+        expect( field.nameRange.start ).toBe( at( main, "deadline", 0 ) );
+        expect( symbols.references( field ).map( r => r.range.start ) ).toContain( at( main, "deadline", 1 ) );
+        const local = symbols.symbolAt( file, at( main, "deadline", 2 ) )!;
+        expect( local.kind ).toBe( "constant" );
+        expect( local.nameRange.start ).toBe( at( main, "deadline", 1 ) );
+    });
+});
+
+describe("symbol index: re-exports and failed declarations", () => {
+
+    const lib = `export function g( x: int ): int { return x + 1; }
+export const K = 3;
+`;
+
+    test("an import through `export { } from` and `export * from` names the declaration", async () => {
+        const main = `import { g } from "./named";
+import { K as k } from "./star";
+
+export function f( x: int ): int { return g( x ) + k; }
+`;
+        const named = `export { g } from "./lib";`;
+        const star = `export * from "./lib";`;
+        const { symbols, diagnostics } = await check({ "src/main.pebble": main, "src/named.pebble": named, "src/star.pebble": star, "src/lib.pebble": lib });
+        expect( diagnostics ).toEqual( [] );
+        const g = symbols.definitionOf( symbols.symbolAt( "/src/main.pebble", at( main, "g", 1 ) )! );
+        expect( where( g ) ).toBe( `/src/lib.pebble:${at( lib, "g" )}` );
+        // renaming `g` renames it in the re-export, the import and the use
+        expect( symbols.references( g ).map( r => `${r.range.source.absoluteProjPath}:${r.range.start}` ) ).toEqual([
+            `/src/main.pebble:${at( main, "g", 0 )}`,
+            `/src/main.pebble:${at( main, "g", 1 )}`,
+            `/src/named.pebble:${at( named, "g" )}`,
+        ]);
+        const k = symbols.definitionOf( symbols.symbolAt( "/src/main.pebble", at( main, "k", 1 ) )! );
+        expect( where( k ) ).toBe( `/src/lib.pebble:${at( lib, "K" )}` );
+    });
+
+    // (an expression stops at its first error: `BAD + h( x )` would never compile `h( x )`)
+    test("a use of a declaration that failed names it", async () => {
+        const main = `import { h } from "./broken";
+
+const BAD = nope;
+
+export function f( x: int ): int {
+    const a = BAD;
+    return h( x );
+}
+`;
+        const broken = `export function h( x: Nope ): int { return 1; }`;
+        const { symbols } = await check({ "src/main.pebble": main, "src/broken.pebble": broken });
+        const bad = symbols.symbolAt( "/src/main.pebble", at( main, "BAD", 1 ) )!;
+        expect( bad.nameRange.start ).toBe( at( main, "BAD", 0 ) );
+        const h = symbols.definitionOf( symbols.symbolAt( "/src/main.pebble", at( main, "h", 1 ) )! );
+        expect( where( h ) ).toBe( `/src/broken.pebble:${at( broken, "h" )}` );
+    });
+});
+
+describe("symbol index: what editors complete", () => {
+
+    test("a function's parameters are its members, in order", async () => {
+        const main = `export function area( w: int, h: int ): int { return w * h; }
+`;
+        const { symbols } = await check({ "src/main.pebble": main });
+        const area = symbols.symbolAt( "/src/main.pebble", at( main, "area" ) )!;
+        expect( symbols.membersOf( area ).map( m => `${m.kind} ${m.name}` ) ).toEqual([ "parameter w", "parameter h" ]);
+        // still visible in the body
+        expect( symbols.visibleAt( "/src/main.pebble", main.indexOf( "w * h" ) ).map( s => s.name ) ).toEqual( expect.arrayContaining([ "w", "h" ]) );
+    });
+
+    test("the fields `context` has in a contract method, as the compiler maps them", async () => {
+        const main = `contract C {
+    param owner: PubKeyHash;
+
+    state Open {
+        n: int;
+        spend close() {
+            const { tx } = context;
+            assert tx.requiredSigners.includes( this.owner );
+        }
+    }
+
+    mint issue() {
+        const { tx } = context;
+        assert tx.requiredSigners.includes( this.owner );
+    }
+}
+`;
+        const { symbols, diagnostics } = await check({ "src/main.pebble": main });
+        expect( diagnostics ).toEqual( [] );
+        const inClose = symbols.contextFieldsAt( "/src/main.pebble", main.indexOf( "const { tx }" ) )!;
+        expect( inClose ).toEqual( expect.arrayContaining([ "tx", "state", "spendingRef" ]) );
+        const inIssue = symbols.contextFieldsAt( "/src/main.pebble", main.lastIndexOf( "const { tx }" ) )!;
+        expect( inIssue ).toEqual( expect.arrayContaining([ "tx", "policy" ]) );
+        expect( inIssue ).not.toContain( "state" );
+        expect( symbols.contextFieldsAt( "/src/main.pebble", main.indexOf( "param owner" ) ) ).toBeUndefined();
+    });
+});

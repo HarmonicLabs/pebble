@@ -770,7 +770,7 @@ export class AstCompiler extends DiagnosticEmitter
                 range: method.range,
                 container: possibleTirTypes.symbol,
             });
-            if( methodSymbol ) this.program.symbols?.registerFunction( tirMethodName, methodSymbol );
+            if( methodSymbol ) this.program.symbols?.registerTirName( tirMethodName, methodSymbol );
 
             if( typeMethodsMap.has( astMethodName ) )
             {
@@ -934,7 +934,7 @@ export class AstCompiler extends DiagnosticEmitter
         const infos = topLevelScope.variables.get( astName );
         if( infos?.symbol ) infos.symbol.exported = true;
         if( infos ) srcExports.defineValue( infos, astName );
-        else srcExports.defineFailedValue( astName );
+        else srcExports.defineFailedValue( astName, topLevelScope.failedValues.get( astName ) );
     }
 
     private _collectTopLevelFuncDeclSig(
@@ -991,7 +991,7 @@ export class AstCompiler extends DiagnosticEmitter
         if( symbol && sig instanceof TirFuncT ) symbol.type = sig;
         if( astFuncExpr.signature.returnType && !( sig instanceof TirFuncT ) )
         {
-            topLevelScope.defineFailedValue( astFuncName );
+            topLevelScope.defineFailedValue( astFuncName, symbol );
             if( exportRange && srcExports ) this._exportFailedDeclaration( astFuncName, topLevelScope, srcExports );
             return undefined;
         }
@@ -1004,7 +1004,7 @@ export class AstCompiler extends DiagnosticEmitter
         if( !funcExpr )
         {
             if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: astFuncName, type: sig, symbol });
-            else topLevelScope.defineFailedValue( astFuncName );
+            else topLevelScope.defineFailedValue( astFuncName, symbol );
             if( exportRange && srcExports ) this._exportFailedDeclaration( astFuncName, topLevelScope, srcExports );
             return undefined;
         }
@@ -1402,6 +1402,15 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     /**
+     * `decl`, a struct `registerInternalTypeDecl` registered, is `symbol` in the symbol index (the
+     * struct a contract state is read as)
+     */
+    registerInternalStructSymbol( decl: StructDecl, symbol: PebbleSymbol | undefined ): void
+    {
+        if( symbol ) this.program.symbols?.registerStruct( decl.name.text, this._internalDeclSrcUid, symbol );
+    }
+
+    /**
      * registers the type-level symbols of every `export contract` in the
      * file: the state-datum union (under the contract's own name), the
      * merged direct redeemer union and per-state redeemer unions (under
@@ -1483,6 +1492,7 @@ export class AstCompiler extends DiagnosticEmitter
         const cached = this._derivedContractTypes.get( contractDecl );
         if( cached !== undefined ) return cached ?? undefined;
 
+        this._declareContractSymbols( contractDecl, scope, srcUid );
         const derived = deriveContractTypes( this, contractDecl );
         if( !derived )
         {
@@ -1508,6 +1518,89 @@ export class AstCompiler extends DiagnosticEmitter
 
         this._derivedContractTypes.set( contractDecl, derived );
         return derived;
+    }
+
+    /**
+     * A contract in the symbol index: its params, its states (structs, with their fields), its
+     * methods and their parameters. Its datum (`getOrDeriveContractTypes`) is a struct whose
+     * constructors are the states, named by the contract: the contract stands for it, so a
+     * destructured state field (`state: { deadline }`) names the state's field.
+     */
+    private _declareContractSymbols(
+        decl: ContractDecl,
+        scope: AstScope,
+        srcUid: string
+    ): { contract: PebbleSymbol, params: Map<string, PebbleSymbol> } | undefined
+    {
+        const symbols = this.program.symbols;
+        if( !symbols ) return undefined;
+        const contract = declareSymbol( this.program, scope, {
+            name: decl.name.text,
+            kind: "contract",
+            nameRange: decl.name.range,
+            range: decl.range,
+        });
+        if( !contract ) return undefined;
+        symbols.registerStruct( decl.name.text, srcUid, contract );
+
+        const params = new Map<string, PebbleSymbol>();
+        for( const param of decl.params )
+        {
+            const symbol = declareSymbol( this.program, scope, {
+                name: param.name.text,
+                kind: "contractParam",
+                nameRange: param.name.range,
+                range: param.range,
+                container: contract,
+            });
+            if( symbol ) params.set( param.name.text, symbol );
+        }
+        const declareMethods = ( methods: FuncDecl[], container: PebbleSymbol ) => {
+            for( const method of methods )
+            {
+                const symbol = declareSymbol( this.program, scope, {
+                    name: method.expr.name.text,
+                    kind: "contractMethod",
+                    nameRange: method.expr.name.range,
+                    range: method.range,
+                    container,
+                });
+                // the redeemer fields the compiler makes of them declare them again, as constants
+                if( symbol ) for( const p of method.expr.signature.params ) if( p instanceof SimpleVarDecl )
+                    declareSymbol( this.program, scope, {
+                        name: p.name.text,
+                        kind: "parameter",
+                        nameRange: p.name.range,
+                        range: p.range,
+                        visibleIn: { start: p.range.end, end: method.range.end },
+                        container: symbol,
+                    });
+            }
+        };
+        declareMethods( [
+            ...decl.spendMethods, ...decl.mintMethods, ...decl.certifyMethods, ...decl.withdrawMethods,
+            ...decl.proposeMethods, ...decl.voteMethods, ...decl.guardMethods,
+        ], contract );
+        for( const state of decl.stateDecls )
+        {
+            const stateSymbol = declareSymbol( this.program, scope, {
+                name: state.name.text,
+                kind: "struct",
+                nameRange: state.name.range,
+                range: state.range,
+                container: contract,
+            });
+            if( !stateSymbol ) continue;
+            for( const field of state.fields ) declareSymbol( this.program, scope, {
+                name: field.name.text,
+                kind: "field",
+                nameRange: field.name.range,
+                range: field.range,
+                container: stateSymbol,
+            });
+            declareMethods( state.spendMethods, stateSymbol );
+        }
+        return { contract, params };
     }
 
     /**
@@ -2247,7 +2340,7 @@ export class AstCompiler extends DiagnosticEmitter
         mergeMap( from.interfaces, into.interfaces );
         mergeMap( from.namespaces, into.namespaces );
         mergeMap( from.contracts,  into.contracts  );
-        for( const name of from.failedValues ) into.defineFailedValue( name );
+        for( const [ name, symbol ] of from.failedValues ) into.defineFailedValue( name, symbol );
     }
 
     /**
@@ -2281,7 +2374,7 @@ export class AstCompiler extends DiagnosticEmitter
             if( from.failedValues.has( srcName ) )
             {
                 found = true;
-                into.defineFailedValue( dstName );
+                into.defineFailedValue( dstName, from.failedValues.get( srcName ) );
             }
 
             if( !found ) this.error(
@@ -2356,7 +2449,7 @@ export class AstCompiler extends DiagnosticEmitter
             {
                 const importAbsPath = getAbsolutePath( stmt.fromPath.string, srcAbsPath );
                 const importedSymbols = importAbsPath === undefined ? undefined : this.program.getExportedSymbols( importAbsPath );
-                if( !importedSymbols )
+                if( importAbsPath === undefined || !importedSymbols )
                 {
                     if( deferTo ) deferTo.push( stmt );
                     else this.error(
@@ -2370,9 +2463,20 @@ export class AstCompiler extends DiagnosticEmitter
                 }
 
                 if( stmt instanceof ExportStarStmt )
+                {
                     this._reExportAllSymbols( importedSymbols, srcExports, stmt );
+                    this.program.symbols?.registerStarExport( srcAbsPath, importAbsPath );
+                }
                 else
+                {
                     this._reExportNamedSymbols( importedSymbols, srcExports, stmt );
+                    // each name it exports, standing for the declaration in the other file
+                    for( const member of stmt.members )
+                    {
+                        const symbol = this._declareImportSymbol( member, member.asIdentifier?.text ?? member.identifier.text, member.identifier.text, importAbsPath, stmt.range );
+                        if( symbol ) symbol.exported = true;
+                    }
+                }
 
                 void stmts.splice( i, 1 );
                 i--;
@@ -2534,7 +2638,7 @@ export class AstCompiler extends DiagnosticEmitter
                 if( isInterface ) srcImportsScope.interfaces.set( localName, importedSymbols.interfaces.get( declName )! );
                 if( isNamespace ) srcImportsScope.defineNamespace({ ...importedSymbols.namespaces.get( declName )!, name: localName });
                 if( isContract ) srcImportsScope.defineContract({ ...importedSymbols.contracts.get( declName )!, name: localName });
-                if( isFailed ) srcImportsScope.defineFailedValue( localName );
+                if( isFailed ) srcImportsScope.defineFailedValue( localName, importSymbol ?? importedSymbols.failedValues.get( declName ) );
             }
 
             // remove from array so we don't process it again
@@ -2788,6 +2892,9 @@ export class AstCompiler extends DiagnosticEmitter
 
             const internalName = getUniqueInternalName( param.name.text );
             paramsInternalNamesMap.set( astName, internalName );
+            // `this.<param>` reads the variable of this name (see `_deriveContractBody`)
+            const paramSymbol = this._declareContractSymbols( contractDecl, userScope, srcUid )?.params.get( astName );
+            if( paramSymbol ) this.program.symbols?.registerTirName( internalName, paramSymbol );
 
             funcParams[i] = new SimpleVarDecl(
                 new Identifier( internalName, param.name.range ),

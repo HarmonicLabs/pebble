@@ -105,7 +105,7 @@ export function _compileSimpleVarDecl(
             isConstant: decl.isConst(),
             symbol
         }, astName );
-        else ctx.scope.defineFailedValue( astName );
+        else ctx.scope.defineFailedValue( astName, symbol );
         return undefined;
     }
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
@@ -133,14 +133,26 @@ export function _compileSimpleVarDecl(
         decl.sourceName ?? ( tirName === astName ? undefined : astName )
     );
 }
-/** `decl` in the symbol index: a parameter where a function's scope starts, else by `const` */
+/**
+ * `decl` in the symbol index: a parameter where a function's scope starts (its function, the
+ * binding the scope declares first for its own name, contains it), else by `const`
+ */
 function _declareVarSymbol( ctx: AstCompilationCtx, decl: SimpleVarDecl, type: TirType | undefined ): PebbleSymbol | undefined
 {
+    if( ctx.program.symbols === undefined ) return undefined;
+    const isParam = ctx.scope.isFunctionBoundary;
+    let container: PebbleSymbol | undefined = undefined;
+    if( isParam ) for( const infos of ctx.scope.variables.values() )
+    {
+        const kind = infos.symbol?.kind;
+        if( kind === "function" || kind === "method" ) { container = infos.symbol; break; }
+    }
     return declareSymbol( ctx.program, ctx.scope, {
         name: decl.name.text,
-        kind: ctx.scope.isFunctionBoundary ? "parameter" : decl.isConst() ? "constant" : "variable",
+        kind: isParam ? "parameter" : decl.isConst() ? "constant" : "variable",
         nameRange: decl.name.range,
         range: decl.range,
+        container,
         type,
     });
 }
