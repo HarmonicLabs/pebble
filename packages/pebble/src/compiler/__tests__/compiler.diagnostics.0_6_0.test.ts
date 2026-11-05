@@ -78,6 +78,18 @@ describe("parser messages (0.6.0)", () => {
         expect( diagnostics.map( d => d.text ).join( "\n" ) ).not.toContain( "'A' is not defined" );
     });
 
+    test.each([
+        [ "a body with a type error", `function g(): int { return #00; }\nexport function f(): int { return g() + 1; }`, [ 2322 ] ],
+        [ "a body with an undefined name", `function g( x: int ): int { return nope + x; }\nexport function f(): int { return g( 1 ) + g( 2 ); }`, [ 256 ] ],
+        [ "a parameter of an undefined type", `function g( x: Nope ): int { return 1; }\nexport function f(): int { return g( 1 ); }`, [ 256 ] ],
+    ])( "a function with %s: that error only, its callers do not report it undefined", async ( _, src, codes ) => {
+        // each call reported "'g' is not defined"
+        const { ok, diagnostics } = await exportF( src );
+        expect( ok ).toBe( false );
+        expect( errors( diagnostics ).map( d => d.code ) ).toEqual( codes );
+        expect( diagnostics.map( d => d.text ).join( "\n" ) ).not.toContain( "'g' is not defined" );
+    });
+
     test("a use of a name that was never declared is still reported", async () => {
         const { diagnostics } = await exportF( `export function f(): int { return B + 1; }` );
         expect( errors( diagnostics ).map( d => d.text ) ).toEqual([ expect.stringContaining( "'B' is not defined" ) ]);

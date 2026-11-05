@@ -43,6 +43,7 @@ import { Identifier } from "../../ast/nodes/common/Identifier";
 import { ArrowKind } from "../../ast/nodes/expr/functions/ArrowKind";
 import { _compileFuncExpr } from "./internal/exprs/_compileFuncExpr";
 import { getDataFuncSignature } from "./internal/types/getDataFuncSignature";
+import { TirFuncT } from "../tir/types/TirNativeType/native/function";
 import { TirTypeParam } from "../tir/types/TirTypeParam";
 import { BodyStmt, TopLevelStmt } from "../../ast/nodes/statements/PebbleStmt";
 import { ContractDecl } from "../../ast/nodes/statements/declarations/ContractDecl";
@@ -925,13 +926,27 @@ export class AstCompiler extends DiagnosticEmitter
 
         const declContext = AstCompilationCtx.fromScope( this.program, topLevelScope );
 
+        // the signature first: a function whose body has an error is still declared, with its
+        // type, so a call to it does not report it undefined (without a return type, the
+        // signature needs the body: it is declared as failed)
+        const sig = astFuncExpr.signature.returnType ? getDataFuncSignature( declContext, astFuncExpr.signature ) : undefined;
+        if( astFuncExpr.signature.returnType && !( sig instanceof TirFuncT ) )
+        {
+            topLevelScope.defineFailedValue( astFuncName );
+            return undefined;
+        }
         const funcExpr = _compileFuncExpr(
             declContext,
             astFuncExpr,
-            undefined, // sig
+            sig,
             false // isMethod
         );
-        if( !funcExpr ) return undefined;
+        if( !funcExpr )
+        {
+            if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: astFuncName, type: sig });
+            else topLevelScope.defineFailedValue( astFuncName );
+            return undefined;
+        }
 
         this.program.functions.set(
             tirFuncName,
