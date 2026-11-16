@@ -316,8 +316,8 @@ function mkBoolSample( v: boolean ): TypedSample
         show: v ? "true" : "false",
         term() { return UPLCConst.bool( v ); },
         runtime() { return v; },
-        // convention from `_boolToData`: true = Constr 0, false = Constr 1
-        data() { return new DataConstr( v ? 0 : 1, [] ); },
+        // as `_boolToData` encodes it (the ledger's encoding): false = Constr 0, true = Constr 1
+        data() { return new DataConstr( v ? 1 : 0, [] ); },
         shrinks() { return v ? [ mkBoolSample( false ) ] : []; },
     };
 }

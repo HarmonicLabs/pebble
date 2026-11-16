@@ -253,14 +253,20 @@ const _mkUnitData = new IRHoisted(
     )
 );
 
+// A boolean as data is `Constr 0 []` for `false` and `Constr 1 []` for `true`: the ledger's
+// encoding (PlutusTx `Bool`: `False` is the first constructor), the one every script context
+// has for the booleans in it, and the one off-chain code writes. `_boolFromData`
+// (`TirFromDataExpr`) reads the same. (It was the other way round until 0.6.0: a datum's
+// `true` was a `false` for anything not compiled by pebble, and the ledger's own booleans,
+// like `IntervalBoundary.isInclusive`, were read inverted.)
 const bool_var_name = Symbol("bool");
 const _boolToData = new IRHoisted( new IRFunc(
     [ bool_var_name ], // bool
     _ir_apps(
         IRNative.strictIfThenElse,
         new IRVar( bool_var_name ), // bool
-        new IRHoisted( IRConst.data( new DataConstr( 0, [] ) ) ),
-        new IRHoisted( IRConst.data( new DataConstr( 1, [] ) ) )
+        new IRHoisted( IRConst.data( new DataConstr( 1, [] ) ) ), // true
+        new IRHoisted( IRConst.data( new DataConstr( 0, [] ) ) )  // false
     )
 ));
 

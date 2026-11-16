@@ -2,13 +2,17 @@ import { testOptions, COMPILER_VERSION } from "../../IR/toUPLC/CompilerOptions";
 import { createMemoryCompilerIoApi } from "../io/CompilerIoApi";
 import { Compiler } from "../Compiler";
 import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
-import { Application, parseUPLC, UPLCConst, UPLCTerm } from "@harmoniclabs/uplc";
+import { Application, constT, parseUPLC, UPLCConst, UPLCTerm } from "@harmoniclabs/uplc";
 import { CEKConst, Machine } from "@harmoniclabs/buildooor";
+import { DataConstr } from "@harmoniclabs/plutus-data";
 import { tirFindSopOptional } from "../tir/expressions/findSopOptional";
 import { TirNativeFunc } from "../tir/expressions/TirNativeFunc";
 import { TirInlineClosedIR } from "../tir/expressions/TirInlineClosedIR";
 import { bool_t, bytes_t, data_t, int_t } from "../tir/program/stdScope/stdScope";
 import { TirDataStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
+import { sampleForType } from "../test/fuzz/typedFuzzers";
+import { PRNG } from "../test/fuzz/PRNG";
+import { decodeValue, formatValue } from "../../debugger/renderValue";
 import { IRNativeTag } from "../../IR/IRNodes/IRNative/IRNativeTag";
 import { IRNative } from "../../IR/IRNodes/IRNative";
 import { IRApp, _ir_apps } from "../../IR/IRNodes/IRApp";
@@ -21,7 +25,7 @@ import type { IRTerm } from "../../IR/IRTerm";
 import { introduceCaseForDualHeadTailAndReturnRoot } from "../../IR/toUPLC/subRoutines/introduceCaseForDualHeadTailAndReturnRoot";
 
 // Regression tests for the bugs found while writing the Jacquard L2 kernel
-// against 0.6.0-dev0 (BUGs 49-59 and 61-64, see PEBBLE_BUGS.md). Each `describe` names
+// against 0.6.0-dev0 (BUGs 49-64, see PEBBLE_BUGS.md). Each `describe` names
 // its bug; a case asserts the EVALUATED result, or the exact diagnostic, not
 // only that the source compiles. The cases that pass on the compiler before
 // the fixes are the controls: what already worked, what is still refused.
@@ -78,6 +82,21 @@ async function contractErrors( src: string ): Promise<string[]> {
     const errors = c.diagnostics.map( d => d.toString() ).filter( d => d.startsWith( "ERROR" ) );
     // a failure with no diagnostic is still a failure
     return errors.length === 0 && failure !== undefined ? [ failure ] : errors;
+}
+
+/** a fuzzed input, as text: whatever shape the runner reports it in */
+function formatInput( value: unknown ): string {
+    const seen = new Set<unknown>();
+    const show = ( v: unknown ): string => {
+        if( typeof v === "bigint" ) return v.toString();
+        if( typeof v !== "object" || v === null ) return String( v );
+        if( seen.has( v ) ) return "<cycle>";
+        seen.add( v );
+        if( v instanceof Uint8Array ) return "#" + toHex( v );
+        if( Array.isArray( v ) ) return "[" + v.map( show ).join( ", " ) + "]";
+        return "{ " + Object.entries( v as object ).map( ([ k, x ]) => k + ": " + show( x ) ).join( ", " ) + " }";
+    };
+    return show( value );
 }
 
 jest.setTimeout( 120_000 );
@@ -1192,6 +1211,116 @@ export function main( n: int ): int {
     assert n > 1000 || limit.contains( total );
     return n;
 }`) ).length ).toBe( 1 );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 60 — a `boolean` struct field is encoded as the docs say
+// --------------------------------------------------------------------------
+describe("BUG 60 — `boolean` as data: false is Constr 0, true is Constr 1", () => {
+
+    test("a struct field", async () => {
+        const uplc = await compileFn(`
+struct Flags { a: boolean, b: boolean }
+export function main( n: int ): bytes {
+    const f = Flags.Flags{ a: n > 0, b: n < 0 };
+    return std.builtins.serialiseData( f.toData() );
+}`);
+        // [ true, false ] = [ Constr 1 [], Constr 0 [] ]
+        expect( evalBytes1( uplc, 3n ) ).toBe( "9fd87a80d87980ff" );
+    });
+
+    test("a boolean of the ledger's is read as the ledger means it", async () => {
+        // what a script context has for the lower bound of `[ n, +inf )`: finite, inclusive.
+        // `isInclusive` was read `false`
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const inclusive = std.builtins.constrData( 1, [] ); // PlutusTx True
+    const exclusive = std.builtins.constrData( 0, [] ); // PlutusTx False
+    const finite = std.builtins.constrData( 1, [ n.toData() ] );
+    const closed = std.builtins.constrData( 0, [ finite, inclusive ] ) as IntervalBoundary;
+    const open = std.builtins.constrData( 0, [ finite, exclusive ] ) as IntervalBoundary;
+    return ( closed.isInclusive ? 10 : 0 ) + ( open.isInclusive ? 1 : 0 );
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 10n );
+    });
+
+    test("a boolean argument decoded from data, and one compared as data", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const yes = std.builtins.constrData( 1, [] ) as boolean;
+    const no = std.builtins.constrData( 0, [] ) as boolean;
+    return ( yes ? 100 : 0 ) + ( no ? 10 : 0 ) + ( ( n > 0 ).toData() == std.builtins.constrData( 1, [] ) ? 1 : 0 );
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 101n );
+    });
+
+    // the three other places the convention lived: the property-test fuzzers, which build
+    // the data a test receives, and the debugger, which shows it
+    test("a fuzzed boolean is the data the compiler reads", () => {
+        const prng = new PRNG( 7 );
+        const seen = new Set<boolean>();
+        for( let i = 0; i < 40; i++ )
+        {
+            const sample = sampleForType( bool_t, prng );
+            const value: boolean = sample.runtime();
+            seen.add( value );
+            const data = sample.data() as DataConstr;
+            expect( data ).toBeInstanceOf( DataConstr );
+            expect( data.fields.length ).toBe( 0 );
+            expect( Number( data.constr ) ).toBe( value ? 1 : 0 );
+            expect( sample.show ).toBe( value ? "true" : "false" );
+        }
+        expect( seen.size ).toBe( 2 );
+    });
+
+    test("a property test sees the boolean its report shows", async () => {
+        const ioApi = createMemoryCompilerIoApi({
+            sources: new Map([["main.pebble", fromUtf8(`
+struct S { S { flag: boolean, n: int } }
+test flag_is_never_set( s: S ) {
+    assert !s.flag else "set";
+}`)]]),
+            useConsoleAsOutput: false,
+        });
+        const c = new Compiler( ioApi, { ...testOptions, compilerVersion: COMPILER_VERSION } );
+        const [ result ] = await c.test({ entry: "main.pebble", root: "/", propertyIterations: 30, seed: 11 } as any );
+        expect( result.skippedReason ).toBeUndefined();
+        // an iteration fails exactly when the input it reports has the flag set
+        let failed = 0;
+        for( const it of result.iterations )
+        {
+            expect( it.inputs ).toHaveLength( 1 );
+            const shown = formatInput( it.inputs![0].value );
+            expect( shown ).toMatch( /flag: (true|false)/ );
+            expect( it.passed ).toBe( !/flag: true/.test( shown ) );
+            if( !it.passed ) failed++;
+        }
+        expect( failed ).toBeGreaterThan( 0 );
+    });
+
+    test("the debugger shows a boolean read from data as the compiler reads it", () => {
+        const yes = new CEKConst( constT.data, new DataConstr( 1, [] ) );
+        const no = new CEKConst( constT.data, new DataConstr( 0, [] ) );
+        expect( formatValue( decodeValue( yes, bool_t ) ) ).toBe( "true" );
+        expect( formatValue( decodeValue( no, bool_t ) ) ).toBe( "false" );
+
+        const flags = new TirDataStructType( "Flags", "", [
+            new TirStructConstr( "Flags", [ new TirStructField( "a", bool_t ), new TirStructField( "b", bool_t ) ] )
+        ], new Map() );
+        const value = new CEKConst( constT.data, new DataConstr( 0, [ new DataConstr( 1, [] ), new DataConstr( 0, [] ) ] ) );
+        expect( formatValue( decodeValue( value, flags ) ) ).toBe( "Flags{ a: true, b: false }" );
+    });
+
+    test("round trip through data keeps the value", async () => {
+        const uplc = await compileFn(`
+struct Flags { a: boolean, b: boolean }
+export function main( n: int ): int {
+    const f = Flags.Flags{ a: n > 0, b: n < 0 };
+    const back = f.toData() as Flags;
+    return ( back.a ? 10 : 0 ) + ( back.b ? 1 : 0 );
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 10n );
     });
 });
 

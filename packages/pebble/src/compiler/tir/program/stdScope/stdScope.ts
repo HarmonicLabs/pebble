@@ -2049,9 +2049,9 @@ export function populatePreludeScope(
     {
         const extPair = Symbol("bound_extPair");
         // isInclusive: bool data in the LEDGER encoding (PlutusTx `Bool`:
-        // False = Constr 0, True = Constr 1). NOTE this is the opposite of
-        // pebble's own bool data convention — these helpers read the
-        // ledger-provided ScriptContext, so the ledger convention applies.
+        // False = Constr 0, True = Constr 1), which is how pebble encodes
+        // every boolean (`_boolToData` / `_boolFromData`). Read here from
+        // the constructor index directly.
         const inclusiveIR = _ir_apps(
             IRNative.equalsInteger,
             _ir_apps(

@@ -269,10 +269,13 @@ const _mkUnit = new IRHoisted(
 const _boolFromDataDataSym = Symbol("boolData");
 // Case(unConstrData(data), [\idxSym _fieldsSym ->
 //     Case(idxSym, [
-//         IRConst.bool(true),   -- ctor 0 → true   (preserves equalsInteger(_, 0) semantics)
-//         IRConst.bool(false)   -- ctor 1 → false
+//         IRConst.bool(false),  -- ctor 0 → false
+//         IRConst.bool(true)    -- ctor 1 → true
 //     ])
 // ])
+// the ledger's encoding of a boolean (PlutusTx `Bool`: `False` is the first constructor),
+// the same `_boolToData` (`TirToDataExpr`) writes; any other constructor is not a boolean,
+// and fails
 const _boolFromDataIdxSym = Symbol("boolIdx");
 const _boolFromDataFieldsSym = Symbol("boolFields_unused");
 const _boolFromData = new IRHoisted( new IRFunc(
@@ -288,8 +291,8 @@ const _boolFromData = new IRHoisted( new IRFunc(
                 new IRCase(
                     new IRVar( _boolFromDataIdxSym ),
                     [
-                        IRConst.bool( true ),
-                        IRConst.bool( false )
+                        IRConst.bool( false ),
+                        IRConst.bool( true )
                     ]
                 )
             )

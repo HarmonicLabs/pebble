@@ -9,6 +9,23 @@ project it starts in, and a failing script now says where it failed in the Pebbl
 source, in `pebble test`, in buildooor and in any tool using
 `@harmoniclabs/plutus-machine` 3.1.0.
 
+### ⚠ BREAKING: a boolean as data is `Constr 0` when `false`
+
+A `boolean` converted to data is now `Constr 0 []` for `false` and `Constr 1 []` for
+`true`: what the documentation says, and what the ledger does (PlutusTx `Bool`). It was the
+other way round.
+
+- **A boolean of the ledger's was read inverted.** `IntervalBoundary.isInclusive` is a
+  `boolean`: `tx.validityInterval.from.isInclusive` was `false` for a closed bound. (The
+  `std.interval` helpers read the constructor themselves since 0.5.0 and were right.)
+- **A datum or redeemer built off chain from the documentation** ("Datum and Redeemer
+  Flow", rule 5) had its booleans read inverted by the script.
+- **What changes for an existing contract**: one with a `boolean` in a datum, a redeemer,
+  or any value it serialises or compares as data has a new hash, and reads the booleans of
+  UTxOs created for the old script inverted. Contracts with no boolean crossing data are
+  unchanged, byte for byte.
+- `pebble test` fuzzers and the debugger use the same encoding.
+
 ### Language
 
 Written as the documentation has them, and refused or broken until now (PEBBLE_BUGS 49-64):

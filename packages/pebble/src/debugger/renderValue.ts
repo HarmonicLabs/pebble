@@ -149,9 +149,9 @@ function decodeTypedData( d: Data, t: TirType, depth: number ): ValueNode | unde
     }
     if( t instanceof TirBoolT )
     {
-        // pebble's own encoding: constructor 0 is `true`
+        // the ledger's encoding, which is pebble's: constructor 0 is `false`, 1 is `true`
         if( d instanceof DataConstr && d.fields.length === 0 && d.constr <= BigInt( 1 ) )
-        return { kind: "bool", value: d.constr === BigInt( 0 ) };
+        return { kind: "bool", value: d.constr === BigInt( 1 ) };
         return undefined;
     }
     if( t instanceof TirStringT )
