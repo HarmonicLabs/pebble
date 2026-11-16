@@ -1267,3 +1267,517 @@ actually provides — and what the writeup should claim — is:
   real library hits it.
 
 ### 8. Example contracts — dropped from this list by the maintainer.
+
+---
+
+## BUGs 49–64 — found writing the Jacquard L2 kernel against 0.6.0-dev0 (2026-11-16)
+
+> **STATUS (fixed 2026-11-16, local build, not committed).** Thirteen of these
+> were hit while writing a ~3,500-line multi-file project (twelve contracts
+> sharing five libraries); most were first worked around in the contracts.
+> Three more (61–63) turned up while root-causing those. All sixteen are fixed
+> in the compiler, and the contracts are back to the code one would write
+> first. Regression coverage is in
+> `packages/pebble/src/compiler/__tests__/compiler.jacquardBugs.0_6_0.test.ts`
+> (112 tests; every one asserts the EVALUATED result, the exact diagnostic, or
+> the shape of the term a pass leaves). Run against the unmodified compiler
+> (`f846d866`), 89 of them fail, one never ends (BUG 51), and the 22 that pass
+> are the controls ("X still works", "Y is still refused") and a few shapes
+> that already worked. Full suite green (1303 passed). The examples, the four
+> masterpiece contracts and the UPLC-CAPE exports compile to the same bytes as
+> before.
+>
+> **One fix changes an encoding: BUG 60** (a boolean as data). Read it before
+> merging.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 49 | MEDIUM | the `else` arm of a `case` expression cannot read a variable or call a function: backend crash | FIXED 2026-11-16 |
+| 50 | LOW | `Some{}` (no field bound) as a `case` pattern: backend crash | FIXED 2026-11-16 |
+| 51 | CRITICAL | `match` with an `else:` arm: wrong value, a value of the wrong type, or a loop that never ends | FIXED 2026-11-16 |
+| 52 | HIGH | `find` on a list of ints or bytes returns an `Optional` nothing can read | FIXED 2026-11-16 |
+| 53 | MEDIUM | `using { … } = std.<namespace>` inside a function or a method: backend crash | FIXED 2026-11-16 |
+| 54 | MEDIUM | map literals (`{}`, `{ #01: 10 }`) are documented and not implemented | FIXED 2026-11-16 |
+| 55 | LOW | `Optional<T>.toData()` does not exist, although `ToData` is documented for it | FIXED 2026-11-16 |
+| 56 | MEDIUM | a function or constant is visible only below its declaration | FIXED 2026-11-16 |
+| 57 | LOW | `bytes + bytes` is refused, although documented as concatenation | FIXED 2026-11-16 |
+| 58 | LOW | `const RawConstr{ index, fields } = unConstrData( d )`, as documented, is "Invaild destructuring" | FIXED 2026-11-16 |
+| 59 | LOW | warning 6134 on a `const` that two statements read | FIXED 2026-11-16 |
+| 60 | HIGH | a boolean as data is `Constr 0` when `true`: the opposite of the docs and of the ledger | FIXED 2026-11-16 (⚠ encoding change) |
+| 61 | CRITICAL | two modules that each declare a function of the same name call each other's | FIXED 2026-11-16 |
+| 62 | MEDIUM | a method of an alias, called on a variable annotated with the alias: backend crash | FIXED 2026-11-16 |
+| 63 | LOW | a namespace's functions cannot use the functions and constants of their own module | FIXED 2026-11-16 |
+| 64 | HIGH | `xs.head()` and `xs.tail()` inside an `if` run when the `if` is not taken: a valid script fails on an empty list it never reads | FIXED 2026-11-16 |
+
+Not a compiler bug, reported here because it changes hashes: see
+"`serialiseData` and maps" at the end of this section.
+
+---
+
+### BUG 49 — MEDIUM: the `else` arm of a `case` expression cannot read its surroundings — FIXED (2026-11-16)
+
+> **FIXED.** `expressifyVars` rewrote the body of every NAMED arm of a
+> `TirCaseExpr` (in a child context that knows the pattern's fields) and
+> returned without touching `wildcardCase.body`. The `else` arm reached IR
+> generation with its variable accesses unresolved and its method calls
+> unlowered. It is now expressified like the others, in a child context of its
+> own (it binds nothing).
+
+```pebble
+function g( x: int ): int { return x + 1; }
+function pick( o: Optional<int> ): int {
+    return case o
+        is Some{ value } => value
+        else g( 5 )            // "variable 'g' is missing in [o]"
+        ;
+}
+```
+
+The same root gave `else std.value.zero.toData()` its own message, "property
+access cannot be translated to IR (missed expressify)". An `else` arm that was
+a literal worked, which is why the arm looked supported.
+
+---
+
+### BUG 50 — LOW: `Some{}` as a `case` pattern — FIXED (2026-11-16)
+
+> **FIXED.** `TirCaseExpr._sopStructToIR` (SoP `Optional` branch) looked up the
+> `Some` pattern's `value` field unconditionally and threw "case pattern not
+> expressified." when the pattern bound nothing. A pattern with no field now
+> takes the payload as an unused lambda parameter.
+
+```pebble
+function isSome( o: Optional<int> ): boolean {
+    return case o
+        is Some{} => true      // backend: "case pattern not expressified."
+        is None{} => false
+        ;
+}
+```
+
+`is Some{ value } => true` worked, at the price of a variable nobody reads.
+
+---
+
+### BUG 51 — CRITICAL: `match` with an `else:` arm miscompiles — FIXED (2026-11-16)
+
+> **FIXED.** `TirMatchStmt` keeps its `else:` arm apart from `cases`
+> (`wildcardCase`), and five analyses walked `cases` only:
+> `TirMatchStmt.definitelyTerminates`, `definitelyFails`, the two traversals of
+> `determineReassignedVariablesAndReturn` (and its own copy of
+> `definitelyFails`), `prependUpdatesToUserContinues`
+> (`expressifyForStmt`) and the "which arm goes on" search in `expressify`.
+> So a variable assigned in the `else:` arm was not part of the state the
+> `match` passes on, a `return` there was not a return of the function, and a
+> `continue` there skipped the loop's update. `TirMatchStmt.arms()` now returns
+> every arm, and all of them iterate it.
+
+```pebble
+struct S { A { x: int } B {} C {} }
+function f( s: S, n: int ): int {
+    let z = 0;
+    match( s ) {
+        when A{ x }: { z = x; }
+        else: { z = n * 2; }      // never reaches the code after the match
+    }
+    return z + 1;
+}
+```
+
+On the unmodified compiler, of the six regression cases: two fail at run time
+with a value of the wrong type (`multiplyInteger :: invalid arguments`), one
+returns nothing, one **never terminates** (`continue` in the `else:` arm of a
+`match` inside a `for`: the update is skipped), and the two where every arm
+returns pass. Nothing is reported at compile time.
+
+---
+
+### BUG 52 — HIGH: `find` on a list of native elements — FIXED (2026-11-16)
+
+> **FIXED.** A SoP `Optional`'s `Some` holds RAW DATA; every consumer
+> (`case`, `match`, `const Some{ value } = …`) decodes it on extraction. The
+> finder (`_findSopOptional`) is type-blind: its `Some{ head }` holds the
+> element as the list holds it, which is data for `List<TxIn>` and a native
+> value for `List<int>` / `List<bytes>`. For those every consumer died decoding
+> a non-data value. `xs.find` and `std.list.find` are now typed by the element
+> (`tir/expressions/findSopOptional.ts`): a native element is encoded before it
+> becomes the payload, as `std.list.at` already did. For elements that are data
+> the term is the bare native exactly as before (same bytes).
+
+```pebble
+const xs: List<int> = [ 1, 2, 3 ];
+match( xs.find( x => x == 3 ) ) {       // "unIData :: not data value"
+    when Some{ value }: { … }
+    when None{}: { … }
+}
+```
+
+Compiles clean, fails on chain; `case`, a destructuring `const Some{ … }` and
+`List<bytes>` (`unBData`) fail the same way.
+
+---
+
+### BUG 53 — MEDIUM: `using` a std namespace inside a body — FIXED (2026-11-16)
+
+> **FIXED.** Same root as BUG 61: see there. `bindNamespaceMember` declared the
+> member under the local name AS ITS OWN NAME (`{ ...variable, name: localName }`),
+> so every use pointed at a name the program does not define
+> (`__pebble__std__crypto__blake2b_256` is what it defines). The scope now maps
+> the local name to the member's own name; renames (`{ blake2b_256: hash }`) and
+> constants (`using { zero } = std.value`) work the same way.
+
+```pebble
+contract C {
+    spend check( point: bytes ) {
+        using { g1Uncompress, g1Compress } = std.crypto.bls12_381;
+        assert g1Compress( g1Uncompress( point ) ) == point;
+        // backend: "variable 'g1Compress' not found in the context"
+    }
+}
+```
+
+The docs' own `using { lookup, prepend } = std.linearMap;` example fails this
+way inside a function.
+
+---
+
+### BUG 54 — MEDIUM: map literals are documented and not implemented — FIXED (2026-11-16)
+
+> **FIXED (implemented).** "Builtin Values and Literals" and the `LinearMap`
+> page document `{}` and `{ #01: 10, #02: 20 }`; the parser accepted identifier
+> keys only and the compiler knew struct literals only (error 252). Now:
+> - the parser reads a key as an expression; a literal with any key that is
+>   not a bare identifier is a `LitMapExpr`;
+> - it compiles to its entries prepended, last first, to the empty map, through
+>   `std.linearMap.prepend` — no new kind of TIR expression, so every pass
+>   after the AST compiler is untouched;
+> - `{}` typed as a `LinearMap` is the empty constant list of pairs;
+> - with no expected type, the first entry gives the map's.
+>
+> **A bare identifier is never a key.** `{ a: 1 }` is how a struct's fields are
+> written; reading `a` as a variable in some literals would give one text two
+> meanings. It is refused with error 30212, which says to write `{ (a): 1 }`.
+> New diagnostics: 30211 (a map literal where another type is expected) and
+> 30212.
+
+```pebble
+const empty: LinearMap<bytes, int> = {};                  // ERROR 252
+const m: LinearMap<bytes, int> = { #01: 10, #02: 20 };    // "Identifier expected"
+```
+
+The docs need one sentence for the bare-identifier rule.
+
+---
+
+### BUG 55 — LOW: `Optional<T>.toData()` — FIXED (2026-11-16)
+
+> **FIXED.** The rule that gives every type its `.toData()` asked
+> `hasDataEncoding()`, which is `false` for the SoP representation of
+> `Optional<T>` (every local `Optional` is one). The type is the same as the
+> data-encoded one and the lowering for it existed (`_inlineToData`, which tags
+> the payload without re-encoding it). `getPropAccessReturnType` now offers
+> `toData` on a SoP `Optional` whose payload has a data encoding.
+
+```pebble
+const some: Optional<int> = Some{ value: 3 };
+some.toData();     // ERROR 2339 "Property 'toData' does not exist on type 'Optional<int>'"
+```
+
+"Builtin Interfaces" lists `Optional<T>` in the `ToData` table.
+
+---
+
+### BUG 56 — MEDIUM: declarations are visible only below themselves — FIXED (2026-11-16)
+
+> **FIXED.** `_collectAllTopLevelSignatures` did not collect signatures: it
+> compiled each function and constant in source order, body included, and
+> declared its name afterwards. A body saw only what was declared above it; an
+> exported function calling a private helper below it was "not defined".
+>
+> Functions and constants of a module (or of a namespace) are now declared
+> first (`AstScope.pendingValues`) and compiled by whichever comes first: their
+> own statement, or the first use of their name (`AstScope.resolveValue`).
+> Order no longer matters, for unannotated functions and constants too.
+>
+> A declaration found "compiling" by a use is being used in its own
+> definition. A function calling itself never gets there (its name resolves to
+> its own scope); two declarations defined in terms of each other do, and are
+> refused with the new error 30210 instead of "'isEven' is not defined" — they
+> have no closed term to compile to, and before this they could not even be
+> written.
+
+```pebble
+export function main( n: int ): int { return helper( n ) + K; }   // 'helper' is not defined
+function helper( x: int ): int { return x * 2; }
+const K = 3;
+```
+
+---
+
+### BUG 57 — LOW: `bytes + bytes` — FIXED (2026-11-16)
+
+> **FIXED.** `TirAddExpr` lowers ints, bytes and `Value`s; `_compileAddExpr`
+> typed ints and `Value`s only. One rule (`addRightOperandType`) now says what
+> `+` adds — ints, bytes (and strings: `appendString`), `Value`s — and `+=`
+> asks the same rule: it accepted ints only, so `total += value` on a `Value`
+> was refused while `total = total + value` compiled.
+
+```pebble
+const cat = #dead + #beef;     // ERROR 2322 "Type 'bytes' is not assignable to type 'int'"
+```
+
+The `bytes` page says `concat` is "the same as `a + other`".
+
+---
+
+### BUG 58 — LOW: `RawConstr{ index, fields }` — FIXED (2026-11-16)
+
+> **FIXED.** What `unConstrData` returns is a builtin pair, not a struct, and
+> named destructuring knew structs and `Optional`s. It is now destructured by
+> its two properties (`tir/types/utils/pairConstructorOf.ts`), in every form:
+> `RawConstr{ index, fields }`, renamed, one property only, without the name,
+> and with a property destructured further (`fields: [ a, b ]`). A
+> `LinearMapEntry` goes through the same code, which fixes
+> `for( const { key, value: P{ x } } of m )` on the way ("expected simple var
+> decl in entry deconstruction").
+
+```pebble
+const RawConstr{ index, fields } = std.builtins.unConstrData( d );   // ERROR 1356
+```
+
+The form appears four times in the docs.
+
+---
+
+### BUG 59 — LOW: warning 6134 on a `const` that two statements read — FIXED (2026-11-16)
+
+> **FIXED.** A letted value is computed where all its reads meet. `everyWayReads`
+> applied that to the branches of an `if` and to what follows it, but not to
+> the expression a statement evaluates itself. A read an assert's condition MAY
+> get to (an argument of a `Value` method) and a read in the next statement
+> meet at the assert; the analysis looked at each alone and found neither
+> certain. The condition of an `assert` and of an `if`, and what a `match`
+> matches, now count as parts. The regression tests also EVALUATE the three
+> shapes to check the value really is computed there.
+
+```pebble
+} else if( pay == outboxCred ) {
+    const total = toValue( value );        // WARNING 6134
+    assert o.value.contains( total );
+    custodyOut = custodyOut.union( total );
+}
+```
+
+---
+
+### BUG 60 — HIGH: a boolean as data is the other way round — FIXED (2026-11-16) ⚠ ENCODING CHANGE
+
+> **FIXED, by changing the encoding.** `_boolToData` / `_boolFromData` used
+> `true = Constr 0 []`, `false = Constr 1 []`. The docs ("Datum and Redeemer
+> Flow", rule 5) say the opposite, and so does the ledger (PlutusTx `Bool`:
+> `False` is the first constructor). Three things followed:
+> - **a boolean of the ledger's was read inverted**: `IntervalBoundary.isInclusive`
+>   is a `boolean` field of the prelude, and
+>   `tx.validityInterval.from.isInclusive` was `false` for a closed bound. (The
+>   `std.interval` helpers were special-cased in 0.5.0 to read the constructor
+>   index themselves, with a comment calling the rest "pebble's own bool data
+>   convention".)
+> - off-chain code written from the docs produced datums and redeemers whose
+>   booleans the script read inverted;
+> - no boolean could be exchanged with a script of any other language.
+>
+> Now `false = Constr 0 []` and `true = Constr 1 []`, in the four places the
+> convention lived: `TirToDataExpr`, `TirFromDataExpr`, the typed fuzzers'
+> boolean samples and the debugger's rendering.
+>
+> **What breaks:** a contract with a `boolean` in a datum, a redeemer or any
+> value it serialises has a new hash, and reads the booleans of existing UTxOs
+> inverted. Nothing in the test suite or in the examples pinned the old
+> encoding (all still pass, same bytes). If the old convention has to stay, the
+> change is four small hunks to revert — and then the docs and
+> `isInclusive` need the fix instead.
+
+```pebble
+struct Flags { a: boolean, b: boolean }
+serialiseData( Flags.Flags{ a: true, b: false }.toData() )
+// was 9f d87980 d87a80 ff        now 9f d87a80 d87980 ff
+```
+
+---
+
+### BUG 61 — CRITICAL: functions of two modules with the same name — FIXED (2026-11-16)
+
+> **FIXED.** `program.functions` is one map for the whole program. A top-level
+> function was registered under its module-unique name AND under its bare
+> source name, and the module's scope declared the value under the bare name;
+> expressify then resolved every access through that one map. The last module
+> to declare a `helper` owned the name: **the calls of every other module ran
+> its function.** Constants had been given unique names already; functions had
+> not.
+>
+> A function is now registered under its unique name only, and scopes map the
+> name the source uses to it (`defineValue( infos, astName )`): top-level
+> declarations, imports (the `as` alias no longer needs its own entry in the
+> global map), `using`, and generic templates (`program.genericTemplates` was
+> keyed by the bare name too). `_compileFuncExpr` no longer looks a signature
+> up by name in the global map. `export( "main" )` takes the function the ENTRY
+> module calls `main` — one it declares, or one it imports — instead of the
+> first `main` any module declares.
+
+```pebble
+// a.pebble                                      // b.pebble
+function helper( x: int ): int { return x + 1; }  function helper( x: int ): int { return x * 2; }
+export function a( x: int ): int {                export function b( x: int ): int {
+    return helper( x );                               return helper( x );
+}                                                 }
+// main: a( 5 ) * 1000 + b( 5 )   →  10010 (expected 6010): a ran b's helper
+```
+
+Silent, no diagnostic, and it depends on import order. The eight regression
+cases cover private/private, entry/library, imported/private, two aliases,
+generics, an unannotated function taking another module's signature, and the
+two `export` cases.
+
+---
+
+### BUG 62 — MEDIUM: a method of an alias on an annotated variable — FIXED (2026-11-16)
+
+> **FIXED.** `expressifyMethodCall` chose the method from the type of the
+> receiver AFTER expressifying it. `expressifyVars` replaces a variable with
+> the expression it was declared with, and `TirLettedExpr.type` is that
+> expression's type: `const a: Amount = n;` is `n`, an `int`, with none of the
+> methods `Amount` declares. The method is now the one the receiver's static
+> type has — the type the call was checked with.
+
+```pebble
+type Amount = int;
+type Amount implements { double( self ): int { return self * 2; } }
+export function main( n: int ): int {
+    const a: Amount = n;
+    return a.double();     // backend: "not implemented::expressifyMethodCall for type 'int'"
+}
+```
+
+`( n as Amount ).double()` and a parameter of type `Amount` worked.
+
+---
+
+### BUG 63 — LOW: a namespace cannot use its module's values — FIXED (2026-11-16)
+
+> **FIXED.** A namespace's functions were compiled with its types, in the types
+> pass, before any value of the module is declared: `inc` below was "not
+> defined" whether declared above or below the namespace. They are now declared
+> in the types pass and compiled with the values of the scope the namespace is
+> in (or by their first use, `Ns.member` and `using` included). Order does not
+> matter in either direction; mutual recursion through a namespace gets error
+> 30210.
+
+```pebble
+function inc( x: int ): int { return x + 1; }
+namespace M {
+    function twiceInc( x: int ): int { return inc( x ) * 2; }   // 'inc' is not defined
+}
+```
+
+---
+
+### BUG 64 — HIGH: the head and the tail of a list, read in a branch — FIXED (2026-11-16)
+
+> **FIXED.** `introduceCaseForDualHeadTailAndReturnRoot` replaces a
+> `headList( L )` and a `tailList( L )` of the same list with one
+> `case L of cons h t`. It put the case around the WHOLE body of the function
+> holding them, on the reasoning that the case fails on an empty list exactly
+> where the builtins did. That holds only where a builtin was certain to run.
+> With both calls inside an `if`, the list was destructured on every way
+> through the body, and the script failed on an empty list that the program
+> never read.
+>
+> The case now goes around a term that cannot be evaluated without evaluating
+> one of the calls: the body when a call is reached unconditionally (what the
+> pass always did, so those scripts are unchanged), otherwise the smallest term
+> holding all the calls when one of them is certain there (both in one arm).
+> Calls that are all behind different branches stay builtins.
+
+```pebble
+let due: List<int> = [ 3 ];
+let acc = 0;
+for( const o of [ 5, 1, 2, 7 ] ) {
+    if( o == n ) {
+        const t = due.head();
+        due = due.tail();
+        acc = acc + t;
+    }
+}
+// n = 2: the branch is taken once. At o = 7 `due` is empty and nothing reads
+// it — "case: constructor tag 1 out of range (1 branches)"
+```
+
+It took a loop to see it (the list has to become empty while the body keeps
+running), which is the shape of "consume one item of a list per matching
+output". The failure reports the `if` statement, not the read.
+
+---
+
+### Seen, and left alone
+
+- **`...rest` in a struct pattern** (`const P{ x, ...others } = p;`) parses,
+  and the name is never declared (`'others' is not defined`), for every struct.
+  It is not documented and has no obvious type; a design decision, not a fix.
+- **`case x as T is A{} => …` does not parse** ("A 'case' expression must have
+  at least one clause"): what is matched ends before `as`, as it ends before
+  `is`. `case ( x as T ) is …` works. Only the message could say so.
+- **A `const` can run before an `assert` written above it** when the `const`
+  is read later. Documented in 0.6.0; only the reported place of a failure
+  changes.
+- **`trace someBytes;` decodes the bytes as UTF-8** and fails on anything else;
+  `trace someBytes.show();` is the way. By design.
+
+### Not the compiler: `serialiseData` and maps
+
+`@harmoniclabs/plutus-data` (`dataToCbor`, 2.0.1 and the published 2.1.0)
+encodes a non-empty `Data` map with an INDEFINITE length (`bf … ff`):
+`src/toCbor.ts`, `new CborMap( …, { indefinite: data.map.length > 0 } )`.
+`plutus-machine` uses `dataToCbor` for the `serialiseData` builtin. A node
+encodes a map with a DEFINITE length; only lists and constructor fields are
+indefinite there. What says so:
+
+- **CIP-42** does not fix the length form itself: its CDDL
+  (`{ * plutus_data => plutus_data }`) admits both. It defines the builtin as
+  Plutus' existing `encodeData`, which it links.
+- **`encodeData`** (`plutus-core/src/PlutusCore/Data.hs`), at the commit the CIP
+  links and on master today: `Map es -> CBOR.encodeMapLen (fromIntegral $
+  length es) <> …`, next to `List ds -> encode ds` (the indefinite one).
+- **The Plutus Core specification** (appendix on the CBOR encoding of `data`):
+  `E(Map l) = head(5, length(l)) · …`, `E(List l) = indef(4) · … · 255`.
+- **Plutus' own test of the builtin**
+  (`untyped-plutus-core/test/Evaluation/Builtins/Definition.hs`):
+  `serialiseData( Map [(I 3, B ""), (B "hello", I -100)] )` is
+  `a2 03 40 45 68656c6c6f 38 63`. `plutus-data` and `plutus-machine` give
+  `bf 03 40 45 68656c6c6f 38 63 ff` for the same value.
+
+(The DECODER accepts both forms, so a datum written with an indefinite map is
+fine on chain; it is what `serialiseData` writes back that is definite.)
+
+So a script that hashes serialised data containing a map computes one hash
+under `pebble test` / buildooor and another on chain:
+
+```pebble
+const v = std.value.zero.insert( #aabb, #01, 5 );
+trace std.builtins.serialiseData( v.toData() ).show();
+// local machine:  bf42aabbbf410105ffff      a real node:  a142aabba1410105
+```
+
+Not touched (it is another package). Until it is fixed, a test that passes
+here says nothing about a hash over a map.
+
+### Not the compiler: buildooor and the ledger's balance
+
+`TxBuilder` (buildooor 0.3.0) computed the change as `inputs + mint - outputs -
+fee` (plus certificate deposits and refunds). Two terms of the ledger's value
+conservation were missing: a treasury donation (`paymentToTreasury`) on the
+produced side, and rewards withdrawn (a `withdrawal` with a non-zero amount) on
+the consumed side. Either transaction was refused with `ValueNotConservedUTxO`.
+Slashing a bond donates half of it, which is how it showed.
+
+Fixed in buildooor (`balanceWithdrawalsAndDonation`, with
+`TxBuilder.build.withdrawals_donation.test.ts`, 9 tests).
