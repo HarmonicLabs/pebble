@@ -167,17 +167,24 @@ function everyWayReads( queue: TirStmt[], forcing: Set<string>, program: TypedPr
 
         if( stmt instanceof TirReturnStmt ) return stmt.value !== undefined && reads( stmt.value );
         if( stmt instanceof TirFailStmt ) return true;
+        // The expression a statement evaluates HERE (an assert's condition, the condition of
+        // an `if`, what a `match` matches) is a part like the branches and what follows are:
+        // a read it holds, even one it may not get to (an argument of a function that may
+        // not need it, the right side of `||`), and a read in another part meet at the
+        // statement, and the value is computed before it.
         if( stmt instanceof TirAssertStmt )
         {
             if( reads( stmt.condition ) ) return true;
+            // a read in the condition and one in what follows: they meet here
+            if( holds( [ stmt.condition ] ) && holds( queue ) ) return true;
             continue;
         }
         if( stmt instanceof TirIfStmt )
         {
             if( reads( stmt.condition ) ) return true;
             const ways = [ branch( stmt.thenBranch ), branch( stmt.elseBranch ) ];
-            // reads in two of the branches and what follows: they meet here
-            if( [ ...ways, queue ].filter( holds ).length >= 2 ) return true;
+            // reads in two of the condition, the branches and what follows: they meet here
+            if( [ [ stmt.condition ], ...ways, queue ].filter( holds ).length >= 2 ) return true;
             return ways.every( way => everyWayReads( [ ...way, ...queue ], new Set( forcing ), program, rules ) );
         }
         if( stmt instanceof TirMatchStmt )
@@ -185,7 +192,7 @@ function everyWayReads( queue: TirStmt[], forcing: Set<string>, program: TypedPr
             if( reads( stmt.matchExpr ) ) return true;
             // a value no case matches fails
             const ways = [ ...stmt.cases.map( c => c.body ), ...( stmt.wildcardCase ? [ stmt.wildcardCase.body ] : [] ) ].map( branch );
-            if( [ ...ways, queue ].filter( holds ).length >= 2 ) return true;
+            if( [ [ stmt.matchExpr ], ...ways, queue ].filter( holds ).length >= 2 ) return true;
             return ways.every( way => everyWayReads( [ ...way, ...queue ], new Set( forcing ), program, rules ) );
         }
         if( stmt instanceof TirTraceStmt ) continue;

@@ -87,6 +87,27 @@ export interface IVariableInfos {
 }
 
 /**
+ * A value of a module (or of a namespace) whose declaration is not compiled yet.
+ *
+ * The functions and the constants a module declares are visible in the WHOLE module, whatever
+ * the order the source declares them in: a function can call one declared below it. So a
+ * declaration is compiled by whichever comes first: its own statement, or the first use of
+ * its name (see `AstScope.resolveValue`).
+ */
+export interface PendingValueDecl {
+    /**
+     * - `"pending"`: not compiled yet
+     * - `"compiling"`: being compiled right now; a use of the name found in this state is a
+     *   use inside the declaration's own definition, through the other declarations the
+     *   definition uses (see `AstScope.isBeingDeclared`)
+     * - `"done"`: compiled; the name is defined in the scope, or failed with its error reported
+     */
+    state: "pending" | "compiling" | "done";
+    /** compiles the declaration: defines its name in the scope, or reports why it cannot */
+    readonly compile: () => void;
+}
+
+/**
  * A namespace is a compile-time only construct that groups
  * symbols (values, types, functions, interfaces, and nested
  * namespaces) under a single name.
@@ -170,6 +191,12 @@ export class AstScope
      * ast name -> variable infos (name, type, isConstant)
      */
     readonly variables: Map<string, IVariableInfos> = new Map();
+    /**
+     * ast name -> the declaration of that value in this scope, while it may still have to
+     * be compiled (see `PendingValueDecl`). Only a module's (or a namespace's) top level
+     * has any.
+     */
+    readonly pendingValues: Map<string, PendingValueDecl> = new Map();
     /**
      * Flow-sensitive type narrowings active in this scope.
      * Variable name -> narrowed type (overrides the type recorded in `variables`
@@ -299,8 +326,97 @@ export class AstScope
         return false;
     }
 
+    /**
+     * declares that `astName` is a value of this scope, compiled by `compile` (see
+     * `PendingValueDecl`).
+     *
+     * @returns the declaration, or `undefined` if the scope has one for the name already: the
+     * statement is a redeclaration, to compile (and refuse) where the source has it
+     */
+    declarePendingValue( astName: string, compile: () => void ): PendingValueDecl | undefined
+    {
+        if( this._isReadonly || this.pendingValues.has( astName ) ) return undefined;
+        const decl: PendingValueDecl = { state: "pending", compile };
+        this.pendingValues.set( astName, decl );
+        return decl;
+    }
+
+    /**
+     * makes `decl`, a declaration of another scope, reachable by `astName` here too: the
+     * scope of a namespace's exported members holds the declarations of the namespace's own
+     */
+    sharePendingValue( astName: string, decl: PendingValueDecl ): void
+    {
+        if( this._isReadonly || this.pendingValues.has( astName ) ) return;
+        this.pendingValues.set( astName, decl );
+    }
+
+    /**
+     * for a member of this scope read DIRECTLY, not through `resolveValue` (a namespace's
+     * member, `Ns.member`): compiles its declaration, if it still has to be.
+     *
+     * @returns `false` if the declaration is being compiled right now: the read is part of
+     * the member's own definition (see `isBeingDeclared`)
+     */
+    ensureValueDeclared( name: string ): boolean
+    {
+        const pending = this.pendingValues.get( name );
+        if( !pending ) return true;
+        if( pending.state === "compiling" ) return false;
+        AstScope.compilePendingValue( pending );
+        return true;
+    }
+
+    /** compiles `decl`, unless it is compiled (or being compiled) already */
+    static compilePendingValue( decl: PendingValueDecl ): void
+    {
+        if( decl.state !== "pending" ) return;
+        decl.state = "compiling";
+        try { decl.compile(); }
+        finally { decl.state = "done"; }
+    }
+
+    /**
+     * `true` iff `name` resolves to a declaration of a module (or a namespace) that is being
+     * compiled right now.
+     *
+     * Declarations compile one inside the other only when the outer one USES the inner one,
+     * so the use asking is inside the definition of `name`: `name` is defined in terms of
+     * itself. (A function calling itself does not get here: its own name resolves to the
+     * function's scope, see `_compileFuncExpr`.)
+     */
+    isBeingDeclared( name: string ): boolean
+    {
+        for( let scope: AstScope | undefined = this; scope !== undefined; scope = scope.parent )
+        {
+            const pending = scope.pendingValues.get( name );
+            if( pending ) return pending.state === "compiling";
+            if( scope.variables.has( name ) ) return false;
+        }
+        return false;
+    }
+
+    /**
+     * the module-unique name (the key in `TypedProgram.functions`) of the function `name`
+     * stands for in this scope: one declared here, or imported, under that name
+     */
+    resolveFunctionName( name: string ): TirFuncName | undefined
+    {
+        return (
+            this.functions.get( name )
+            ?? this.parent?.resolveFunctionName( name )
+        );
+    }
+
     resolveValue( name: string ): ResolveValueResult | undefined
     {
+        // a value this scope declares, not compiled yet: this use is the first one
+        if( !this.variables.has( name ) )
+        {
+            const pending = this.pendingValues.get( name );
+            if( pending ) AstScope.compilePendingValue( pending );
+        }
+
         const narrowed = this.narrowings.get( name );
         const localValue = this.variables.get( name );
         if( localValue ) return {

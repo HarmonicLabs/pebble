@@ -16,7 +16,7 @@ import { DiagnosticCode } from "../../diagnostics/diagnosticMessages.generated";
 import { CompilerOptions, isLegacyEncodingStrategy, normalizeTargetPlutusVersion } from "../../IR/toUPLC/CompilerOptions";
 import { Parser } from "../../parser/Parser";
 import { CompilerIoApi, createMemoryCompilerIoApi } from "../io/CompilerIoApi";
-import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol } from "./scope/AstScope";
+import { AstFuncName, PossibleTirTypes, AstScope, TirFuncName, AstContractSymbol, PendingValueDecl } from "./scope/AstScope";
 import { TypedProgram } from "../tir/program/TypedProgram";
 import { TirAliasType } from "../tir/types/TirAliasType";
 import { getAppliedStructTypeName, TirDataStructType, TirSoPStructType, TirStructConstr, TirStructField } from "../tir/types/TirStructType";
@@ -177,6 +177,11 @@ export class AstCompiler extends DiagnosticEmitter
     }
 
     private _isExporting: boolean;
+    /**
+     * the name of the function `export`/`run` asked for, until the function it names in the
+     * ENTRY module is found (`program.contractTirFuncName` is then its module-unique name)
+     */
+    private _exportFuncName: string | undefined = undefined;
     /** scope used to resolve field types of synthetic internal type decls while a contract body is being derived */
     private _internalDeclScope: AstScope | undefined = undefined;
     private _internalDeclSrcUid: string = "";
@@ -195,6 +200,7 @@ export class AstCompiler extends DiagnosticEmitter
         }
 
         this.program.contractTirFuncName = funcName;
+        this._exportFuncName = funcName;
 
         return await this.compile();
     }
@@ -229,6 +235,7 @@ export class AstCompiler extends DiagnosticEmitter
         const funcName = _uniqueFuncName( "__pebble_run__", src.text );
         this._isExporting = true;
         this.program.contractTirFuncName = funcName;
+        this._exportFuncName = funcName;
 
         // 1) Rewrite the source text: wrap non-declaration statements in a function
         src.text = _wrapSourceTextForRun( src.text, funcName );
@@ -265,6 +272,7 @@ export class AstCompiler extends DiagnosticEmitter
         const funcName = _uniqueFuncName( "__pebble_repl__", src.text );
         this._isExporting = true;
         this.program.contractTirFuncName = funcName;
+        this._exportFuncName = funcName;
 
         // 1) Rewrite the source text: wrap non-declaration statements in a function
         //    with no return type annotation, and turn the last statement into a return
@@ -358,6 +366,8 @@ export class AstCompiler extends DiagnosticEmitter
         // them here too showed every error twice)
         if( this.diagnostics.some( d => d.category === DiagnosticCategory.Error ) || !entrySrc ) return this.program;
 
+        this._resolveExportedFunction( entrySrc );
+
         const mainFuncExpr = this.program.functions.get( this.program.contractTirFuncName );
         if( this.program.contractTirFuncName === "" || !mainFuncExpr ) {
             this.error(
@@ -375,6 +385,22 @@ export class AstCompiler extends DiagnosticEmitter
 
         warnUnusedFailingValues( this.program, this );
         return this.program;
+    }
+
+    /**
+     * `export( funcName )` names a function as the ENTRY module sees it. One the module
+     * declares is found when it compiles (`_collectTopLevelFuncDeclSig`); this finds the
+     * others: a function the entry module imports (under the name it imports it with).
+     */
+    private _resolveExportedFunction( entrySrc: Source ): void
+    {
+        const funcName = this._exportFuncName;
+        if( funcName === undefined ) return;
+        const entryScope = this._srcCompilations.get( entrySrc.absoluteProjPath )?.topLevelScope;
+        const tirFuncName = entryScope?.resolveFunctionName( funcName );
+        if( tirFuncName === undefined || !this.program.functions.has( tirFuncName ) ) return;
+        this.program.contractTirFuncName = tirFuncName;
+        this._exportFuncName = undefined; // found
     }
 
     // mutually recursive
@@ -554,6 +580,62 @@ export class AstCompiler extends DiagnosticEmitter
         isEntryFile: boolean = false
     ): void
     {
+        // The functions and the constants of a module (or of a namespace) are visible in the
+        // whole of it, whatever the order the source declares them in. Each one is declared
+        // first, and compiled by whichever comes first: its own statement, or the first use
+        // of its name (`AstScope.resolveValue`).
+        const declarations = this._declareTopLevelValues(
+            stmts,
+            srcUid,
+            topLevelScope,
+            srcExports,
+            isEntryFile
+        );
+        this._compileTopLevelValues(
+            stmts,
+            srcUid,
+            topLevelScope,
+            isEntryFile,
+            declarations
+        );
+    }
+
+    /**
+     * the namespaces declared in a scope (a module's top level, or a namespace's own) whose
+     * functions and constants are declared but not compiled yet: how to compile each one's
+     * (see `_compileNamespaceDecl`). They compile with the values of the scope they are in,
+     * which they can use.
+     */
+    private readonly _namespacesToCompile = new Map<AstScope, ( () => void )[]>();
+
+    /**
+     * compiles the values `_declareTopLevelValues` declared for `stmts`: first those of the
+     * namespaces `topLevelScope` declares, then each statement, in source order
+     */
+    private _compileTopLevelValues(
+        stmts: TopLevelStmt[],
+        srcUid: string,
+        topLevelScope: AstScope,
+        isEntryFile: boolean,
+        declarations: Map<FuncDecl | SimpleVarDecl, { pending: PendingValueDecl | undefined, compile: () => void }>
+    ): void
+    {
+        const namespaces = this._namespacesToCompile.get( topLevelScope );
+        if( namespaces )
+        {
+            this._namespacesToCompile.delete( topLevelScope );
+            for( const compileNamespace of namespaces ) compileNamespace();
+        }
+
+        const compileDeclaration = ( node: FuncDecl | SimpleVarDecl ): void => {
+            const declaration = declarations.get( node );
+            if( !declaration ) return;
+            // the first declaration of its name: compiled here, unless a use did already
+            if( declaration.pending ) AstScope.compilePendingValue( declaration.pending );
+            // a redeclaration: compiled here, where it is refused
+            else declaration.compile();
+        };
+
         top_level_stmts_iter: for( let i = 0; i < stmts.length; i++ )
         {
             let stmt = stmts[i];
@@ -619,15 +701,7 @@ export class AstCompiler extends DiagnosticEmitter
                         continue top_level_stmts_iter;
                     }
 
-                    this._collectTopLevelConst(
-                        decl,
-                        srcUid,
-                        topLevelScope,
-                        srcExports,
-                        exportRange,
-                        isEntryFile,
-                        dI === 0 ? _firstDeclStmtRange( stmt, decl ) : undefined
-                    );
+                    compileDeclaration( decl );
                 }
 
                 // remove from array so we don't process it again
@@ -668,10 +742,10 @@ export class AstCompiler extends DiagnosticEmitter
                     funcDeclContract,
                     srcUid,
                     topLevelScope,
-                    srcExports,
                     // `export contract` exports the contract's TYPE symbols
                     // (handled by `_collectExportedContractTypes`), NOT the
                     // synthesized main function as a value
+                    undefined, // srcExports
                     undefined, // exportRange
                     // set main
                     true // isEntryFile
@@ -683,16 +757,7 @@ export class AstCompiler extends DiagnosticEmitter
                 continue;
             }
 
-            if( stmt instanceof FuncDecl )
-            this._collectTopLevelFuncDeclSig(
-                stmt,
-                srcUid,
-                topLevelScope,
-                srcExports,
-                exportRange,
-                // don't set main
-                false // isEntryFile
-            );
+            if( stmt instanceof FuncDecl ) compileDeclaration( stmt );
             else
             this._collectInterfaceImplSigs(
                 stmt,
@@ -704,6 +769,85 @@ export class AstCompiler extends DiagnosticEmitter
             void stmts.splice( i, 1 );
             i--;
         }
+    }
+
+    /**
+     * Declares the functions and the constants of `stmts` in `topLevelScope`, without
+     * compiling them (`AstScope.declarePendingValue`): each one gets the closure that
+     * compiles it, exactly as its statement would.
+     *
+     * @returns for each declaration, how to compile it: `pending` for the first declaration
+     * of a name (a use of the name compiles it too); `compile` alone for a redeclaration,
+     * which only its own statement compiles (and refuses).
+     */
+    private _declareTopLevelValues(
+        stmts: TopLevelStmt[],
+        srcUid: string,
+        topLevelScope: AstScope,
+        srcExports: AstScope,
+        isEntryFile: boolean
+    ): Map<FuncDecl | SimpleVarDecl, { pending: PendingValueDecl | undefined, compile: () => void }>
+    {
+        const declarations = new Map<FuncDecl | SimpleVarDecl, { pending: PendingValueDecl | undefined, compile: () => void }>();
+        let exportRange: SourceRange | undefined = undefined;
+        const declare = ( node: FuncDecl | SimpleVarDecl, astName: string, compile: () => void ): void => {
+            const pending = topLevelScope.declarePendingValue( astName, compile );
+            // an exported member is read through the exports' scope too (`Ns.member`, of a
+            // namespace): a read there finds the same declaration to compile
+            if( pending && exportRange ) srcExports.sharePendingValue( astName, pending );
+            declarations.set( node, { pending, compile } );
+        };
+
+        for( let stmt of stmts )
+        {
+            exportRange = undefined;
+            if( stmt instanceof ExportStmt )
+            {
+                exportRange = stmt.range;
+                stmt = stmt.stmt;
+            }
+
+            const stmtExportRange = exportRange;
+            if( stmt instanceof FuncDecl )
+            {
+                const funcDecl = stmt;
+                declare( funcDecl, funcDecl.expr.name.text, () => this._collectTopLevelFuncDeclSig(
+                    funcDecl,
+                    srcUid,
+                    topLevelScope,
+                    srcExports,
+                    stmtExportRange,
+                    // don't set main
+                    false, // isEntryFile
+                    // the function `export` asks for is one the ENTRY module declares
+                    isEntryFile // isEntryTopLevel
+                ));
+                continue;
+            }
+
+            if( !( stmt instanceof VarStmt ) ) continue;
+
+            const varStmt = stmt;
+            for( let dI = 0; dI < varStmt.declarations.length; dI++ )
+            {
+                const decl = varStmt.declarations[dI];
+                // only constants can be declared here: the statement's own turn reports the
+                // first declaration that is not one, and drops the rest of the statement
+                if(!( decl instanceof SimpleVarDecl && decl.isConst() )) break;
+                const stmtRange = dI === 0 ? _firstDeclStmtRange( varStmt, decl ) : undefined;
+                declare( decl, decl.name.text, () => this._collectTopLevelConst(
+                    decl,
+                    srcUid,
+                    topLevelScope,
+                    srcExports,
+                    stmtExportRange,
+                    isEntryFile,
+                    stmtRange
+                ));
+            }
+        }
+
+        return declarations;
     }
 
     private _collectInterfaceImplSigs(
@@ -943,16 +1087,28 @@ export class AstCompiler extends DiagnosticEmitter
         topLevelScope: AstScope,
         srcExports: AstScope | undefined = undefined,
         exportRange: SourceRange | undefined = undefined,
-        isEntryFile: boolean = false
+        isEntryFile: boolean = false,
+        /**
+         * `true` for the declarations at the top level of the entry module: the only ones
+         * `export( funcName )` can name directly (a function the entry module IMPORTS is
+         * found through its scope, see `_resolveExportedFunction`)
+         */
+        isEntryTopLevel: boolean = false
     ): void
     {
         const astFuncExpr = stmt.expr;
         const astFuncName = astFuncExpr.name.text;
         const tirFuncName = PEBBLE_INTERNAL_IDENTIFIER_PREFIX + astFuncName + "_" + srcUid;
 
-        if( this._isExporting && astFuncName === this.program.contractTirFuncName )
-        {
+        // the function to export is the one the ENTRY module calls `funcName`: a function of
+        // the same name in a module it imports (compiled first) is not it
+        if(
+            isEntryTopLevel
+            && this._exportFuncName !== undefined
+            && astFuncName === this._exportFuncName
+        ) {
             this.program.contractTirFuncName = tirFuncName;
+            this._exportFuncName = undefined; // found
         }
 
         // Generic function declaration path: do NOT compile the body. Instead,
@@ -1003,26 +1159,27 @@ export class AstCompiler extends DiagnosticEmitter
         );
         if( !funcExpr )
         {
-            if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: astFuncName, type: sig, symbol });
+            if( sig instanceof TirFuncT ) topLevelScope.defineValue({ isConstant: true, name: tirFuncName, type: sig, symbol }, astFuncName );
             else topLevelScope.defineFailedValue( astFuncName, symbol );
             if( exportRange && srcExports ) this._exportFailedDeclaration( astFuncName, topLevelScope, srcExports );
             return undefined;
         }
-
-        this.program.functions.set(
-            tirFuncName,
-            funcExpr
-        );
-        this.program.functions.set(
-            astFuncName,
-            funcExpr
-        );
 
         if( topLevelScope.functions.has( astFuncName ) )
         return this.error(
             DiagnosticCode._0_is_already_defined,
             astFuncExpr.name.range,
             astFuncName
+        );
+
+        // `program.functions` is ONE map for the whole program: a function is registered
+        // under its module-unique name ONLY, and the module's scope maps the name the source
+        // uses to it (as constants do). Registering the bare source name too made two
+        // modules that each declare a `helper` share one entry: the calls of one module
+        // ran the other module's function.
+        this.program.functions.set(
+            tirFuncName,
+            funcExpr
         );
 
         topLevelScope.functions.set(
@@ -1032,10 +1189,10 @@ export class AstCompiler extends DiagnosticEmitter
         if( symbol ) symbol.type = funcExpr.type;
         topLevelScope.defineValue({
             isConstant: true,
-            name: astFuncName,
+            name: tirFuncName,
             type: funcExpr.type,
             symbol,
-        });
+        }, astFuncName );
 
         if( exportRange && srcExports )
         {
@@ -1136,8 +1293,10 @@ export class AstCompiler extends DiagnosticEmitter
         const placeholderFuncType = getDataFuncSignature( templateCtx, astFuncExpr.signature );
         if( !placeholderFuncType ) return undefined;
 
-        // Register the template on the program
-        this.program.genericTemplates.set( astFuncName, {
+        // Register the template on the program, under its module-unique name: the bare
+        // source name made two modules that each declare a generic `pick<T>` share one
+        // template (the calls of one module instantiated the other module's function)
+        this.program.genericTemplates.set( tirFuncName, {
             kind: "user",
             astFuncName,
             astFuncExpr,
@@ -1161,12 +1320,12 @@ export class AstCompiler extends DiagnosticEmitter
             type: placeholderFuncType,
         });
         topLevelScope.defineValue({
-            name: astFuncName,
+            name: tirFuncName,
             type: placeholderFuncType,
             isConstant: true,
-            genericTemplateName: astFuncName,
+            genericTemplateName: tirFuncName,
             symbol,
-        });
+        }, astFuncName );
 
         if( exportRange && srcExports )
         {
@@ -1181,12 +1340,12 @@ export class AstCompiler extends DiagnosticEmitter
             );
             srcExports.functions.set( astFuncName, tirFuncName );
             srcExports.defineValue({
-                name: astFuncName,
+                name: tirFuncName,
                 type: placeholderFuncType,
                 isConstant: true,
-                genericTemplateName: astFuncName,
+                genericTemplateName: tirFuncName,
                 symbol,
-            });
+            }, astFuncName );
         }
     }
 
@@ -1322,13 +1481,27 @@ export class AstCompiler extends DiagnosticEmitter
             publicScope
         );
 
-        this._collectAllTopLevelSignatures(
+        // The namespace's functions and constants are DECLARED now, and compiled with the
+        // values of the scope the namespace is in (`_compileTopLevelValues`), or by the
+        // first use of one, whichever comes first. Compiled right here they could not use
+        // the functions and the constants of their own module: this runs with the types,
+        // before any value of the module is declared.
+        const declarations = this._declareTopLevelValues(
             fakeStmts,
             nsSrcUid,
             compilationScope,
             publicScope,
             false
         );
+        let namespacesToCompile = this._namespacesToCompile.get( enclosingScope );
+        if( !namespacesToCompile ) this._namespacesToCompile.set( enclosingScope, namespacesToCompile = [] );
+        namespacesToCompile.push( () => this._compileTopLevelValues(
+            fakeStmts,
+            nsSrcUid,
+            compilationScope,
+            false,
+            declarations
+        ));
 
         enclosingScope.defineNamespace({ name: nsName, publicScope });
         if( isExported )
@@ -2598,22 +2771,17 @@ export class AstCompiler extends DiagnosticEmitter
                     const funcExpr = this.program.functions.get( tirFuncName );
                     if( funcExpr )
                     {
+                        // the importing module's name for it (possibly an `as`
+                        // alias, or one a re-export introduced) stands for the
+                        // function's module-unique name: an access resolves to
+                        // THAT entry of `program.functions`, whatever the same
+                        // name means in any other module
                         srcImportsScope.defineValue({
                             isConstant: true,
-                            name: localName,
+                            name: tirFuncName,
                             type: funcExpr.type,
                             symbol: importSymbol,
-                        });
-                        // expressify resolves top-level function accesses by
-                        // the LOCAL name through `program.functions` (local
-                        // declarations register their bare AST name the same
-                        // way). A name that only exists at this import site —
-                        // an `as` alias, or an alias introduced by a
-                        // re-export (`export { double as twice } from`) —
-                        // needs the same aliasing or the call site dies at
-                        // expressify with "variable not found in context".
-                        if( !this.program.functions.has( localName ) )
-                            this.program.functions.set( localName, funcExpr );
+                        }, localName );
                     }
                 }
                 if( isType )

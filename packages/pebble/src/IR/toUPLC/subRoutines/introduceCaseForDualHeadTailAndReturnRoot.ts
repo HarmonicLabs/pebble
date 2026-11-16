@@ -25,8 +25,19 @@
  *     substitution. Wrapping again would be a no-op constructor pair.
  *   - The nil branch is `IRError`. Original code that calls `headList` or
  *     `tailList` on a nil list errors at evaluation; the new code errors
- *     at the case dispatch — same observable behavior whenever either
- *     call is actually reached.
+ *     at the case dispatch — the same observable behavior ONLY where one
+ *     of the calls was certain to run. So the case goes around a term that
+ *     cannot be evaluated without evaluating one of them (`wrapTarget`):
+ *     the whole body when a call is reached unconditionally, otherwise the
+ *     smallest term holding all the calls, when it reaches one
+ *     unconditionally. Calls that are all behind branches (`h` in one arm,
+ *     `t` in another) stay builtins.
+ *
+ *     (The case used to go around the whole body in every situation. With
+ *     `if( c ) { const x = xs.head(); xs = xs.tail(); … }` in a loop it
+ *     destructured `xs` on EVERY iteration, taken or not, and failed as
+ *     soon as the list was empty — on a program that never read an empty
+ *     list.)
  *   - The pass iterates: after introducing a case for L, the (now
  *     substituted) body might still contain a different L' with dual
  *     head/tail uses — handled by re-scanning until no more pairs.
@@ -34,7 +45,9 @@
 
 import { IRApp } from "../../IRNodes/IRApp";
 import { IRCase } from "../../IRNodes/IRCase";
+import { IRConstr } from "../../IRNodes/IRConstr";
 import { IRError } from "../../IRNodes/IRError";
+import { IRForced } from "../../IRNodes/IRForced";
 import { IRFunc } from "../../IRNodes/IRFunc";
 import { IRHoisted } from "../../IRNodes/IRHoisted";
 import { IRLetted } from "../../IRNodes/IRLetted";
@@ -76,90 +89,173 @@ function processNode( node: IRTerm ): void
 
 function tryWrap( fn: IRFunc ): void
 {
+    // lists whose head and tail are never certain to run: left as builtins
+    const leftAlone = new Set<symbol>();
     while( true )
     {
-        const choice = findFirstDualHeadTailList( fn.body, new Set( fn.params ) );
-        if( choice === undefined ) return;
+        const usesByList = collectHeadTailUses( fn.body, new Set( fn.params ) );
 
-        const listSym = choice;
+        let listSym: symbol | undefined = undefined;
+        let target: IRTerm | undefined = undefined;
+        for( const [ sym, uses ] of usesByList )
+        {
+            if( leftAlone.has( sym ) ) continue;
+            if( !uses.some( u => u.isHead ) || !uses.some( u => !u.isHead ) ) continue;
+            target = wrapTarget( uses );
+            if( target === undefined ) { leftAlone.add( sym ); continue; }
+            listSym = sym;
+            break;
+        }
+        if( listSym === undefined || target === undefined ) return;
+
         const desc = listSym.description ?? "L";
         const hSym = Symbol( "h_" + desc );
         const tSym = Symbol( "t_" + desc );
 
-        // Substitute head(L)/tail(L) inside the current body (won't descend
+        // Substitute head(L)/tail(L) inside the target (won't descend
         // into nested scopes that re-bind L, h, or t — but we just minted
-        // h/t so they don't collide with anything).
-        substituteHeadTailInBody( fn.body, listSym, hSym, tSym );
+        // h/t so they don't collide with anything). Every use of L is
+        // inside it: it holds them all.
+        substituteHeadTailInBody( target, listSym, hSym, tSym );
 
         // Wrap.
-        const oldBody = fn.body;
-        const consFn = new IRFunc( [ hSym, tSym ], oldBody );
+        const isBody = target === fn.body;
+        const parent = target.parent;
+        const consFn = new IRFunc( [ hSym, tSym ], target );
         const wrapped = new IRCase(
             new IRVar( listSym ),
             [ consFn, new IRError() ]
         );
-        fn.body = wrapped;
+        if( isBody ) fn.body = wrapped;
+        else _modifyChildFromTo( parent as any, target, wrapped );
     }
+}
+
+/** a `headList( L )` or `tailList( L )` and the terms it is in */
+interface HeadTailUse {
+    isHead: boolean;
+    /** from the function's body (first) down to the call itself (last) */
+    path: IRTerm[];
+}
+
+/**
+ * `true` iff evaluating `parent` always evaluates `child`: the two sides of an
+ * application, the fields of a `constr`, what a `case` matches, a forced term;
+ * and the value of a letted (or hoisted) term, computed where it is placed,
+ * which is never after a reference to it. NOT a branch of a `case`, the body
+ * of a function, a delayed term.
+ */
+function alwaysEvaluates( parent: IRTerm, child: IRTerm ): boolean
+{
+    if(
+        parent instanceof IRApp
+        || parent instanceof IRConstr
+        || parent instanceof IRForced
+        || parent instanceof IRLetted
+        || parent instanceof IRHoisted
+    ) return true;
+    if( parent instanceof IRCase ) return parent.constrTerm === child;
+    return false;
+}
+
+/** whether evaluating `use.path[ from ]` always evaluates the call */
+function runsWhenever( use: HeadTailUse, from: number ): boolean
+{
+    for( let i = from; i < use.path.length - 1; i++ )
+    {
+        if( !alwaysEvaluates( use.path[i], use.path[i + 1] ) ) return false;
+    }
+    return true;
+}
+
+/**
+ * The term to put the case around, for the calls on one list: one that holds
+ * them all and cannot be evaluated without evaluating one of them, so that
+ * failing on an empty list there fails nothing that did not fail already.
+ *
+ * - the function's body, if a call runs whenever the body does (what this
+ *   pass always did: unchanged where that was right);
+ * - otherwise the smallest term holding all the calls, if one of them runs
+ *   whenever it does (both calls in one arm of a branch);
+ * - otherwise `undefined`: no such term.
+ */
+function wrapTarget( uses: HeadTailUse[] ): IRTerm | undefined
+{
+    if( uses.some( u => runsWhenever( u, 0 ) ) ) return uses[0].path[0];
+
+    // the deepest term every path goes through
+    let depth = 0;
+    const first = uses[0].path;
+    while(
+        depth + 1 < first.length
+        && uses.every( u => depth + 1 < u.path.length && u.path[ depth + 1 ] === first[ depth + 1 ] )
+    ) depth++;
+    // (a call is not the meeting point of two calls)
+    if( uses.some( u => u.path.length - 1 === depth ) ) return undefined;
+
+    return uses.some( u => runsWhenever( u, depth ) ) ? first[ depth ] : undefined;
 }
 
 /**
  * Scan `root` for free `headList(L)`/`tailList(L)` uses where `L` is NOT
  * shadowed by an enclosing nested IRFunc/IRRecursive within `root`. Returns
- * the first list symbol with at least one head AND one tail use.
+ * them by list symbol, each with the terms it is in.
  */
-function findFirstDualHeadTailList(
+function collectHeadTailUses(
     root: IRTerm,
     boundInOuterFunc: Set<symbol>,
-): symbol | undefined
+): Map<symbol, HeadTailUse[]>
 {
-    const heads = new Set<symbol>();
-    const tails = new Set<symbol>();
+    const uses = new Map<symbol, HeadTailUse[]>();
+    const path: IRTerm[] = [];
 
     function walk( node: IRTerm, locallyBound: Set<symbol> ): void
     {
-        if( node instanceof IRFunc )
+        path.push( node );
+        try
         {
-            const next = new Set( locallyBound );
-            for( const p of node.params ) next.add( p );
-            walk( node.body, next );
-            return;
-        }
-        if( node instanceof IRRecursive )
-        {
-            const next = new Set( locallyBound );
-            next.add( node.name );
-            walk( node.body, next );
-            return;
-        }
-        if( node instanceof IRApp )
-        {
-            const fn = unwrap( node.fn );
-            const arg = node.arg;
-            if(
-                fn instanceof IRNative
-                && arg instanceof IRVar
-                && !locallyBound.has( arg.name )
-                && (
-                    fn.tag === IRNativeTag.headList
-                    || fn.tag === IRNativeTag.tailList
-                )
-            ) {
-                ( fn.tag === IRNativeTag.headList ? heads : tails ).add( arg.name );
-                // do not descend further — this is a leaf for our purposes
+            if( node instanceof IRFunc )
+            {
+                const next = new Set( locallyBound );
+                for( const p of node.params ) next.add( p );
+                walk( node.body, next );
                 return;
             }
-            // generic descent
+            if( node instanceof IRRecursive )
+            {
+                const next = new Set( locallyBound );
+                next.add( node.name );
+                walk( node.body, next );
+                return;
+            }
+            if( node instanceof IRApp )
+            {
+                const fn = unwrap( node.fn );
+                const arg = node.arg;
+                if(
+                    fn instanceof IRNative
+                    && arg instanceof IRVar
+                    && !locallyBound.has( arg.name )
+                    && (
+                        fn.tag === IRNativeTag.headList
+                        || fn.tag === IRNativeTag.tailList
+                    )
+                ) {
+                    let ofList = uses.get( arg.name );
+                    if( !ofList ) uses.set( arg.name, ofList = [] );
+                    ofList.push({ isHead: fn.tag === IRNativeTag.headList, path: path.slice() });
+                    // do not descend further — this is a leaf for our purposes
+                    return;
+                }
+                // generic descent
+            }
+            for( const c of node.children() ) walk( c, locallyBound );
         }
-        for( const c of node.children() ) walk( c, locallyBound );
+        finally { path.pop(); }
     }
 
     walk( root, boundInOuterFunc );
-
-    for( const sym of heads )
-    {
-        if( tails.has( sym ) ) return sym;
-    }
-    return undefined;
+    return uses;
 }
 
 /**

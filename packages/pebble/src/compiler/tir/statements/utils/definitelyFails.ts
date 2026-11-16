@@ -32,7 +32,7 @@ export function definitelyFails( stmt: TirStmt | TirBlockStmt ): boolean
             continue;
         }
         if( stmt instanceof TirMatchStmt ) {
-            if( stmt.cases.every(({ body }) => definitelyFails( body )) ) return true;
+            if( stmt.arms().every(({ body }) => definitelyFails( body )) ) return true;
             continue;
         }
         if(

@@ -28,9 +28,10 @@ import { TirSingleDeconstructVarDecl } from "../../tir/statements/TirVarDecl/Tir
 import { TirWhileStmt } from "../../tir/statements/TirWhileStmt";
 import { TirFromDataExpr } from "../../tir/expressions/TirFromDataExpr";
 import { data_t } from "../../tir/program/stdScope/stdScope";
-import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
 import { TirDataStructType, TirSoPStructType } from "../../tir/types/TirStructType";
 import { getUnaliased } from "../../tir/types/utils/getUnaliased";
+import { pairConstructorOf } from "../../tir/types/utils/pairConstructorOf";
+import { TirUnConstrDataResultT } from "../../tir/types/TirNativeType";
 import { ExpressifyCtx } from "./ExpressifyCtx";
 import { expressifyVarAssignmentStmt } from "./expressifyVarAssignmentStmt";
 import { isSingleConstrStruct } from "./isSingleConstrStruct";
@@ -304,38 +305,62 @@ export function expressifyFuncBody(
             );
 
             const stmtUnaliasedType = getUnaliased( stmt.type );
-            if( stmtUnaliasedType instanceof TirLinearMapEntryT )
+            // a builtin PAIR at runtime, destructured by its two properties (see
+            // `pairConstructorOf`): each one is the pair's first or second
+            const pairConstr = pairConstructorOf( stmtUnaliasedType );
+            if( pairConstr )
             {
-                // LinearMapEntry<K,V> is Pair<Data,Data> at runtime
-                // extract fields via fstPair/sndPair + _inlineFromData
-                for( const [ fieldName, varDecl ] of stmt.fields )
-                {
-                    if(!( varDecl instanceof TirSimpleVarDecl )) throw new Error("expected simple var decl in entry deconstruction");
-                    const isKey = fieldName === "key";
-                    const fieldType = isKey ? stmtUnaliasedType.keyTypeArg : stmtUnaliasedType.valTypeArg;
-                    const pairAccessor = isKey ? TirNativeFunc.fstPairData : TirNativeFunc.sndPairData;
-
-                    const fieldLettedName = getUniqueInternalName(`${lettedExpr.varName}_${fieldName}`);
-                    const lettedField = ctx.introduceLettedConstant(
-                        fieldLettedName,
-                        expressifyVars( ctx,
-                            new TirFromDataExpr(
-                                new TirCallExpr(
-                                    pairAccessor,
-                                    [ lettedExpr ],
-                                    data_t,
-                                    stmt.range
-                                ),
-                                fieldType,
-                                stmt.range
-                            )
+                const range = stmt.range;
+                /** the property that is `pairConstr.fields[ idx ]`, read from the (letted) pair */
+                const readProperty = ( idx: number ): TirExpr => {
+                    // `RawConstr`: `( int, List<data> )`, both as they are
+                    if( stmtUnaliasedType instanceof TirUnConstrDataResultT )
+                    {
+                        const accessor = idx === 0
+                            ? TirNativeFunc.unConstrDataResultIndex
+                            : TirNativeFunc.unConstrDataResultFields;
+                        return new TirCallExpr( accessor, [ lettedExpr ], accessor.type.returnType, range );
+                    }
+                    // `LinearMapEntry<K, V>`: `( data, data )`, to decode as `K` and `V`
+                    return new TirFromDataExpr(
+                        new TirCallExpr(
+                            idx === 0 ? TirNativeFunc.fstPairData : TirNativeFunc.sndPairData,
+                            [ lettedExpr ],
+                            data_t,
+                            range
                         ),
-                        stmt.range
+                        pairConstr.fields[ idx ].type,
+                        range
+                    );
+                };
+
+                const nestedDeconstructs: TirVarDecl[] = [];
+                for( let idx = 0; idx < pairConstr.fields.length; idx++ )
+                {
+                    const fieldName = pairConstr.fields[ idx ].name;
+                    const varDecl = stmt.fields.get( fieldName );
+                    if( !varDecl ) continue; // not asked for
+
+                    const lettedField = ctx.introduceLettedConstant(
+                        getUniqueInternalName(`${lettedExpr.varName}_${fieldName}`),
+                        expressifyVars( ctx, readProperty( idx ) ),
+                        range
                     );
 
-                    ctx.setNewVariableName( varDecl.name, lettedField.varName );
-                    debugBindLetted( lettedField, debugDeclBinding( varDecl ) );
+                    if( varDecl instanceof TirSimpleVarDecl )
+                    {
+                        ctx.setNewVariableName( varDecl.name, lettedField.varName );
+                        debugBindLetted( lettedField, debugDeclBinding( varDecl ) );
+                    }
+                    else
+                    {
+                        // a property destructured further: a declaration of its own,
+                        // initialized with the property
+                        varDecl.initExpr = lettedField;
+                        nestedDeconstructs.push( varDecl );
+                    }
                 }
+                bodyStmts.unshift( ...nestedDeconstructs );
                 continue;
             }
             else if( stmtUnaliasedType instanceof TirSoPStructType )
@@ -665,9 +690,14 @@ export function expressifyFuncBody(
              * if it is positive, then only one case does not terminate and this is the index
             **/
             let doesNotTerminateIdx: number | undefined = undefined;
-            for( let i = 0; i < stmt.cases.length; i++ )
+            // the `else` arm counts: when it is the one that goes on (or one
+            // of several), the rest of the body belongs to it too. Counting
+            // the named cases alone gave the continuation to a single named
+            // arm and left the `else` arm returning nothing.
+            const arms = stmt.arms();
+            for( let i = 0; i < arms.length; i++ )
             {
-                const _case = stmt.cases[i];
+                const _case = arms[i];
                 if( _case.body.definitelyTerminates() ) continue;
 
                 if( typeof doesNotTerminateIdx !== "number" )
@@ -681,7 +711,7 @@ export function expressifyFuncBody(
             const onlyOneCaseDoesNotTerminate = typeof doesNotTerminateIdx === "number" && doesNotTerminateIdx >= 0;
             if( onlyOneCaseDoesNotTerminate )
             {
-                const theDude = stmt.cases[doesNotTerminateIdx!];
+                const theDude = arms[doesNotTerminateIdx!];
                 
                 theDude.body = theDude.body instanceof TirBlockStmt ? theDude.body : new TirBlockStmt(
                     [ theDude.body ],

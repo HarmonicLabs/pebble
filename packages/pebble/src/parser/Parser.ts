@@ -32,6 +32,7 @@ import { AstRedeemerOfTypeExpr } from "../ast/nodes/types/AstRedeemerOfTypeExpr"
 import { LitArrExpr } from "../ast/nodes/expr/litteral/LitArrExpr";
 import { LitNamedObjExpr } from "../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../ast/nodes/expr/litteral/LitObjExpr";
+import { LitMapExpr } from "../ast/nodes/expr/litteral/LitMapExpr";
 import { LitStrExpr } from "../ast/nodes/expr/litteral/LitStrExpr";
 import { TemplateStrExpr } from "../ast/nodes/expr/litteral/TemplateStrExpr";
 import { LitIntExpr } from "../ast/nodes/expr/litteral/LitIntExpr";
@@ -3005,32 +3006,63 @@ export class Parser extends DiagnosticEmitter
                     tn.range(startPos, tn.pos)
                 );
             }
-            // LitObjExpr
+            // LitObjExpr | LitMapExpr
+            //
+            // `{ a: 1, b }`: every key a bare identifier -> `LitObjExpr` (a struct's
+            // fields; or, typed as a `LinearMap`, the empty map `{}`)
+            // `{ #01: 10, f( x ): 20 }`: a key that is any other expression -> `LitMapExpr`
             case Token.OpenBrace: {
                 let startPos = tn.tokenPos;
-                let names = new Array<Identifier>();
-                let values = new Array<PebbleExpr>();
-                let name: Identifier;
+                // one entry per `key: value`; `name` is set for a bare identifier key
+                const entries = new Array<{ name: Identifier | undefined, key: PebbleExpr, value: PebbleExpr }>();
                 while (!tn.skip( Token.CloseBrace)) {
 
-                    if (!tn.skipIdentifier()) {
-                        this.error(
-                            DiagnosticCode.Identifier_expected,
-                            tn.range(),
-                        );
-                        return undefined;
-                    }
-                    
-                    name = new Identifier(tn.readIdentifier(), tn.range());
-                    names.push(name);
+                    let name: Identifier | undefined = undefined;
+                    let key: PebbleExpr | undefined = undefined;
+                    let value: PebbleExpr | undefined = undefined;
 
-                    if (tn.skip( Token.Colon))
+                    // a bare identifier key is an identifier followed by `:`, `,` or `}`;
+                    // an identifier followed by anything else starts an expression
+                    // (`a.b: 1`, `f( x ): 1`)
+                    const beforeKey = tn.mark();
+                    if( tn.skipIdentifier() )
                     {
-                        let value = this.parseExpr(Precedence.Comma + 1);
-                        if (!value) return undefined;
-                        values.push(value);
+                        const identifier = new Identifier( tn.readIdentifier(), tn.range() );
+                        const next = tn.peek();
+                        if(
+                            next === Token.Colon
+                            || next === Token.Comma
+                            || next === Token.CloseBrace
+                        ) {
+                            name = identifier;
+                            key = identifier;
+                            // shorthand `{ a }`: the value is the variable of the same name
+                            if( !tn.skip( Token.Colon ) ) value = identifier;
+                        }
+                        else tn.reset( beforeKey );
                     }
-                    else values.push(name);
+
+                    if( !key )
+                    {
+                        key = this.parseExpr( Precedence.Comma + 1 );
+                        if( !key ) return undefined;
+                        if( !tn.skip( Token.Colon ) )
+                        {
+                            this.error(
+                                DiagnosticCode._0_expected,
+                                tn.range(), ":"
+                            );
+                            return undefined;
+                        }
+                    }
+
+                    if( !value )
+                    {
+                        value = this.parseExpr(Precedence.Comma + 1);
+                        if (!value) return undefined;
+                    }
+
+                    entries.push({ name, key, value });
 
                     if( tn.skip( Token.Comma ) ) continue; 
 
@@ -3044,7 +3076,32 @@ export class Parser extends DiagnosticEmitter
                     }
                 }
 
-                return new LitObjExpr(names, values, tn.range(startPos, tn.pos));
+                const range = tn.range(startPos, tn.pos);
+                if( entries.every( entry => entry.name !== undefined ) )
+                return new LitObjExpr(
+                    entries.map( entry => entry.name! ),
+                    entries.map( entry => entry.value ),
+                    range
+                );
+
+                // a map literal. A bare identifier is never one of its keys: `{ a: 1 }` is
+                // how a struct's fields are written, so `a` there is not read as a variable
+                // in SOME literals only (those that happen to have another kind of key too)
+                for( const entry of entries )
+                {
+                    if( entry.name === undefined ) continue;
+                    this.error(
+                        DiagnosticCode.A_bare_identifier_cannot_be_the_key_of_a_map_literal_Write_0_value_to_use_the_value_of_the_variable_as_the_key,
+                        entry.name.range, entry.name.text
+                    );
+                    return undefined;
+                }
+
+                return new LitMapExpr(
+                    entries.map( entry => entry.key ),
+                    entries.map( entry => entry.value ),
+                    range
+                );
             }
             case Token.Identifier: {
                 const identifierText = tn.readIdentifier();

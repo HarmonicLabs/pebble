@@ -13,6 +13,7 @@ import { LitHexBytesExpr } from "../../../../ast/nodes/expr/litteral/LitHexBytes
 import { LitIntExpr } from "../../../../ast/nodes/expr/litteral/LitIntExpr";
 import { LitNamedObjExpr } from "../../../../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../../../../ast/nodes/expr/litteral/LitObjExpr";
+import { LitMapExpr } from "../../../../ast/nodes/expr/litteral/LitMapExpr";
 import { LitStrExpr } from "../../../../ast/nodes/expr/litteral/LitStrExpr";
 import { TemplateStrExpr } from "../../../../ast/nodes/expr/litteral/TemplateStrExpr";
 import { isLitteralExpr } from "../../../../ast/nodes/expr/litteral/LitteralExpr";
@@ -1392,6 +1393,21 @@ function _exprReplaceParamsAndAssertNoLitContext(
             );
             if( !newElem ) return undefined;
             expr.elems[i] = newElem;
+        }
+        return expr;
+    }
+    if( expr instanceof LitMapExpr ) {
+        // a map literal: its keys are expressions, as its values are
+        for( const exprs of [ expr.keys, expr.values ] )
+        for( let i = 0; i < exprs.length; i++ ) {
+            const newExpr = _exprReplaceParamsAndAssertNoLitContext(
+                compiler,
+                exprs[i],
+                paramsInternalNamesMap,
+                renamedVariables
+            );
+            if( !newExpr ) return undefined;
+            exprs[i] = newExpr;
         }
         return expr;
     }

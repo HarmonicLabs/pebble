@@ -52,6 +52,17 @@ export function tryResolveNamespaceChain(
             continue;
         }
 
+        // a member whose declaration is not compiled yet is compiled by this use; one that
+        // is compiling right now is being used in its own definition
+        if( !pub.ensureValueDeclared( name ) )
+        {
+            ctx.error(
+                DiagnosticCode.Mutually_recursive_declarations_are_not_supported_0_is_used_directly_or_indirectly_in_its_own_definition,
+                seg.range, name
+            );
+            return { kind: "incomplete" };
+        }
+
         const variable = pub.variables.get( name );
         if( variable )
         {

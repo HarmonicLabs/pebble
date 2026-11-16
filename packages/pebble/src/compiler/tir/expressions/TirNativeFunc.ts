@@ -889,17 +889,11 @@ export class TirNativeFunc
     //         ], new TirDataOptT(elems_t))
     //     );
     // }
-    static _findSopOptional(elems_t: TirType): TirNativeFunc {
-        return new TirNativeFunc(
-            IRNativeTag._findSopOptional,
-            new TirFuncT([
-                // predicate: (elemT) => bool
-                new TirFuncT([ elems_t ], bool_t),
-                // list<elemT>
-                new TirListT(elems_t)
-            ], new TirSopOptT(elems_t))
-        );
-    }
+    // NOTE: there is no `_findSopOptional` here on purpose. `find` is the one
+    // list native whose lowering depends on the element type — the `Some`
+    // payload must be data — so it is built by `tirFindSopOptional`
+    // (`./findSopOptional.ts`): the bare native only for elements that are
+    // data already.
     static _lookupLinearMap(keyT: TirType, valT: TirType): TirNativeFunc {
         return new TirNativeFunc(
             IRNativeTag._lookupLinearMap,

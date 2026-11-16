@@ -9,6 +9,30 @@ project it starts in, and a failing script now says where it failed in the Pebbl
 source, in `pebble test`, in buildooor and in any tool using
 `@harmoniclabs/plutus-machine` 3.1.0.
 
+### Language
+
+Written as the documentation has them, and refused or broken until now (PEBBLE_BUGS 49-64):
+
+- **Map literals**: `const m: LinearMap<bytes, int> = { #01: 10, #02: 20 };` and the empty
+  `{}`. A key is any expression except a bare identifier (`{ a: 1 }` is a struct's field):
+  `{ (a): 1 }` uses the variable `a`. Without an expected type the first entry gives the
+  map's. Entries keep their order, duplicate keys included.
+- **`+` concatenates bytes** (`#dead + #beef`, string literals too), and **`+=` adds whatever
+  `+` adds**: it was ints only, so `total += value;` on a `Value` was refused.
+- **`const RawConstr{ index, fields } = unConstrData( d );`**, also renamed, with one
+  property, without the name, and with `fields` destructured further. A map entry's
+  `{ key, value }` can be destructured further too (`value: P{ x }`).
+- **`Optional<T>.toData()`**, the encoding a struct field of that type has.
+- **Functions and constants in any order.** A function can call one declared below it, read
+  a constant declared below it, and be used by a constant above it; so can the members of a
+  namespace, which can now also use the functions and constants of their module. Two
+  declarations defined in terms of each other are refused with the new error 30210 (each
+  was "not defined" for the other): they cannot be compiled.
+- **`using { … } = std.crypto.bls12_381;` inside a function or a method** (any namespace's
+  functions and constants; it failed in the backend).
+- **`is Some{} => …`** in a `case`, and an **`else` arm of a `case`** that reads a variable or
+  calls a function (both failed in the backend).
+
 ### REPL
 
 - `pebble repl` (pebble-cli) reads the project of the working directory: the nearest
@@ -203,8 +227,40 @@ source, in `pebble test`, in buildooor and in any tool using
 - Six error codes each belonged to two messages, and only the first message of each pair was
   shown (254, 282, 283, 293, 1365, 1385). The second message of each pair has its own code now
   (297 to 300, 1393, 1394), and generating the messages fails on a duplicate code.
+- New errors: 30210 (declarations defined in terms of each other), 30211 (a map literal
+  where another type is expected) and 30212 (a bare identifier as the key of a map literal;
+  the message gives the `(a): v` form).
+- Warning 6134 was raised for a `const` read by an assert and by the statement after it, when
+  the assert only passes it to a function that may not need it
+  (`const total = toValue( v ); assert out.value.contains( total ); sum = sum.union( total );`).
+  The two reads meet before the assert, where the value is computed on every way. The same
+  holds for the condition of an `if` and what a `match` matches, next to their branches.
 
 ### Fixes
+
+- ⚠ Wrong code: two modules that each declared a function of the same name ran one another's.
+  Functions were registered in the program under their bare name next to their unique one,
+  and every call resolved through the bare name: the last module to declare `helper` owned it
+  for all of them, silently. The same held for two generic functions of the same name, for
+  an imported function and a private one of another module, and for two modules importing
+  different functions under one alias; and `export` took the first `main` any module
+  declared, a library's before the entry file's. A name now means what its own module says.
+- ⚠ Wrong code: a `match` with an `else:` arm. A variable assigned there kept its old value
+  after the `match` (or made the function return a value of the wrong type), a `return`
+  there was lost, and a `continue` there skipped the loop's update: the loop never ended.
+  Five analyses looked at the named arms only.
+- ⚠ A valid script could fail: `xs.head()` and `xs.tail()` of the same list, both inside an
+  `if`, were turned into one destructuring of `xs` placed around the whole function body, so
+  it ran on every way through, taken or not. In a loop that consumes a list one item per
+  matching element (`if( match ) { const x = xs.head(); xs = xs.tail(); … }`) the script
+  failed as soon as the list was empty, on an iteration that read nothing. The destructuring
+  now goes where one of the two reads was certain to run.
+- `find` on a `List<int>` or a `List<bytes>` returned an `Optional` that failed whatever
+  read it (`unIData :: not data value`): `match`, `case` and `const Some{ value } = …`. The
+  element found is now encoded as every `Some` payload is. Lists of structs are unchanged.
+- A method an alias declares, called on a variable annotated with the alias
+  (`const a: Amount = n; a.double()`), failed in the backend: the method was looked up on the
+  type of the value the variable was declared with. It is the receiver's declared type's.
 
 - ⚠ Output change: consecutive asserts were merged into one condition that computed every
   condition, the last one first. With `assert x > 10 else "a"; assert x > 20 else "b";`,

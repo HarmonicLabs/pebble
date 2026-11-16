@@ -305,6 +305,9 @@ export enum DiagnosticCode {
     Circular_import_of_0_may_only_reference_types_and_contracts = 6056,
     _guard_contract_methods_target_the_Plutus_V4_guarding_purpose_and_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0 = 30208,
     _nested_contract_methods_sub_transaction_execution_require_targetPlutusVersion_experimental_v4_or_newer_the_current_target_is_0 = 30209,
+    Mutually_recursive_declarations_are_not_supported_0_is_used_directly_or_indirectly_in_its_own_definition = 30210,
+    A_map_literal_is_not_assignable_to_0 = 30211,
+    A_bare_identifier_cannot_be_the_key_of_a_map_literal_Write_0_value_to_use_the_value_of_the_variable_as_the_key = 30212,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -614,6 +617,9 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 6056: return "Circular import of '{0}' may only reference types and contracts.";
         case 30208: return "'guard' contract methods target the Plutus V4 guarding purpose and require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".";
         case 30209: return "'nested' contract methods (sub-transaction execution) require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".";
+        case 30210: return "Mutually recursive declarations are not supported: '{0}' is used, directly or indirectly, in its own definition.";
+        case 30211: return "A map literal is not assignable to {0}.";
+        case 30212: return "A bare identifier cannot be the key of a map literal. Write '({0}): value' to use the value of the variable as the key.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

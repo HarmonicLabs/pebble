@@ -143,8 +143,9 @@ export function determineReassignedVariablesAndReturn(
             continue;
         }
         if( stmt instanceof TirMatchStmt ) {
-            for( const caseStmt of stmt.cases ) {
-                stack.push( caseStmt.body );
+            // the `else` arm reassigns and returns like any other arm
+            for( const arm of stmt.arms() ) {
+                stack.push( arm.body );
             }
             continue;
         }
@@ -229,8 +230,9 @@ export function determineReassignedVariablesAndFlowInfos(
             continue;
         }
         if( stmt instanceof TirMatchStmt ) {
-            for( const caseStmt of stmt.cases ) {
-                stack.push( caseStmt.body );
+            // the `else` arm reassigns and returns like any other arm
+            for( const arm of stmt.arms() ) {
+                stack.push( arm.body );
             }
             continue;
         }
@@ -297,7 +299,7 @@ export function definitelyFails( stmt: TirStmt | TirBlockStmt ): boolean
             continue;
         }
         if( stmt instanceof TirMatchStmt ) {
-            if( stmt.cases.every(({ body }) => definitelyFails( body )) ) return true;
+            if( stmt.arms().every(({ body }) => definitelyFails( body )) ) return true;
             continue;
         }
         if(

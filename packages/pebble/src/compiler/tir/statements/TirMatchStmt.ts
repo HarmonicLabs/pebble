@@ -63,9 +63,22 @@ export class TirMatchStmt
         );
     }
 
+    /**
+     * Every way through the statement: the named cases, then the `else` arm.
+     *
+     * The `else` arm is stored apart from `cases` because it has no pattern,
+     * but it is an arm like the others: whatever asks what this statement can
+     * do — terminate, fail, reassign a variable, `continue` a loop — has to
+     * ask it of these, not of `cases` alone.
+     */
+    arms(): ( TirMatchStmtCase | TirMatchStmtWildcardCase )[]
+    {
+        return this.wildcardCase ? [ ...this.cases, this.wildcardCase ] : this.cases.slice();
+    }
+
     definitelyTerminates(): boolean
     {
-        return this.cases.every(({ body }) => body.definitelyTerminates());
+        return this.arms().every(({ body }) => body.definitelyTerminates());
     }
 
     deps(): string[]

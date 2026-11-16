@@ -9,6 +9,7 @@ import { ToIRTermCtx } from "../ToIRTermCtx";
 import { getUnaliased } from "../../types/utils/getUnaliased";
 import { CEKConst, Machine } from "@harmoniclabs/plutus-machine";
 import { TirBytesT } from "../../types/TirNativeType/native/bytes";
+import { TirStringT } from "../../types/TirNativeType/native/string";
 import { TirIntT } from "../../types/TirNativeType/native/int";
 import { TirEnumType } from "../../types/TirEnumType";
 import { TirValueT } from "../../types/TirNativeType/native/value";
@@ -514,6 +515,7 @@ export class TirAddExpr
         if(
             leftType instanceof TirIntT
             || leftType instanceof TirBytesT
+            || leftType instanceof TirStringT
         ) return leftType;
         // enum + int yields an int (enums lower to ints at runtime)
         if( leftType instanceof TirEnumType ) return int_t;
@@ -556,6 +558,7 @@ export class TirAddExpr
         const irFunc = (
             (type instanceof TirIntT || type instanceof TirEnumType) ? IRNative.addInteger :
             type instanceof TirBytesT ? IRNative.appendByteString :
+            type instanceof TirStringT ? IRNative.appendString :
             type instanceof TirValueT ? IRNative.unionValue :
             undefined
         );

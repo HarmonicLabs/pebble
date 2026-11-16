@@ -27,6 +27,7 @@ import { TirArrayT } from "../../types/TirNativeType/native/array";
 import { TirValueT } from "../../types/TirNativeType/native/value";
 import { TirAliasType } from "../../types/TirAliasType";
 import { isTirStructType } from "../../types/TirStructType";
+import { _findSopOptionalIR, findSopOptionalType } from "../../expressions/findSopOptional";
 import { TirSopOptT } from "../../types/TirNativeType/native/Optional/sop";
 import { TirTypeParam } from "../../types/TirTypeParam";
 import { TirType } from "../../types/TirType";
@@ -51,6 +52,12 @@ import {
 } from "./stdScope";
 import { _toDataUplcFunc } from "../../expressions/TirToDataExpr";
 import { _ir_lazyIfThenElse } from "../../../../IR/tree_utils/_ir_lazyIfThenElse";
+
+/**
+ * the key of `std.linearMap.prepend` in `TypedProgram.genericTemplates`: a map literal is
+ * its entries prepended to the empty map (see `_compileLitteralMapExpr`)
+ */
+export const linearMapPrependTemplateName = "__pebble__std__linearMap__prepend";
 
 /**
  * Populate the top-level `std` namespace and its sub-namespaces:
@@ -710,8 +717,9 @@ export function populateStdNamespace( program: TypedProgram ): void
         listNs
     );
     defineGenericBuiltin( listNsScope, "find", 1,
-        ( [ T ] ) => new TirFuncT([ new TirFuncT([ T ], bool_t), new TirListT( T ) ], new TirSopOptT( T )),
-        () => new IRNative( IRNativeTag._findSopOptional ),
+        ( [ T ] ) => findSopOptionalType( T ),
+        // typed by the element: the `Some` payload must be data (see `_findSopOptionalIR`)
+        ( [ T ] ) => _findSopOptionalIR( T ),
         listNs
     );
     defineGenericBuiltin( listNsScope, "equals", 1,

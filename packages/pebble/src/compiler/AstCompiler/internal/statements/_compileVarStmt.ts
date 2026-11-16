@@ -16,8 +16,9 @@ import { TirSingleDeconstructVarDecl } from "../../../tir/statements/TirVarDecl/
 import { TirVarDecl } from "../../../tir/statements/TirVarDecl/TirVarDecl";
 import { TirDataT } from "../../../tir/types/TirNativeType/native/data";
 import { isTirOptType } from "../../../tir/types/TirNativeType/native/Optional/isTirOptType";
-import { TirLinearMapEntryT } from "../../../tir/types/TirNativeType/native/linearMapEntry";
+import { TirUnConstrDataResultT } from "../../../tir/types/TirNativeType";
 import { isTirStructType, TirStructConstr, TirStructField } from "../../../tir/types/TirStructType";
+import { pairConstructorOf } from "../../../tir/types/utils/pairConstructorOf";
 import { TirType } from "../../../tir/types/TirType";
 import { getNamedDestructableType, getStructType, canAssignTo } from "../../../tir/types/utils/canAssignTo";
 import { canCastToData } from "../../../tir/types/utils/canCastTo";
@@ -194,6 +195,35 @@ export function _compileNamedDeconstructVarDecl(
     if( !typeAndExpr ) return undefined;
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
+    // `RawConstr{ index, fields }`: what `unConstrData` returns is a pair at runtime, and is
+    // destructured by its two properties (see `pairConstructorOf`)
+    if( getUnaliased( finalVarType ) instanceof TirUnConstrDataResultT )
+    {
+        const rawConstr = pairConstructorOf( finalVarType )!;
+        if( decl.name.text !== rawConstr.name )
+        return ctx.error(
+            DiagnosticCode.Construcotr_0_is_not_part_of_the_definiton_of_1,
+            decl.name.range, decl.name.text, rawConstr.name
+        );
+
+        const deconstructedFields = _getDeconstructedFields( ctx, decl, rawConstr );
+        if( !deconstructedFields ) return undefined;
+        const [ fields, rest, fieldLabelRanges ] = deconstructedFields;
+
+        return new TirNamedDeconstructVarDecl(
+            decl.name.text,
+            fields,
+            rest,
+            finalVarType,
+            initExpr,
+            decl.isConst(),
+            stmtRange ?? decl.range,
+            decl.name.range,
+            fieldLabelRanges,
+            typeAnnotationRange
+        );
+    }
+
     const namedDestructableType = getNamedDestructableType( finalVarType )
     if(
         !namedDestructableType
@@ -297,16 +327,11 @@ export function _compileSingleDeconstructVarDecl(
     if( !typeAndExpr ) return undefined;
     const [ finalVarType, initExpr, typeAnnotationRange ] = typeAndExpr;
 
-    // LinearMapEntry<K,V> can be destructured as { key, value }
-    const unaliasedVarType = getUnaliased( finalVarType );
-    if( unaliasedVarType instanceof TirLinearMapEntryT ) {
-        const virtualConstr = new TirStructConstr(
-            "Entry",
-            [
-                new TirStructField( "key", unaliasedVarType.keyTypeArg ),
-                new TirStructField( "value", unaliasedVarType.valTypeArg ),
-            ]
-        );
+    // `LinearMapEntry<K, V>` is destructured as `{ key, value }`, and what `unConstrData`
+    // returns as `{ index, fields }`: pairs at runtime, each destructured by its two
+    // properties (see `pairConstructorOf`)
+    const virtualConstr = pairConstructorOf( finalVarType );
+    if( virtualConstr ) {
         const deconstructedFields = _getDeconstructedFields( ctx, decl, virtualConstr );
         if( !deconstructedFields ) return undefined;
         const [ fields, rest, fieldLabelRanges ] = deconstructedFields;

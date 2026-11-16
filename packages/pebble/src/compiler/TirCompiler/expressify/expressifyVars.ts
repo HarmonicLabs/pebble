@@ -18,6 +18,7 @@ import { TirLitVoidExpr } from "../../tir/expressions/litteral/TirLitVoidExpr";
 import { TirAssertAndContinueExpr } from "../../tir/expressions/TirAssertAndContinueExpr";
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../tir/expressions/TirCaseExpr";
+import { tirFindSopOptional } from "../../tir/expressions/findSopOptional";
 import { TirIsExpr } from "../../tir/expressions/TirIsExpr";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
@@ -211,6 +212,19 @@ export function expressifyVars(
             );
 
             c.body = expressifyFuncBody( branchCtx, branchBodyStmts, undefined );
+        }
+        // the `else` arm binds nothing, but its body reads variables, calls
+        // functions and methods like any other arm's: it goes through the
+        // same pass, in a scope of its own. Left out, every name in it reached
+        // the backend unresolved ("variable 'x' is missing", "missed
+        // expressify").
+        if( expr.wildcardCase ) {
+            const wildcard = expr.wildcardCase;
+            wildcard.body = expressifyFuncBody(
+                ctx.newChild(),
+                [ new TirReturnStmt( wildcard.body, wildcard.body.range ) ],
+                undefined
+            );
         }
         return expr;
     }
@@ -619,8 +633,14 @@ function expressifyMethodCall(
     const methodIdentifierProp = methodPropAccess.prop;
     const methodName = methodIdentifierProp.text;
 
+    // The method called is the one the receiver's STATIC type has: the type the source
+    // gives the receiver, the one this call was typed with. It is read BEFORE the receiver
+    // is expressified: `expressifyVars` replaces a variable with the expression it was
+    // declared with, whose own type can be another one (`const a: Amount = n;` is `n`, an
+    // `int`) that has none of the methods `Amount` declares.
+    const staticObjectType = methodPropAccess.object.type;
     const objectExpr = expressifyVars( ctx, methodPropAccess.object );
-    let objectType = objectExpr.type;
+    let objectType = staticObjectType;
 
     while( objectType instanceof TirAliasType ) {
         const aliasMethds = objectType.methodsNamesPtr;
@@ -1108,7 +1128,9 @@ function expressifyListMethodCall(
         // const finalType = getUnaliased( methodCall.type );
         // console.log( finalType );
         return new TirCallExpr(
-            TirNativeFunc._findSopOptional( elemsType ),
+            // typed by the element: a native element is encoded before it
+            // becomes the `Some` payload (see `_findSopOptionalIR`)
+            tirFindSopOptional( elemsType ),
             [ methodCall.args[0], objectExpr ],
             methodCall.type,
             exprRange

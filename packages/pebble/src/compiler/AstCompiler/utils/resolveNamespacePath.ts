@@ -82,6 +82,17 @@ export function bindNamespaceMember(
     const name = originalName.text;
     const localName = aliasName?.text ?? name;
 
+    // a member whose declaration is not compiled yet is compiled by this use; one that is
+    // compiling right now is being used in its own definition
+    if( !pub.ensureValueDeclared( name ) )
+    {
+        ctx.error(
+            DiagnosticCode.Mutually_recursive_declarations_are_not_supported_0_is_used_directly_or_indirectly_in_its_own_definition,
+            originalName.range, name
+        );
+        return false;
+    }
+
     const variable = pub.variables.get( name );
     const fn = pub.functions.get( name );
     const tirFunc = fn ? pub.program.functions.get( fn ) : undefined;
@@ -100,9 +111,13 @@ export function bindNamespaceMember(
 
     let ok = true;
 
+    // `localName` is only what THIS scope calls the member: the value it stands for keeps
+    // the name the program knows it by (a constant's or a function's module-unique name).
+    // Renaming the value itself to `localName` left every use pointing at a name nothing
+    // defines ("variable 'blake2b_256' not found in the context").
     if( variable )
     {
-        ok = target.defineValue({ ...variable, name: localName }) && ok;
+        ok = target.defineValue( variable, localName ) && ok;
     }
     if( fn )
     {
@@ -111,9 +126,9 @@ export function bindNamespaceMember(
         {
             target.defineValue({
                 isConstant: true,
-                name: localName,
+                name: fn,
                 type: tirFunc.type,
-            });
+            }, localName );
         }
     }
     if( ty )

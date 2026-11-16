@@ -21,6 +21,7 @@ import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearM
 import { TirListT } from "../../tir/types/TirNativeType/native/list";
 import { isTirOptType } from "../../tir/types/TirNativeType/native/Optional/isTirOptType";
 import { TirSopOptT } from "../../tir/types/TirNativeType/native/Optional/sop";
+import { getUnaliased } from "../../tir/types/utils/getUnaliased";
 import { TirStringT } from "../../tir/types/TirNativeType/native/string";
 import { TirVoidT } from "../../tir/types/TirNativeType/native/void";
 import { referenceSymbol } from "./symbols";
@@ -80,6 +81,15 @@ export function getPropAccessReturnType(
     {
         return new TirFuncT([], data_t );
     }
+    // `Optional<T>` is ONE type with two representations. A local `Optional` is the SoP one,
+    // which `hasDataEncoding()` says `false` for (it is not data at runtime) — but it has
+    // the same canonical encoding as the other, `Constr 0 [ value ]` / `Constr 1 []`, and
+    // the lowering for it exists (`_inlineToData`). Asking the representation instead of
+    // the type made `.toData()` "not exist" on every `Optional` a function declares.
+    if( propName === "toData" && sopOptionalConvertsToData( objType ) )
+    {
+        return new TirFuncT([], data_t );
+    }
 
     if( isTirStructType( objType ) ) return getStructPropAccessReturnType( ctx, objType, propId );
     if( objType instanceof TirVoidT ) return undefined;
@@ -111,6 +121,19 @@ export function getPropAccessReturnType(
     const tsEnsureExhaustiveCheck: never = objType;
     console.error( objType );
     throw new Error("unreachable::getPropAccessReturnType");
+}
+
+/**
+ * `true` for the SoP representation of an `Optional<T>` whose `T` has a data encoding:
+ * the `Some` payload is that encoding already (the SoP optional convention), so the
+ * optional converts to data by tagging it.
+ */
+function sopOptionalConvertsToData( type: TirType ): boolean
+{
+    type = getUnaliased( type );
+    if( !( type instanceof TirSopOptT ) ) return false;
+    const payload = getUnaliased( type.typeArg );
+    return payload instanceof TirSopOptT ? sopOptionalConvertsToData( payload ) : payload.hasDataEncoding();
 }
 
 function getListMethods( elemsType: TirType ): { [x: string]: TirFuncT | undefined }

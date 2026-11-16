@@ -12,6 +12,22 @@ export function _compileVarAccessExpr(
 ): TirVariableAccessExpr | undefined
 {
     const resolvedValue = ctx.scope.resolveValue( expr.text );
+
+    // a declaration of the module that is still compiling: this use is part of its own
+    // definition, through the declarations that definition uses (`f` calls `g`, `g` calls
+    // `f`; or a constant whose value needs itself). A function calling ITSELF is fine and
+    // does not get here (its name resolves to the function's own scope); two declarations
+    // defined in terms of each other have no closed term to compile to, so the use is
+    // refused here instead of looping in the backend.
+    if( ctx.scope.isBeingDeclared( expr.text ) )
+    {
+        if( resolvedValue ) referenceSymbol( ctx.program, expr.range, resolvedValue.variableInfos.symbol );
+        return ctx.error(
+            DiagnosticCode.Mutually_recursive_declarations_are_not_supported_0_is_used_directly_or_indirectly_in_its_own_definition,
+            expr.range, expr.text
+        );
+    }
+
     if( !resolvedValue ) {
         if( ctx.scope.resolveNamespace( expr.text ) )
         return ctx.error(

@@ -317,5 +317,9 @@
   "'guard' contract methods target the Plutus V4 guarding purpose and require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".": 30208,
   "'nested' contract methods (sub-transaction execution) require 'targetPlutusVersion' \"experimental-v4\" (or newer); the current target is \"{0}\".": 30209,
 
+  "Mutually recursive declarations are not supported: '{0}' is used, directly or indirectly, in its own definition.": 30210,
+  "A map literal is not assignable to {0}.": 30211,
+  "A bare identifier cannot be the key of a map literal. Write '({0}): value' to use the value of the variable as the key.": 30212,
+
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }

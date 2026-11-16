@@ -12,6 +12,8 @@ import { LitHexBytesExpr } from "../../../../ast/nodes/expr/litteral/LitHexBytes
 import { LitIntExpr } from "../../../../ast/nodes/expr/litteral/LitIntExpr";
 import { LitNamedObjExpr } from "../../../../ast/nodes/expr/litteral/LitNamedObjExpr";
 import { LitObjExpr } from "../../../../ast/nodes/expr/litteral/LitObjExpr";
+import { LitMapExpr } from "../../../../ast/nodes/expr/litteral/LitMapExpr";
+import { Identifier } from "../../../../ast/nodes/common/Identifier";
 import { LitStrExpr } from "../../../../ast/nodes/expr/litteral/LitStrExpr";
 import { LitteralExpr } from "../../../../ast/nodes/expr/litteral/LitteralExpr";
 import { TemplateStrExpr } from "../../../../ast/nodes/expr/litteral/TemplateStrExpr";
@@ -40,7 +42,11 @@ import { TirDataStructType, TirSoPStructType, TirStructType } from "../../../tir
 import { TirType, isTirType } from "../../../tir/types/TirType";
 import { TirTypeParam } from "../../../tir/types/TirTypeParam";
 import { canAssignTo, isStructOrStructAlias, getStructType, canAssignToOptional, canAssignToList } from "../../../tir/types/utils/canAssignTo";
-import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
+import { getLinearMapTypeArgs, getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
+import { TirLinearMapT } from "../../../tir/types/TirNativeType/native/linearMap";
+import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
+import { linearMapPrependTemplateName } from "../../../tir/program/stdScope/populateStdNamespace";
+import { monomorphizeGeneric } from "../../utils/monomorphizeGeneric";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "./_compileExpr";
@@ -80,6 +86,7 @@ export function _compileLitteralExpr(
     }
     if( expr instanceof LitArrExpr ) return _compileLitteralArrayExpr( ctx, expr, typeHint );
     if( expr instanceof LitObjExpr ) return _compileLitteralObjExpr( ctx, expr, typeHint );
+    if( expr instanceof LitMapExpr ) return _compileLitteralMapExpr( ctx, expr, typeHint );
     if( expr instanceof LitNamedObjExpr ) return _compileLitteralNamedObjExpr( ctx, expr, typeHint );
     if( expr instanceof LitFailExpr ) return new TirLitFailExpr( expr.range );
     if( expr instanceof TemplateStrExpr ) return _compileTemplateStrExpr( ctx, expr );
@@ -271,11 +278,128 @@ export function _compileLitteralNamedObjExpr(
     );
 }
 
+/** the empty `LinearMap`: the empty (constant) list of pairs of data */
+function _emptyLinearMap( mapType: TirType, range: LitObjExpr["range"] ): TirExpr
+{
+    return new TirLitArrExpr( [], mapType, range );
+}
+
+function _bareIdentifierMapKeyError( ctx: AstCompilationCtx, key: Identifier ): undefined
+{
+    return ctx.error(
+        DiagnosticCode.A_bare_identifier_cannot_be_the_key_of_a_map_literal_Write_0_value_to_use_the_value_of_the_variable_as_the_key,
+        key.range, key.text
+    );
+}
+
+/**
+ * A map literal, `{ #01: 10, #02: 20 }`: a `LinearMap<K, V>`, its entries in the order
+ * the source has them (duplicate keys are kept, as an association list keeps them).
+ *
+ * It is the entries prepended, last first, to the empty map:
+ * `prepend( k0, v0, prepend( k1, v1, {} ) )`, where `prepend` is `std.linearMap.prepend`
+ * (it encodes the key and the value as data, as every entry of a map is). No new kind of
+ * expression: everything after this point already knows calls and constant lists.
+ *
+ * A key is an expression, but never a bare identifier: `{ a: 1 }` is how a struct's
+ * fields are written, and reading `a` as a variable there would give the same text two
+ * meanings. `{ (a): 1 }` uses the value of `a`. (The parser refuses one next to other
+ * keys; `_compileLitteralObjExpr` refuses a literal that has nothing else.)
+ */
+export function _compileLitteralMapExpr(
+    ctx: AstCompilationCtx,
+    expr: LitMapExpr,
+    typeHint: TirType | undefined
+): TirExpr | undefined
+{
+    let mapType: TirType | undefined = typeHint;
+    let keyType: TirType | undefined = undefined;
+    let valueType: TirType | undefined = undefined;
+    if( mapType )
+    {
+        const typeArgs = getLinearMapTypeArgs( mapType );
+        if( !typeArgs ) return ctx.error(
+            DiagnosticCode.A_map_literal_is_not_assignable_to_0,
+            expr.range, mapType.toString()
+        );
+        [ keyType, valueType ] = typeArgs;
+        // a type that only asks for some map types nothing: the entries do
+        if( !keyType.isConcrete() || !valueType.isConcrete() )
+        {
+            mapType = undefined;
+            keyType = undefined;
+            valueType = undefined;
+        }
+    }
+
+    const nEntries = expr.keys.length;
+    const keys = new Array<TirExpr>( nEntries );
+    const values = new Array<TirExpr>( nEntries );
+    for( let i = 0; i < nEntries; i++ )
+    {
+        // (the parser refuses a bare identifier as a key; an `Identifier` here is what a
+        // contract's `this.param` was rewritten to)
+        const astKey = expr.keys[i];
+        const key = _compileExpr( ctx, astKey, keyType );
+        if( !key ) return undefined;
+        const value = _compileExpr( ctx, expr.values[i], valueType );
+        if( !value ) return undefined;
+
+        // no expected type: the first entry gives the map's
+        if( !keyType ) keyType = key.type;
+        if( !valueType ) valueType = value.type;
+
+        if( !canAssignTo( key.type, keyType ) ) return ctx.error(
+            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+            astKey.range, key.type, keyType
+        );
+        if( !canAssignTo( value.type, valueType ) ) return ctx.error(
+            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+            expr.values[i].range, value.type, valueType
+        );
+        keys[i] = key;
+        values[i] = value;
+    }
+
+    // the parser makes a `LitMapExpr` of a literal with one entry at least (the empty `{}`
+    // is a `LitObjExpr`): the first entry gave the types, if the expected type did not
+    if( !keyType || !valueType ) throw new Error( "unreachable: a map literal with no entry" );
+    if( !mapType ) mapType = new TirLinearMapT( keyType, valueType );
+
+    const template = ctx.program.genericTemplates.get( linearMapPrependTemplateName );
+    if( !template ) throw new Error( "map literal: 'std.linearMap.prepend' is not registered" );
+    const prepend = monomorphizeGeneric( ctx, template, [ keyType, valueType ], expr.range );
+    if( !prepend ) return undefined;
+
+    let map: TirExpr = _emptyLinearMap( mapType, expr.range );
+    for( let i = nEntries - 1; i >= 0; i-- )
+    {
+        map = new TirCallExpr(
+            new TirVariableAccessExpr(
+                {
+                    variableInfos: {
+                        name: prepend.tirFuncName,
+                        type: prepend.concreteFuncType,
+                        isConstant: true,
+                    },
+                    isDefinedOutsideFuncScope: true,
+                    crossesFunctionBoundary: false,
+                },
+                expr.range
+            ),
+            [ keys[i], values[i], map ],
+            mapType,
+            expr.range
+        );
+    }
+    return map;
+}
+
 export function _compileLitteralObjExpr(
     ctx: AstCompilationCtx,
     expr: LitObjExpr,
     typeHint: TirType | undefined
-): TirLitObjExpr | undefined
+): TirExpr | undefined
 {
     if( !isTirType( typeHint ) )
     {
@@ -283,6 +407,14 @@ export function _compileLitteralObjExpr(
             DiagnosticCode.Unnamed_object_litteral_must_be_explicitly_cast_to_a_type,
             expr.range
         );
+    }
+    // Typed as a map, a brace literal is a map literal. Its keys here are all bare
+    // identifiers (the parser makes a `LitMapExpr` of any other), which a map's keys
+    // never are: only the empty one, `{}`, is a map.
+    if( getLinearMapTypeArgs( typeHint ) )
+    {
+        if( expr.fieldNames.length > 0 ) return _bareIdentifierMapKeyError( ctx, expr.fieldNames[0] );
+        return _emptyLinearMap( typeHint, expr.range );
     }
     if( !isStructOrStructAlias( typeHint ) )
     {

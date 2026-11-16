@@ -11,6 +11,7 @@ import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo } from "../../../tir/types/utils/canAssignTo";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
+import { addRightOperandType } from "../exprs/binary/_compileAddExpr";
 import { referenceSymbol } from "../../utils/symbols";
 
 export function _compileAssignmentStmt(
@@ -119,7 +120,8 @@ export function _compileExplicitAssignmentStmt(
     }
     else if( stmt instanceof AddAssignmentStmt )
     {
-        expr = __getBinOpAssignmentLeftArg( ctx, stmt, varType, int_t );
+        // `a += b` is `a = a + b`: whatever `+` adds (ints, bytes, strings, values)
+        expr = __getBinOpAssignmentLeftArg( ctx, stmt, varType, addRightOperandType( ctx, varType ) ?? int_t );
         if( !expr ) return undefined;
         expr = new TirAddExpr(
             varAccessExpr.clone(),

@@ -97,28 +97,25 @@ export function _compileFuncExpr(
     }
     else
     {
-        expectedFuncType = (
-            isMethod ? undefined :
-            ctx.program.functions.get( expr.name.text )?.sig()
-        );
-        if(!( expectedFuncType instanceof TirFuncT ))
+        // the signature is the declaration's own. (It used to be looked up by NAME in
+        // `program.functions` first: any function of the program with the same source
+        // name, of any module, gave this one its signature.)
+
+        // if the return type annotation is missing,
+        // infer it from the body instead of erroring
+        if( !expr.signature.returnType )
         {
-            // if the return type annotation is missing,
-            // infer it from the body instead of erroring
-            if( !expr.signature.returnType )
-            {
-                return _compileFuncExprInferReturnType(
-                    ctx, expr, isMethod
-                );
-            }
-            expectedFuncType = getDataFuncSignature(
-                ctx,
-                expr.signature
+            return _compileFuncExprInferReturnType(
+                ctx, expr, isMethod
             );
-            if(!(
-                expectedFuncType instanceof TirFuncT
-            )) return undefined;
         }
+        expectedFuncType = getDataFuncSignature(
+            ctx,
+            expr.signature
+        );
+        if(!(
+            expectedFuncType instanceof TirFuncT
+        )) return undefined;
     }
 
     const returnType = expectedFuncType.returnType;

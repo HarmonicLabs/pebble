@@ -1,7 +1,6 @@
 import { TirNamedDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirNamedDeconstructVarDecl";
 import { TirSingleDeconstructVarDecl } from "../../tir/statements/TirVarDecl/TirSingleDeconstructVarDecl";
-import { TirLinearMapEntryT } from "../../tir/types/TirNativeType/native/linearMapEntry";
-import { getUnaliased } from "../../tir/types/utils/getUnaliased";
+import { pairConstructorOf } from "../../tir/types/utils/pairConstructorOf";
 import { isSingleConstrStruct } from "./isSingleConstrStruct";
 
 export function toNamedDeconstructVarDecl(
@@ -12,11 +11,12 @@ export function toNamedDeconstructVarDecl(
     if( varDecl instanceof TirSingleDeconstructVarDecl ) {
         const declType = varDecl.type;
 
-        // LinearMapEntry<K,V> uses virtual "Entry" constructor name
-        const unaliased = getUnaliased( declType );
-        if( unaliased instanceof TirLinearMapEntryT ) {
+        // a pair at runtime (`LinearMapEntry`, `RawConstr`): the name of the one
+        // constructor it is destructured as
+        const pairConstr = pairConstructorOf( declType );
+        if( pairConstr ) {
             return new TirNamedDeconstructVarDecl(
-                "Entry",
+                pairConstr.name,
                 varDecl.fields,
                 varDecl.rest,
                 varDecl.type,

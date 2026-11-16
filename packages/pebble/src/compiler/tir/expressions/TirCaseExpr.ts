@@ -282,10 +282,19 @@ export class TirCaseExpr
             let someValueType: TirType | undefined = undefined;
             if( someBranch ) {
                 const varDecl = someBranch.pattern.fields.values().next().value;
-                if(!( varDecl instanceof TirSimpleVarDecl ))
-                throw new Error("case pattern not expressified.");
-                someBranchVarSym = someBranchCtx.defineVar( varDecl.name, varDecl );
-                someValueType = varDecl.type;
+                if( varDecl === undefined ) {
+                    // `Some{}`: the arm matches the constructor and binds
+                    // nothing. The payload is still the handler's argument,
+                    // so the arm's scope introduces it, unused — as a struct
+                    // arm does for the fields its pattern leaves out.
+                    someBranchVarSym = someBranchCtx.pushUnusedVar();
+                }
+                else {
+                    if(!( varDecl instanceof TirSimpleVarDecl ))
+                    throw new Error("case pattern not expressified.");
+                    someBranchVarSym = someBranchCtx.defineVar( varDecl.name, varDecl );
+                    someValueType = varDecl.type;
+                }
             }
             const someBranchIR = someBranch?.body.toIR( someBranchCtx ) ?? wildcardBodyIR.clone();
 

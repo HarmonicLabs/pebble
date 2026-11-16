@@ -402,7 +402,8 @@ function prependUpdatesToUserContinues( stmts: TirStmt[], update: TirStmt[] ): v
         }
         if( stmt instanceof TirMatchStmt )
         {
-            for( const matchCase of stmt.cases )
+            // the `else` arm included: a `continue` there skips the update too
+            for( const matchCase of stmt.arms() )
             {
                 if( matchCase.body instanceof TirContinueStmt )
                     matchCase.body = new TirBlockStmt(
