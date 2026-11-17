@@ -422,6 +422,46 @@ Written as the documentation has them, and refused or broken until now (PEBBLE_B
   bytes to 4,175. Scripts with no such function change by a few bytes either way: recompile
   and compare hashes before relying on a script address.
 
+### PEBBLE_BUGS 49 to 81, one line each
+
+The repro, the root cause and the fix of each are in `PEBBLE_BUGS.md`, and the tests in
+`compiler.jacquardBugs.0_6_0.test.ts` (49 to 77) and `compiler.jacquardBugs.0_6_0.sharing.test.ts`
+(78 to 81). The sections above describe the same fixes by what they change for a program.
+
+- **49**: the `else` arm of a `case` expression could not read a variable or call a function.
+- **50**: `Some{}`, binding no field, failed in the backend as a `case` pattern.
+- **51**: the `else:` arm of a `match` lost its assignments and returns; its `continue` never ended.
+- **52**: `find` on a list of ints or of bytes returned an `Optional` that failed whatever read it.
+- **53**: `using { … } = std.<namespace>;` inside a function or a method failed in the backend.
+- **54**: map literals, `{}` and `{ #01: 10 }`, were documented and not implemented.
+- **55**: `Optional<T>.toData()` did not exist.
+- **56**: a function or a constant was visible only below its declaration.
+- **57**: `bytes + bytes` was refused, and `+=` added ints only.
+- **58**: `const RawConstr{ index, fields } = unConstrData( d );` was refused.
+- **59**: warning 6134 was raised for a `const` read by an assert and by the statement after it.
+- **60**: a boolean as data was `Constr 0` when `true`; it is when `false` now (breaking, above).
+- **61**: two modules that each declared a function of the same name ran one another's.
+- **62**: a method of an alias, on a variable annotated with the alias, failed in the backend.
+- **63**: the functions of a namespace could not use the functions and constants of their module.
+- **64**: `xs.head()` and `xs.tail()` in an `if` ran when it was not taken: an empty list failed.
+- **65**: an `Optional` read from a datum fit one made in a function only as a call argument.
+- **66**: `==` on an `Optional` made in a function or a type with no equality failed in the backend.
+- **67**: `List<Optional<T>>` as a variable's or a parameter's type failed in the backend.
+- **68**: the `else` arm of a `case` expression was not type-checked.
+- **69**: a variable narrowed by `is` or by a `case` arm could not be used as the type it has.
+- **70**: warning 6134 was raised for `n % R`, with `R` a module's constant other than 0.
+- **71**: `reverse()` on a list or on a map was accepted and failed in the backend.
+- **72**: `b.toInt()`, `b as int`, `std.bytes.toInt( b )` were accepted and failed in the backend.
+- **73**: `==` on two entries of a map, and `map.includes( entry )`, failed in the backend.
+- **74**: `map.find( … )` failed in the backend.
+- **75**: `b.decodeUtf8()` failed in the backend; a string had `bytes`' methods, not `encodeUtf8()`.
+- **76**: a `case` arm of the form `c ? a : b` took the next arm for its own ("Statement expected").
+- **77**: warning 6134 was raised for a value in a list written for a multi-scalar multiplication.
+- **78**: each copy of a rewritten term got new variables: a function was compiled once per call.
+- **79**: a term kept the hash it had before what it holds was replaced.
+- **80**: after replacing a term, the walk of the tree skipped the `case` branches not yet visited.
+- **81**: a function that hashes passed for expensive work and was bound in every branch calling it.
+
 ### Editors: `check()`
 
 `Compiler.check()` is what the language server runs on every change. It now answers for the
