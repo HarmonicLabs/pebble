@@ -1770,6 +1770,80 @@ trace std.builtins.serialiseData( v.toData() ).show();
 Not touched (it is another package). Until it is fixed, a test that passes
 here says nothing about a hash over a map.
 
+### Not the compiler: `equalsData` on lists, and `multiScalarMul` — FIXED (2026-11-16)
+
+Two more defects of the JavaScript CEK machine's dependencies, found the same
+way. Neither is in the compiler; both change what a test of a contract can
+see. Both are fixed where they are (not committed when this was written).
+
+- **`equalsData` took a list for a longer one it is a prefix of.**
+  `@harmoniclabs/plutus-data` 2.0.1, `src/Data.ts`, `eqData`: constructors and
+  maps compared their lengths, lists did not
+  (`a.list.every( ( elem, idx ) => eqData( elem, b.list[ idx ] ) )`). So
+  `equalsData( List [], List [ I 1 ] )` was `True` on the local machine and
+  `False` on a node, where it is `(==)` on `Data` (Plutus,
+  `Default/Builtins.hs`: `equalsDataDenotation = (==)`; `Data` derives `Eq`).
+  A script that checks an output by building the datum it expects accepted,
+  locally, any datum whose lists are cut short — and a shortcut struct is a
+  list of its fields. `a == b` on two `List<…>` values was not affected: the
+  compiler emits its own loop for it. Fixed in `eqData`
+  (`src/__tests__/Data.eqData.test.ts`, 6 tests).
+- **`bls12_381_G1_multiScalarMul` and its G2 twin always failed on a list that
+  is not empty.** `@harmoniclabs/plutus-machine` 3.1.0 called `msm` of
+  `@noble/curves`, while its points are made by the copy of the same library
+  vendored in `@harmoniclabs/crypto`: `msm` checks `instanceof` and threw
+  `invalid point at index 0`. The sum is now built with the operations every
+  other BLS builtin uses, and the second curve library is no longer a
+  dependency.
+
+### Not the compiler: what a script costs, and five results (2026-11-16)
+
+Checking the multi-scalar multiplication against the Plutus conformance suite
+(its 2026-01 state, 991 cases, 724 of them with the budget the evaluation must
+spend) showed that the machine agreed with it on 899 of 935 results and on 396
+of 724 budgets. It agrees on all of both now. None of this is in the compiler,
+but every cost measured for a Pebble contract came out of this machine.
+
+`@harmoniclabs/plutus-machine` (`src/__tests__/plutus_conformance_2026.test.ts`
+holds the suite to results and budgets; `aiken_crosscheck.test.ts` now also
+asserts the budget Aiken reports for a real script, met to the unit):
+
+| What | Before |
+|---|---|
+| sizes of integers and byte strings | counted in bytes; Plutus counts 64-bit words. Every cost that grows with a size grew eight times as fast (`blake2b_256` of 64 bytes: 736,089 steps for 268,153), and costs that compare two sizes took the wrong branch: `divideInteger -503 -1777777777` cost 85,848 for 131,930, an **under**estimate |
+| size of a string | its UTF-8 bytes, for its characters |
+| `multiplyInteger`, `verifyEd25519Signature` | the cost shapes of Plutus V1/V2 (sum of the sizes; size of the signature) under V3 parameters, where they are the product of the sizes and the size of the message. A V1 or V2 cost model keeps the old shapes |
+| division, quotient, remainder, modulo | the term in the square of the divisor's size was not squared |
+| `integerToByteString`, `replicateByte`, `dropList`, shifts, rotations | a width, a length or a count was costed on the size of the number and not on what it asks for |
+| `andByteString`, `orByteString`, `xorByteString` | costed on the operands after padding or truncating |
+| `sliceByteString` | cost nothing when the slice was empty |
+| `unValueData`, `listToArray`, `writeBits` | costed on a size where Plutus counts nodes, elements, positions |
+| a cost beyond 64 bits | did not stop at the largest one |
+| `xorByteString` with padding | padded with ones: wrong result |
+| `findFirstSetBit` | wrong for anything but an all-zero input |
+| `rotateByteString` | wrong beyond two bytes, and for a count that needs more than 53 bits |
+
+`@harmoniclabs/uplc`, the text parser (`UPLC.Term.parseUPLCText.bls.test.ts`,
+`…value.test.ts`): a list of BLS12-381 constants lost everything after its
+first element; a `value` constant was kept as the list written, unsorted,
+with repeated keys, zero quantities, keys of any length; a byte string with no
+`#` was read as an empty one.
+
+`@harmoniclabs/crypto` (`secp256k1.plutus.test.ts`, run on the sources and on
+`dist`): the **built** package refused every ECDSA secp256k1 signature. It
+compiles to ES5, where a class that extends `Error` builds plain `Error`s, and
+the vendored `verify` tells "not DER, try the compact form" by `instanceof`.
+The package's tests run from the sources and never saw it. The signature is
+now read as `r ‖ s` and nothing else, a key that is not on the curve or an
+`r`, `s` at or above the group's order is an error as on a node (it was
+`false`), and so is a Schnorr key that is no x coordinate.
+
+The costs measured for the Jacquard contracts came down with the fixes, the
+more so the more a transaction hashes and multiplies field elements: the
+data-mode commitment with the Groth16 and KZG checks went from 4.48 to 4.04
+billion steps over 1 blob, from 6.21 to 5.28 over 4 and from 8.73 to 7.03 over
+8, and 12 blobs fit a transaction (8.83 billion) where they did not.
+
 ### Not the compiler: buildooor and the ledger's balance
 
 `TxBuilder` (buildooor 0.3.0) computed the change as `inputs + mint - outputs -
@@ -1781,3 +1855,538 @@ Slashing a bond donates half of it, which is how it showed.
 
 Fixed in buildooor (`balanceWithdrawalsAndDonation`, with
 `TxBuilder.build.withdrawals_donation.test.ts`, 9 tests).
+
+---
+
+## BUGs 65–70 — found adding the data-L2 mode to the Jacquard kernel (2026-11-16)
+
+> **Scope.** The same project as BUGs 49–64, one feature later. The line that
+> started it is `claimed == old` on two `Optional<int>` parameters; 66 to 69
+> were found following its root cause through the compiler, and 70 writing a
+> KZG check.
+>
+> **Resolved.** All six are fixed at the root. Regression coverage is in the
+> same file, `compiler.jacquardBugs.0_6_0.test.ts` (34 more tests, 146 in all;
+> each asserts the evaluated result or the exact diagnostic). Run against the
+> compiler before these fixes (`553b6ed1`), 26 of the 34 fail and the 8 that
+> pass are the controls. Full suite green (1337 passed). The examples and the
+> eleven Jacquard contracts that compiled before compile to the same bytes.
+>
+> **Not committed yet** when this was written.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 65 | HIGH | an `Optional` read out of a datum and one made in a function are two types with one name: refused, crashing or wrong everywhere but as a call argument | FIXED 2026-11-16 |
+| 66 | MEDIUM | `==` on an `Optional` made in a function, or on any type with no equality: backend crash | FIXED 2026-11-16 |
+| 67 | MEDIUM | `List<Optional<T>>` as an annotation gets an element type no list can hold: backend crash | FIXED 2026-11-16 |
+| 68 | MEDIUM | the `else` arm of a `case` expression is not type-checked | FIXED 2026-11-16 |
+| 69 | MEDIUM | a variable narrowed by `is` or a `case` arm cannot be used as the type it has | FIXED 2026-11-16 |
+| 70 | LOW | warning 6134 on a value that cannot fail: `n % R`, with `R` a module constant | FIXED 2026-11-16 |
+
+### BUG 65 — HIGH: the two encodings of `Optional<T>` — FIXED (2026-11-16)
+
+> **FIXED.** An `Optional<T>` is data when it comes out of a datum (`Constr 0
+> [x]`) and a constructor term when a function makes it (`TirDataOptT`,
+> `TirSopOptT`). Both print as `Optional<T>`. Two things were wrong.
+>
+> 1. In `canAssignTo`, the rule for a data optional as the TARGET was a copy of
+>    the rule above it, for a SoP target, with its two cases not swapped: a SoP
+>    optional was "assignable as it is" to a data one (it is not the same value
+>    at run time), and a data optional "needs a cast" to a data one.
+> 2. The conversion between the two (`isOptionalEncodingBridge`) was inserted
+>    for call arguments only.
+>
+> The rule is now its mirror image, and every place a value flows into a typed
+> slot converts through one helper (`AstCompiler/utils/fitToType.ts`): `return`,
+> an annotated `const`/`let`, an assignment, the second arm of `?:`, the arms of
+> a `case` (with a type to aim at, joined without one, the `else` arm too), a
+> struct field, a list element, a call argument, and the operands of `==`.
+
+```pebble
+struct Holder { Holder { maybe: Optional<int> } }
+
+function f( d: data ): Optional<int> {
+    const Holder{ maybe } = d as Holder;
+    return maybe;     // ERROR 2322 "Type 'Optional<int>' is not assignable to type 'Optional<int>'"
+}
+```
+
+What each site did before, with `maybe` out of a datum and `made` built in the
+function:
+
+| Source | Before |
+|---|---|
+| `return maybe;` from a function declared `Optional<int>` | ERROR 2322, both types printed `Optional<int>` |
+| `const x: Optional<int> = maybe;` &nbsp; `x = maybe;` | the same |
+| `let y = maybe; y = made;` | backend: `Cannot convert from Optional<int> to Optional<int>` |
+| `c ? maybe : made` | compiled; `c ? made : maybe` was ERROR 2322 |
+| `[ maybe, made ]` | ERROR 2322 |
+| `made == maybe` | ERROR 2322 |
+| `maybe == made` | **compiled, and failed at run time**: `equalsData :: not data` |
+| `f( maybe )` | converted (the one site that did) |
+
+### BUG 66 — MEDIUM: `==` with no term behind it — FIXED (2026-11-16)
+
+> **FIXED.** `_compileEqualExpr` accepted any two operands of assignable types
+> and `IRNative.equals` threw `invalid type for std equality` for a SoP
+> optional, a runtime struct, a function, a BLS12-381 element and an array —
+> a backend error with no source position. Every `Optional` made in a function
+> or received as a parameter is a SoP optional, so `a == b` on two parameters
+> of type `Optional<int>` crashed, as did `xs.find( … ) == x` and `m.lookup( k )
+> != none`.
+>
+> - A SoP optional has an equality now (`getEqSopOpt`): its `Some` holds the
+>   payload's data encoding whatever the payload is, so one term compares any
+>   two — by constructor, then `equalsData` on the payloads.
+> - `hasStdEquality` (`tir/types/utils`) lists exactly the types
+>   `IRNative.equals` has a term for; the front end asks it and reports error
+>   2365 (`Operator '==' cannot be applied to types …`) for the others.
+> - The left operand was compiled with the type the comparison is wanted as
+>   (`boolean`), which refused a struct literal there: `if( P.P{ … } == p )`
+>   was "Named object litteral is not assignable to boolean".
+
+```pebble
+function same( a: Optional<int>, b: Optional<int> ): boolean {
+    return a == b;       // backend error: invalid type for std equality
+}
+```
+
+### BUG 67 — MEDIUM: `List<Optional<T>>` as an annotation — FIXED (2026-11-16)
+
+> **FIXED.** `List` is a registered generic name, so `List<Optional<int>>`
+> reaches the named-generic branch of `_compileSopEncodedConcreteType`, which
+> compiled every type argument as SoP. The branch for the native list above it
+> compiles the argument as data, with the comment that says why: a list holds
+> low-level UPLC values, never constructor terms. In the named branch an
+> `Optional` among the arguments of `List` and `LinearMap` is now the data one.
+> The other arguments resolve as they did, so a `List<G1>` is still a list of
+> points (a type with no data encoding must not be resolved as data).
+
+```pebble
+const s: Optional<int> = Some{ value: 7 };
+const xs: List<Optional<int>> = [ s, s ];      // backend error: invalid constant
+const none: List<Optional<int>> = [];
+none.prepend( s );                             // backend error: SoP encoded optional cannot be represented as uplc const
+```
+
+A list of optionals out of a datum could not be passed to a function declared
+to take one either: "Type 'List<Optional<int>>' is not assignable to type
+'List<Optional<int>>'".
+
+### BUG 68 — MEDIUM: the `else` arm of a `case` — FIXED (2026-11-16)
+
+> **FIXED.** `_compileCaseWildcardMatcher` compiled the arm's body and never
+> compared its type with the expression's (BUG 29 added that check for the
+> other arms). It is an arm like the others now.
+
+```pebble
+const n: int = case o is Some{ value } => value else #aabb;   // compiled; `n` is bytes when `o` is None
+```
+
+### BUG 69 — MEDIUM: a narrowed variable loses its type — FIXED (2026-11-16)
+
+> **FIXED.** Inside `if( o is Some )`, the arm of a `case`, or `o is Some ? … :
+> …`, the variable's type is a view of its struct holding some of the
+> constructors (`narrowTo`). Two things did not know that a view is still the
+> struct.
+>
+> 1. For an `Optional`, the view is a plain struct type named `Optional`: no
+>    rule made it assignable to `Optional<T>`, it had no `toData`, and no
+>    equality. `canAssignTo` now treats it as the optional it is, in the
+>    encoding it has (`narrowedOptionalView`), and so do the conversion to data
+>    and `==`.
+> 2. Two views of one struct did not join: `joinTypes` now gives the view that
+>    holds the constructors of both (`unionWith`).
+
+```pebble
+function valueOf( o: Optional<int> ): int { return case o is Some{ value } => value is None{} => 0; }
+
+if( o is Some ) { n = valueOf( o ); }          // ERROR 2322 "Type 'Optional' is not assignable to type 'Optional<int>'"
+const w = case v is A{} => v is B{} => v;      // ERROR 2322 "Type 'AB' is not assignable to type 'AB'"
+```
+
+### BUG 70 — LOW: warning 6134 on `n % R` — FIXED (2026-11-16)
+
+> **FIXED.** Warning 6134 ("computed only where it is read, and some ways
+> after it do not read it") is for a value whose computation may fail. A
+> division counted as one unless its divisor was a number other than 0 written
+> on the spot (`isNonZeroIntLiteral`). The order of a field is a `const` at the
+> top of a file, and every `x % R` was "may fail": each `const` holding a field
+> element drew the warning, on code with nothing to fix.
+>
+> `FailureAnalysis.isNonZeroConstant` follows a module's `const` to its value:
+> a constant that is a number other than 0, directly or through another one,
+> imported ones included. A constant that is 0, a parameter and a local
+> variable still count as they did, also a local named like a module constant.
+
+```pebble
+const R = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+
+function main( n: int ): int {
+    const m = n % R;        // WARNING 6134: 'm' is computed only where it is read…
+    if( n > 100 ) return 0;
+    return m;
+}
+```
+
+---
+
+## BUGs 71–75 — methods the checker offers and the backend does not have (2026-11-16)
+
+> **Scope.** Bringing the Jacquard kernel up to the current data-L2 mode, a
+> list built by prepending in a loop had to be put back in order:
+> `cited.reverse()` type-checked and crashed the backend. Every method the
+> checker offers on a list, a map and a byte string was then tried once
+> (41 calls): 36 compiled and gave the right value, the others are below.
+>
+> **Resolved.** All five are fixed at the root, with 14 tests in
+> `compiler.jacquardBugs.0_6_0.test.ts` (160 in all). On the compiler before
+> these fixes 12 of the 14 fail and the 2 that pass are controls. Full suite
+> green (1351 passed).
+>
+> **Not committed yet** when this was written.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 71 | MEDIUM | `xs.reverse()` on a list or a map: accepted, then `not implemented::expressifyMethodCall` | FIXED 2026-11-16 |
+| 72 | MEDIUM | `b.toInt()`, `b as int`, `std.bytes.toInt( b )`: accepted, then `unknown (negative) native … _bytesToIntBE` | FIXED 2026-11-16 |
+| 73 | MEDIUM | `==` on two entries of a map, and `map.includes( entry )`: `unknown (negative) native … _equalPairData` | FIXED 2026-11-16 |
+| 74 | MEDIUM | `map.find( … )`: `TirToDataExpr: cannot convert to Data from type #pair_data` | FIXED 2026-11-16 |
+| 75 | LOW | `bytes.decodeUtf8()` had no backend, `string.encodeUtf8()` could not be written, and a string was offered the methods of `bytes`, which fail on it at run time | FIXED 2026-11-16 |
+
+All five are backend errors with no source position, on code the checker
+accepted.
+
+### BUG 71 — MEDIUM: `reverse()` — FIXED (2026-11-16)
+
+> **FIXED.** `getListMethods` and `getLinearMapMethods` declare `reverse`;
+> `expressifyListMethodCall` ended on a commented-out `// TODO` listing it. The
+> function `std.list.reverse( xs )` existed and worked. The method is now the
+> same term (`tir/expressions/reverseList.ts`, used by both), and a map has it
+> through the list of pairs it is.
+
+```pebble
+let acc: List<int> = [];
+for( const x of xs ) { acc = acc.prepend( f( x ) ); }
+const inOrder = acc.reverse();      // backend error: not implemented::expressifyMethodCall … 'reverse'
+```
+
+### BUG 72 — MEDIUM: bytes to integer — FIXED (2026-11-16)
+
+> **FIXED.** `IRNativeTag._bytesToIntBE` is what `b.toInt()`, `b as int` and
+> `std.bytes.toInt( b )` compile to, and `nativeToIR` had its case commented
+> out (`// case IRNativeTag._bytesToIntBE: ;`). It is `byteStringToInteger
+> True`, the mirror of the `_intToBytesBE` beside it. Contracts reached the
+> builtin directly (`std.builtins.byteStringToInteger( true, b )`), which is
+> why nothing showed.
+
+### BUG 73 — MEDIUM: equality of two map entries — FIXED (2026-11-16)
+
+> **FIXED.** The same in `nativeToIR` for `IRNativeTag._equalPairData`, which
+> `TirNativeFunc._equals` returns for a pair of data and for a map entry: `e ==
+> f` and `map.includes( e )` crashed. Two pairs are equal when both halves are
+> (`equalsData` on each, the second only if the first holds).
+
+### BUG 74 — MEDIUM: `find()` on a map — FIXED (2026-11-16)
+
+> **FIXED.** `find` wraps what it finds in `Some`, whose payload is data: for a
+> list of integers the element is encoded first (BUG 53). For a map the
+> element is a pair, which has no data form, and asking for one threw. But the
+> consumers of an `Optional<entry>` already take the payload as the pair it is
+> (`_inlineFromData`: "LinearMapEntry is Pair<Data,Data> at runtime — no
+> conversion needed"), so the finder now leaves a pair as it finds it
+> (`findSopOptional.ts`, `elementsAreData`).
+
+```pebble
+const best = case prices.find( e => e.value > floor )      // backend error: cannot convert to Data from type #pair_data
+    is Some{ value } => value.key
+    is None{} => #;
+```
+
+### BUG 75 — LOW: a string and its bytes — FIXED (2026-11-16)
+
+> **FIXED.** Three things about the type `string` (what `decodeUtf8` gives; a
+> quoted literal is `bytes`).
+>
+> 1. `bytes.decodeUtf8()` was declared and `expressifyMethodCall` had no case
+>    for it: `not implemented::expressifyMethodCall for type 'bytes'`.
+> 2. The table `stringMethods` (`encodeUtf8`) was never read: a string was
+>    given `bytesMethods` instead, so `s.encodeUtf8()` was error 2339 and the
+>    only way from a string to its bytes was `std.builtins.encodeUtf8( s )`.
+> 3. With the methods of `bytes`, `s.length()` or `s.slice( … )` on a string
+>    compiled to `lengthOfByteString`, `sliceByteString` applied to a string,
+>    which fail at run time. They are refused now (error 2339): a string has
+>    the one method that gives its bytes, and the rest is asked of those. The
+>    member list the editor shows (`SourceTypeMap.stringMembers`) says the same.
+
+---
+
+## BUGs 76–77 — found writing the Jacquard DA scripts (2026-11-16)
+
+> **Resolved.** Both fixed at the root, with 6 tests in
+> `compiler.jacquardBugs.0_6_0.test.ts` (166 in all). Full suite green (1357
+> passed). **Not committed yet** when this was written.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 76 | MEDIUM | a `case` arm whose body is `c ? a : b` swallows the next arm: "Statement expected", reported lines below | FIXED 2026-11-16 |
+| 77 | LOW | warning 6134 on a value read in a list written out for a multi-scalar multiplication | FIXED 2026-11-16 |
+
+### BUG 76 — MEDIUM: a conditional as the body of a `case` arm — FIXED (2026-11-16)
+
+> **FIXED.** Inside a `case`, `is` separates the arms and binds looser than
+> `?:` (`_caseArmIsLowPrec`). The parser read the else branch of a conditional
+> down to the comma, as outside a `case`, so with an arm after it the branch
+> took that arm's `is` for a test of its own last operand: `b is Rect{ … }`.
+> What followed (`=>`) then made no sense, and the error was reported where the
+> statement list next broke — in the case that showed it, the closing brace of
+> the next function. The else branch now stops where its arm does. In
+> parentheses nothing changes: `( c ? p : q ) is Some` and `( c ? p : q is Some )`
+> are what they say.
+
+```pebble
+return case shape
+    is Square{ side } => big ? side * side : side
+    is Rect{ w, h } => w * h          // ERROR 1368 "Statement expected.", some lines further down
+    ;
+```
+
+### BUG 77 — LOW: warning 6134 and a list written out — FIXED (2026-11-16)
+
+> **FIXED.** The analysis behind warning 6134 does not count a read inside a
+> list written out (`[ a, v ]`) as one that computes `v`, and it is right not
+> to: `[ a, v ].head()` is `a`, and `v` is never computed (there is a control
+> for it). But a list written out as the scalars or the points of
+> `g1MultiScalarMul` is used whole, and a `const` holding one of them — a field
+> element reduced with an assert on its range — drew the warning on code with
+> nothing to fix. The two multi-scalar multiplications are now known to use
+> every element of a list written out for them
+> (`loopResultIsForced.ts`, `WHOLE_LIST_BUILTINS`).
+
+```pebble
+const v = evaluated( coeffs, x );                    // asserts each coefficient is a field element
+const left = g1MultiScalarMul( [ 1, R - v ], … );    // WARNING 6134: 'v' is computed only where it is read…
+```
+
+## BUGs 78–81 — one function, compiled several times (2026-11-16)
+
+> **Scope.** The registry script of the Jacquard DA layer came out at 22,089
+> bytes: more than a transaction holds. It verifies a Merkle Patricia Forestry
+> proof in five places, and the proof function was in the script once per
+> call — a function called once cost 3,471 bytes, twice 6,547, four times
+> 12,705. Four faults of the backend, each of which alone makes it compile a
+> function more than once.
+>
+> **Resolved.** All four are fixed at the root, with 33 tests in
+> `compiler.jacquardBugs.0_6_0.sharing.test.ts`; on the compiler before these
+> fixes 30 of them fail (the three that pass are two controls and the test of
+> the new debug check itself). Full suite green (1390 passed), also with
+> `PEBBLE_DBG_HASHES=1`. The same function now costs 1,135
+> bytes called once, 1,158 twice, 1,180 four times; the registry is 4,175
+> bytes; the fourteen scripts of the Jacquard kernel went from 33,332 bytes
+> to 30,300 (the largest from 14,164 to 12,053), and all their tests pass.
+>
+> **Not committed yet** when this was written.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 78 | HIGH | a pass that rewrites a term gives each copy of it variables of its own: the copies are no longer one term, and a function is compiled once per call | FIXED 2026-11-16 |
+| 79 | HIGH | a term goes on remembering the hash it had before what it holds was replaced: terms that differ pass for equal, and equal ones for different | FIXED 2026-11-16 |
+| 80 | HIGH | the walk of the tree skips the other branches of a `case` once a term was replaced inside one: a pass that replaces something everywhere does it in one method only | FIXED 2026-11-16 |
+| 81 | HIGH | a function that hashes passes for expensive work and is bound again in every branch it is called from: a copy of its body per branch | FIXED 2026-11-16 |
+
+None of the four gives a wrong script by itself: the scripts were right, and
+several times too large. 79 and 80 are worse than that in what they allow —
+see each.
+
+### How the backend shares a term
+
+A term is in the tree once per use: a function called in four places is four
+copies of one term. `handleLetted` and `handleHoisted` recognize the copies by
+their **hash** — a Merkle hash over the tree, in which a variable is hashed by
+identity — and bind the term once for all of them. Everything below is a way
+for two copies of one term to stop having the same hash, or for a term to be
+bound once per place although it has one.
+
+### BUG 78 — HIGH: every copy of a term gets variables of its own — FIXED (2026-11-16)
+
+> **FIXED.** A pass that introduces a variable now asks for the one that
+> belongs to what it is rewriting (`derivedSymbol`, a table of the
+> compilation keyed by the hash of the term before the rewrite), so equal
+> terms are rewritten into equal terms. `TirHoistedExpr.toIR` already said
+> why that matters ("converting the same function once per call site would
+> produce hash-DIFFERENT (alpha-equivalent) copies") and solved it for the
+> conversion to IR by converting once and cloning; the passes that run after
+> it undid that. The places:
+>
+> - a test of a list (`xs.isEmpty()`, `xs.length() == 0`, `strictChooseList`)
+>   becomes a `case` whose branch binds the head and the tail: `Symbol("_h")`
+>   and `Symbol("_t")` at each of the three sites of
+>   `rewriteNativesAppliedToConstantsAndReturnRoot`. Nothing differs until
+>   `rewriteHeadTailInCaseCons` makes the branch READ them;
+> - the `case` introduced where a function reads both the head and the tail
+>   of a list (`introduceCaseForDualHeadTailAndReturnRoot`);
+> - the function that drops `n` elements, built again wherever `n` elements
+>   are dropped, for an `n` with no template (5, 6, 7, 9, …);
+> - `λ recBody. recBody recBody`, which each recursive function is applied
+>   through: one variable for all of them now, as for any other template.
+
+```pebble
+function total( xs: List<int>, acc: int ): int {
+    if( xs.isEmpty() ) return acc;                    // -> case xs of cons _h _t -> … ; nil -> acc
+    return total( xs.tail(), acc + xs.head() );       //    … _t … _h …
+}
+// total( a, 0 )                                              36 bytes
+// total( a, 0 ) + total( b, 1 )                              71 bytes   (now 45)
+// total( a, 0 ) + total( b, 1 ) + total( c, 2 ) + total( d, 3 )   137 bytes   (now 62)
+```
+
+A function with no list test in it was shared, which is why this went
+unnoticed: it takes a rewrite that binds something, and then a read of it.
+
+### BUG 79 — HIGH: the hash of a term that no longer exists — FIXED (2026-11-16)
+
+> **FIXED.** Every node remembers its hash once computed, and has a
+> `markHashAsInvalid` that forgets it and tells the node it is in. Nothing
+> called it: the setters of a node's children did, until the hashes were
+> removed and put back (`0b3ce7a6 add back IR hashes`, 2025-10) without those
+> calls. A node whose child was replaced kept the hash of the term it had
+> been — for the rest of the compilation.
+>
+> `handleLetted` reads equal hashes as "identical free-var SYMBOLS, bound by
+> the same binder chain" and binds one value for all the terms that have one.
+> With hashes that are never forgotten that reads: all the terms that WERE
+> equal when someone first asked. Two copies rewritten differently — one
+> inside a `case` on a list, where `headList( xs )` becomes the variable of
+> the branch, one outside — stayed "the same term", and one of the two values
+> was bound for both. And which terms had been asked depended on what ran
+> before: the copies of a builtin's template, hashed when the compiler loads,
+> were recognized whatever was done to them; the copies of a user's function,
+> hashed late, were not (BUG 78 showed there and not elsewhere).
+>
+> Fixed where it was lost and in what depended on it:
+>
+> - every setter of a child forgets the hash of its node and of the nodes it
+>   is in (`invalidateHashesFrom`: a loop, not a recursion as deep as the
+>   tree, that stops at the first node remembering nothing);
+> - `removeUnusedVars` edits the parameters of a function in place: the hash
+>   says how many there are;
+> - a copy remembers what its original remembers — but `IRFunc.clone()` and
+>   `IRNative.clone()` did not, so a copy of a term that remembered its hash
+>   held a function that did not: a change inside the function stopped there
+>   and never reached the copy;
+> - `IRHoisted`'s constructor unwraps a hoisted term given another one, its
+>   setter did not: a node holding `hoisted( hoisted( x ) )` was copied as
+>   `hoisted( x )` with the hash of the former.
+>
+> **`PEBBLE_DBG_HASHES=1`** checks after every pass that no node remembers
+> the hash of a term it no longer is, and makes every node remember one for
+> the next pass (`_debug_assertFreshHashes`). The whole suite passes under
+> it; one test compiles a contract under it for good.
+
+```ts
+const app = new IRApp( new IRVar( x ), IRConst.int( 1 ) );
+const fn = new IRFunc( [ x ], new IRDelayed( app ) );
+fn.hash;                                              // 1f1fc386…
+_modifyChildFromTo( app, app.arg, IRConst.int( 2 ) );
+fn.hash;                                              // 1f1fc386…: of the function it was (now 71da7559…)
+```
+
+Fixing this alone makes scripts LARGER (the kernel's by 6%): the stale
+hashes were hiding BUG 78 and BUG 80 for every term hashed early.
+
+### BUG 80 — HIGH: the walk of the tree skips what it has not visited — FIXED (2026-11-16)
+
+> **FIXED.** `iterTree` visits a term before the terms it holds; when the
+> callback replaces the term it was given, the walk forgets the terms of the
+> same parent still waiting and visits the parent again. It forgot more than
+> those: every waiting term marked "a later child of its parent", whoever the
+> parent. When the term replaced was the last one waiting below its own
+> parent — the builtin at the head of an application, visited after the
+> arguments — what was waiting next belonged to a term further up: the other
+> branches of a `case`, the other fields of a `constr`. They were dropped,
+> and the walk went back to the replaced term's parent only. It now drops
+> what the parent was holding, and nothing else.
+>
+> Passes that replace a term everywhere did it in one place:
+>
+> - `_makeAllNegativeNativesHoisted` wraps every builtin: in a contract of
+>   three methods it wrapped the ones of the last method;
+> - `replaceNativesAndReturnRoot` lowers the compiler's own builtins
+>   (`_length`, `_strictAnd`, …): the ones it skipped reached the end of the
+>   compilation and failed there (`getNRequiredForces … input was: -<tag>`).
+>   The repeated sweeps of `compileIRToUPLC`, and their comment ("this shows
+>   up in contracts with enough methods for bodies to be shared"), are what
+>   was built around that;
+> - `handleLetted` removes a `force` around a builtin that is bound already
+>   forced; one it skipped forces the builtin twice, which fails when the
+>   script runs (the comment there records it as found on-chain);
+> - `replaceClosedLettedWithHoisted`.
+>
+> With BUG 79 fixed it is also a size bug: the three copies of a function
+> were two terms, one with its builtins wrapped and two without
+> (`compiler.masterpieceBugs.0_3_5.sharedFunctions.test.ts`, which the stale
+> hashes had been passing, caught it).
+
+### BUG 81 — HIGH: a function that hashes is bound in every branch — FIXED (2026-11-16)
+
+> **FIXED.** A closed value read in several branches of a `case` is bound
+> once above them — unless it is expensive work (a hash, `serialiseData`),
+> which no method that does not read it should pay for: that one is bound in
+> each branch that reads it. `containsExpensiveWork` looked for a hash
+> ANYWHERE in the value, also in the body of a function nobody is calling
+> there. So every function that hashes was expensive work, and its body was
+> written again in each branch of each `case` it was called from, down to
+> the innermost. In the registry `combine` — `blake2b_256( a + b )` — had 128
+> bindings for 192 calls, and the proof function two copies of 2,822 terms
+> each. It now asks what EVALUATING the value does: a function does nothing
+> where it is built, a delayed term nothing until forced; applied to all its
+> parameters, forced, or as the branch of a `case`, their body runs and
+> counts. A hash computed once (`const DIGEST = sha2_256( … )`) is still
+> bound only where it is read (a control checks the cost of a method that
+> does not read it).
+
+```pebble
+function combine( a: bytes, b: bytes ): bytes { return std.crypto.blake2b_256( a + b ); }
+// called from 1, 2, 4 and 6 methods of a contract: +0, +1, +2 copies… now one, and a call each
+```
+
+### The snapshots of `compiler.contractRedeemerEncodingParity.test.ts`
+
+Three scripts are pinned byte for byte there, to notice a change of the
+redeemer's wire format. They changed (216, 166 and 182 bytes; now 210, 166
+and 180): builtins are wrapped in every method now. Before recording them
+again the scripts recorded before were run against the new ones on 5,040
+contexts — 21 redeemers of every shape, 6 minted amounts, 5 numbers of
+inputs, the datums of the state — and gave the same verdict on each.
+
+### Not the compiler: an integer constant above 2^31, and the script that reaches L1 (2026-11-16)
+
+Found right after BUGs 78–81, and first taken for a fifth one: the registry's
+`assert stake >= MIN_BOND;` (`MIN_BOND = 10_000_000_000`, 10,000 ada) accepted
+a bond of 5,000 ada, on a script whose final IR was right.
+
+The compiler's output was right too. What ran was not it: `loadContract`
+reads the `.flat`, applies the script's parameters and writes it again, and
+`@harmoniclabs/uplc` **2.0.6** writes an integer constant from 2^31 up to 2^53
+with 32-bit operators — `10000000000` goes out as `1410065408`
+(`10^10 mod 2^32`), `8640000000` as `50065408`, `4294967296` as `0`. Smaller
+and larger constants are fine, which is why nothing in the Jacquard kernel had
+tripped on it (its largest constant in that range is 21 days in milliseconds,
+just under 2^31). The script that reaches L1 is the re-encoded one: a
+different script from the one compiled, with nothing to say so. The source map
+no longer matches it either, which is how it showed: failures of those two
+scripts had no source location.
+
+uplc 2.0.7 has the fix ("fix big int encodings") and the compiler package
+resolves it. buildooor — through which every off-chain script handling goes —
+depended on `^2.0.6` and had 2.0.6 installed. Its checkout now requires
+`^2.0.7` (package.json, lockfile, installed copy), with a test that fails on
+2.0.6 (`src/__tests__/uplc.integerConstants.test.ts`, 12 of its 27 cases), and
+the plutus-machine checkout likewise. Both **uncommitted**. Twenty-odd other
+checkouts on this machine still have 2.0.6 or older installed.
+
+The same stale install had `@harmoniclabs/cbor` 2.0.1, which encodes an
+integer above 2^64 correctly but dumps it to the console with a warning every
+time (its constructor discarded the big-number form it had just derived);
+2.0.2 fixed it, and buildooor now requires that too.
