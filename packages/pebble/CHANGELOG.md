@@ -49,6 +49,37 @@ Written as the documentation has them, and refused or broken until now (PEBBLE_B
   functions and constants; it failed in the backend).
 - **`is Some{} => …`** in a `case`, and an **`else` arm of a `case`** that reads a variable or
   calls a function (both failed in the backend).
+- **An `Optional<T>` is one type wherever it comes from** (PEBBLE_BUGS 65-69). One read out of
+  a datum and one made in a function have different encodings; the compiler converted
+  between them for call arguments only. It now does for `return`, an annotated `const` or
+  `let`, an assignment, the arms of `?:` and `case`, struct fields, list elements and the
+  operands of `==` — each was refused ("Type 'Optional<int>' is not assignable to type
+  'Optional<int>'"), failed in the backend, or in one case (`maybe == made`) failed at run time.
+- **`==` and `!=` on an `Optional`** made in a function or received as a parameter, on the
+  result of `find` and `lookup`, and against `undefined`. A type with no equality (a
+  function, a BLS12-381 element, an array, a runtime struct) is error 2365 at the operator,
+  where it was a backend failure.
+- **`List<Optional<T>>`** as a variable's or a parameter's type: its literals, `prepend`,
+  and passing a list out of a datum to a function that takes one.
+- **A variable narrowed by `is`** (`if( o is Some )`, a `case` arm, `o is Some ? … : …`) is
+  still a value of its type: it can be passed to a function, compared, converted to data,
+  and returned from the arm that narrowed it.
+- **The `else` arm of a `case` expression is type-checked** like the other arms: `case o is
+  Some{ value } => value else #aabb`, wanted as an `int`, was accepted.
+- **Warning 6134 no longer fires on `n % R`** when `R` is a `const` of a module that is a
+  number other than 0 (PEBBLE_BUGS 70): only a divisor that can be 0 can fail.
+- **Methods that were offered and had no backend** now work: `xs.reverse()` on a list and
+  on a map; `b.toInt()`, `b as int` and `std.bytes.toInt( b )`; `==` on two entries of a map
+  and `map.includes( entry )`; `map.find( … )`; `b.decodeUtf8()`. Each was accepted by the
+  checker and stopped the backend with an error that named no line.
+- **A `case` arm may be a conditional**: `is A{ x } => c ? x : 0` followed by another arm was
+  "Statement expected", reported some lines below (PEBBLE_BUGS 76).
+- **Warning 6134 no longer fires on a scalar or a point written out in the list of a
+  multi-scalar multiplication** (PEBBLE_BUGS 77): the builtin uses every element.
+- **A `string` has one method, `encodeUtf8()`**, which could not be written before. It was
+  offered the methods of `bytes` instead (`length`, `slice`, …): those compiled to byte-string
+  builtins applied to a string and failed when the script ran. They are now error 2339; ask
+  them of `s.encodeUtf8()`. A quoted literal is `bytes`, as before.
 
 ### REPL
 

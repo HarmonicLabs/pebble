@@ -13,6 +13,7 @@ import { TirDataStructType, TirSoPStructType } from "../../../tir/types/TirStruc
 import { TirEnumType, getEnumType } from "../../../tir/types/TirEnumType";
 import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo, getStructType, joinTypes } from "../../../tir/types/utils/canAssignTo";
+import { fitToType } from "../../utils/fitToType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileVarDecl } from "../statements/_compileVarStmt";
 import { _compileExpr } from "./_compileExpr";
@@ -59,6 +60,17 @@ export function _compileCaseExpr(
             ( cases[1] ?? cases[0] ).body.type.toString(),
             cases[0].body.type.toString()
         );
+        // every arm is a value of the joined type (an arm of the other
+        // `Optional` encoding joins, and is converted here)
+        if( returnType ) for( const c of cases )
+        {
+            const fitted = fitToType( c.body, returnType );
+            if( !fitted ) return ctx.error(
+                DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+                c.body.range, c.body.type.toString(), returnType.toString()
+            );
+            c.body = fitted;
+        }
     }
     if( !returnType ) return ctx.error(
         DiagnosticCode.Cannot_infer_return_type_Try_to_make_the_type_explicit,
@@ -149,11 +161,12 @@ export function _compileCaseExprMatcher(
             ctorNameRange, memberName, enumType.toString()
         );
 
-        const body = _compileExpr( ctx, matcher.body, returnTypeHint );
-        if( !body ) return undefined;
-        if( returnTypeHint && !canAssignTo( body.type, returnTypeHint ) ) return ctx.error(
+        const compiledBody = _compileExpr( ctx, matcher.body, returnTypeHint );
+        if( !compiledBody ) return undefined;
+        const body = returnTypeHint ? fitToType( compiledBody, returnTypeHint ) : compiledBody;
+        if( !body ) return ctx.error(
             DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-            matcher.body.range, body.type.toString(), returnTypeHint.toString()
+            matcher.body.range, compiledBody.type.toString(), returnTypeHint!.toString()
         );
 
         return new TirCaseMatcher(
@@ -231,11 +244,12 @@ export function _compileCaseExprMatcher(
         }
     }
 
-    const body = _compileExpr( bodyCtx, matcher.body, returnTypeHint );
-    if( !body ) return undefined;
-    if( returnTypeHint && !canAssignTo( body.type, returnTypeHint ) ) return ctx.error(
+    const compiledBody = _compileExpr( bodyCtx, matcher.body, returnTypeHint );
+    if( !compiledBody ) return undefined;
+    const body = returnTypeHint ? fitToType( compiledBody, returnTypeHint ) : compiledBody;
+    if( !body ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-        matcher.body.range, body.type.toString(), returnTypeHint.toString()
+        matcher.body.range, compiledBody.type.toString(), returnTypeHint!.toString()
     );
 
     if(!(
@@ -258,8 +272,14 @@ function _compileCaseWildcardMatcher(
     returnTypeHint: TirType | undefined
 ): TirWildcardCaseMatcher | undefined
 {
-    const bodyExpr = _compileExpr( ctx, wildcardCase.body, returnTypeHint );
-    if( !bodyExpr ) return undefined;
+    const compiledBody = _compileExpr( ctx, wildcardCase.body, returnTypeHint );
+    if( !compiledBody ) return undefined;
+    // an arm like the others: a value of the expression's type
+    const bodyExpr = returnTypeHint ? fitToType( compiledBody, returnTypeHint ) : compiledBody;
+    if( !bodyExpr ) return ctx.error(
+        DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+        wildcardCase.body.range, compiledBody.type.toString(), returnTypeHint!.toString()
+    );
 
     return new TirWildcardCaseMatcher(
         bodyExpr,

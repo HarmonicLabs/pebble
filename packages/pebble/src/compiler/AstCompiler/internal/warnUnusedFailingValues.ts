@@ -143,7 +143,7 @@ class FailureAnalysis
         // dividing by a constant other than 0 cannot fail
         if(
             ( node instanceof TirDivExpr || node instanceof TirModuloExpr )
-            && !isNonZeroIntLiteral( node.right )
+            && !this.isNonZeroConstant( node.right )
         ) return true;
         if( seen.has( node ) ) return false;
         seen.add( node );
@@ -154,6 +154,28 @@ class FailureAnalysis
         }
         // the functions passed around in it may be called: they count too
         return childNodes( node ).some( child => this.mayFail( child, seen ) );
+    }
+
+    /**
+     * `expr` is an integer other than 0, whatever runs: a literal, or a `const` of a module
+     * that is one (`x % R`, with `const R = 0x73ed…;` at the top of a file: a field's order
+     * is a name, not a number written at every use)
+     */
+    private isNonZeroConstant( expr: any, inModuleConst: boolean = false, seen: Set<string> = new Set() ): boolean
+    {
+        while( expr instanceof TirParentesizedExpr ) expr = expr.expr;
+        if( expr instanceof TirLitIntExpr ) return expr.integer !== BigInt( 0 );
+        if( !( expr instanceof TirVariableAccessExpr ) ) return false;
+        // A module's constant: declared outside every function, under its file-unique name.
+        // (What a module constant's own value names can be nothing else: no local is in sight.)
+        if( !inModuleConst && !expr.resolvedValue.isDefinedOutsideFuncScope ) return false;
+        if( seen.has( expr.varName ) ) return false;
+        seen.add( expr.varName );
+        const decl = this.program.constants.get( expr.varName );
+        return decl !== undefined
+            && decl.isConst
+            && decl.initExpr !== undefined
+            && this.isNonZeroConstant( decl.initExpr, true, seen );
     }
 
     private calleeMayFail( fn: TirFuncExpr ): boolean
@@ -178,12 +200,6 @@ class FailureAnalysis
         const fn = this.program.functions.get( fnName );
         return fn instanceof TirFuncExpr && isUserCode( fn ) ? { fn, isMethod: callee instanceof TirPropAccessExpr } : undefined;
     }
-}
-
-function isNonZeroIntLiteral( expr: any ): boolean
-{
-    while( expr instanceof TirParentesizedExpr ) expr = expr.expr;
-    return expr instanceof TirLitIntExpr && expr.integer !== BigInt( 0 );
 }
 
 function methodFunctionName( type: TirType, methodName: string ): string | undefined

@@ -267,7 +267,9 @@ function strictlyReads( expr: TirExpr, names: ReadonlySet<string>, program: Type
     if( expr instanceof TirCallExpr )
     {
         const tag = builtinCalled( expr, program );
-        if( tag !== undefined && !LAZY_BUILTINS.has( tag ) ) return expr.args.some( reads );
+        if( tag !== undefined && !LAZY_BUILTINS.has( tag ) ) return expr.args.some( reads )
+            // a list written out as an argument, of a builtin that needs all of it
+            || ( WHOLE_LIST_BUILTINS.has( tag ) && expr.args.some( a => writtenOutElems( a ).some( reads ) ) );
         const receiver = builtinMethodReceiver( expr );
         if( receiver !== undefined && reads( receiver ) ) return true;
         if( rules === undefined ) return false;
@@ -322,7 +324,12 @@ function exprParts( expr: TirExpr, program: TypedProgram, rules: UserConstReads 
     if( expr instanceof TirCallExpr )
     {
         const tag = builtinCalled( expr, program );
-        if( tag !== undefined ) return expr.args.map( a => LAZY_BUILTINS.has( tag ) ? sometimes( a ) : always( a ) );
+        if( tag !== undefined ) return expr.args.flatMap( a =>
+            LAZY_BUILTINS.has( tag ) ? [ sometimes( a ) ]
+            // the elements of a list written out are parts of the call that needs them all
+            : WHOLE_LIST_BUILTINS.has( tag ) && writtenOutElems( a ).length > 0 ? writtenOutElems( a ).map( always )
+            : [ always( a ) ]
+        );
         const called = rules.userFunction( expr );
         const passed: TirExpr[] = called?.isMethod && expr.func instanceof TirPropAccessExpr ? [ expr.func.object, ...expr.args ] : expr.args;
         return [
@@ -355,6 +362,25 @@ function constructorCount( type: TirType ): number
     if( t instanceof TirSopOptT || t instanceof TirDataOptT ) return 2;
     const constructors = ( t as any )?.constructors;
     return Array.isArray( constructors ) ? constructors.length : 1;
+}
+
+/**
+ * Builtins that use every element of a list they are given. A list WRITTEN OUT (`[ a, b ]`)
+ * is otherwise not known to compute its elements: handed to something that takes a list
+ * apart (`[ a, b ].head()`, `xs.prepend( a ).head()`), the compiler gives it the part it
+ * asks for and the rest is never built. A multi-scalar multiplication has no part to ask
+ * for: it needs each scalar and each point.
+ */
+const WHOLE_LIST_BUILTINS: ReadonlySet<IRNativeTag> = new Set([
+    IRNativeTag.bls12_381_G1_multiScalarMul,
+    IRNativeTag.bls12_381_G2_multiScalarMul,
+]);
+
+/** the elements of a list written out in place (`[ a, b ]`, in parentheses or not); none for anything else */
+function writtenOutElems( expr: TirExpr ): readonly TirExpr[]
+{
+    while( expr instanceof TirParentesizedExpr ) expr = expr.expr;
+    return expr instanceof TirLitArrExpr ? expr.elems : [];
 }
 
 /** builtins the compiler may turn into a `case` whose branches are computed only when taken */

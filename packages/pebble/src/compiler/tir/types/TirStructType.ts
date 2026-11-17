@@ -193,6 +193,25 @@ export class TirDataStructType
         );
     }
 
+    /**
+     * The view of the same struct that holds the constructors of this view
+     * and of `other` (two views of ONE struct). It is what the arms of a
+     * `case` join to when each returns the scrutinee as its arm narrowed it.
+     */
+    unionWith( other: TirDataStructType ): TirDataStructType
+    {
+        const { idxs, ctors } = unionOfViewCtors( this, other );
+        return new TirDataStructType(
+            this.name,
+            this.fileUid,
+            ctors,
+            this.methodNamesPtr,
+            this.untagged,
+            idxs,
+            this.appliedGeneric
+        );
+    }
+
     toString(): string {
         return this.name;
     }
@@ -352,6 +371,22 @@ export class TirSoPStructType
         return narrowed;
     }
 
+    /** see `TirDataStructType.unionWith` */
+    unionWith( other: TirSoPStructType ): TirSoPStructType
+    {
+        const { idxs, ctors } = unionOfViewCtors( this, other );
+        const union = new TirSoPStructType(
+            this.name,
+            this.fileUid,
+            ctors,
+            this.methodNamesPtr,
+            idxs,
+            this.appliedGeneric
+        );
+        union.untagged = this.untagged;
+        return union;
+    }
+
     toString(): string {
         return this.name;
     }
@@ -431,4 +466,21 @@ export class TirStructField
             this.type.clone()
         );
     }
+}
+/** the constructors of two views of one struct, by their index in the un-narrowed struct */
+function unionOfViewCtors(
+    a: { constructors: TirStructConstr[], narrowedFromParentCtorIdxs: number[] | undefined },
+    b: { constructors: TirStructConstr[], narrowedFromParentCtorIdxs: number[] | undefined }
+): { idxs: number[], ctors: TirStructConstr[] }
+{
+    const byParentIdx = new Map<number, TirStructConstr>();
+    for( const view of [ a, b ] )
+    {
+        const parentIdxs = view.narrowedFromParentCtorIdxs ?? view.constructors.map( ( _, i ) => i );
+        parentIdxs.forEach( ( idx, i ) => {
+            if( !byParentIdx.has( idx ) ) byParentIdx.set( idx, view.constructors[i] );
+        });
+    }
+    const idxs = [ ...byParentIdx.keys() ].sort( ( x, y ) => x - y );
+    return { idxs, ctors: idxs.map( idx => byParentIdx.get( idx )! ) };
 }

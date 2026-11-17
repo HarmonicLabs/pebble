@@ -21,6 +21,7 @@ import { isTirStructType, TirStructConstr, TirStructField } from "../../../tir/t
 import { pairConstructorOf } from "../../../tir/types/utils/pairConstructorOf";
 import { TirType } from "../../../tir/types/TirType";
 import { getNamedDestructableType, getStructType, canAssignTo } from "../../../tir/types/utils/canAssignTo";
+import { fitToType } from "../../utils/fitToType";
 import { canCastToData } from "../../../tir/types/utils/canCastTo";
 import { getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
 import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
@@ -555,12 +556,14 @@ export function _getVarDeclTypeAndExpr(
     let initExpr: TirExpr | undefined = undefined;
     if( decl.initExpr )
     {
-        initExpr = _compileExpr( ctx, decl.initExpr, typeHint );
-        if( !initExpr ) return undefined;
-        if( typeHint && !canAssignTo( initExpr.type, typeHint ) )
+        const compiledInit = _compileExpr( ctx, decl.initExpr, typeHint );
+        if( !compiledInit ) return undefined;
+        // the initialiser as a value of the declared type
+        initExpr = typeHint ? fitToType( compiledInit, typeHint ) : compiledInit;
+        if( !initExpr )
             return ctx.error(
                 DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-                decl.initExpr.range, initExpr.type.toString(), typeHint.toString()
+                decl.initExpr.range, compiledInit.type.toString(), typeHint!.toString()
             );
     }
 

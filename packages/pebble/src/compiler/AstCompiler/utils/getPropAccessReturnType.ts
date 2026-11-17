@@ -22,6 +22,7 @@ import { TirListT } from "../../tir/types/TirNativeType/native/list";
 import { isTirOptType } from "../../tir/types/TirNativeType/native/Optional/isTirOptType";
 import { TirSopOptT } from "../../tir/types/TirNativeType/native/Optional/sop";
 import { getUnaliased } from "../../tir/types/utils/getUnaliased";
+import { sopOptionalHoldsData } from "../../tir/types/utils/canAssignTo";
 import { TirStringT } from "../../tir/types/TirNativeType/native/string";
 import { TirVoidT } from "../../tir/types/TirNativeType/native/void";
 import { referenceSymbol } from "./symbols";
@@ -86,7 +87,7 @@ export function getPropAccessReturnType(
     // the same canonical encoding as the other, `Constr 0 [ value ]` / `Constr 1 []`, and
     // the lowering for it exists (`_inlineToData`). Asking the representation instead of
     // the type made `.toData()` "not exist" on every `Optional` a function declares.
-    if( propName === "toData" && sopOptionalConvertsToData( objType ) )
+    if( propName === "toData" && sopOptionalHoldsData( objType ) )
     {
         return new TirFuncT([], data_t );
     }
@@ -96,7 +97,10 @@ export function getPropAccessReturnType(
     if( objType instanceof TirBoolT ) return undefined;
     if( objType instanceof TirIntT ) return undefined;
     if( objType instanceof TirBytesT ) return bytesMethods[propName];
-    if( objType instanceof TirStringT ) return bytesMethods[propName];
+    // A string is not its bytes: the methods of `bytes` applied to one compile to
+    // byte-string builtins, which fail on a string at run time. It has the one
+    // method that gives its bytes; the rest is asked of those.
+    if( objType instanceof TirStringT ) return stringMethods[propName];
     if( objType instanceof TirDataT ) return undefined;
     if( isTirOptType( objType ) ) return undefined;
     if( objType instanceof TirFuncT ) return undefined;
@@ -121,19 +125,6 @@ export function getPropAccessReturnType(
     const tsEnsureExhaustiveCheck: never = objType;
     console.error( objType );
     throw new Error("unreachable::getPropAccessReturnType");
-}
-
-/**
- * `true` for the SoP representation of an `Optional<T>` whose `T` has a data encoding:
- * the `Some` payload is that encoding already (the SoP optional convention), so the
- * optional converts to data by tagging it.
- */
-function sopOptionalConvertsToData( type: TirType ): boolean
-{
-    type = getUnaliased( type );
-    if( !( type instanceof TirSopOptT ) ) return false;
-    const payload = getUnaliased( type.typeArg );
-    return payload instanceof TirSopOptT ? sopOptionalConvertsToData( payload ) : payload.hasDataEncoding();
 }
 
 function getListMethods( elemsType: TirType ): { [x: string]: TirFuncT | undefined }

@@ -27,6 +27,7 @@ import { TirListT } from "../types/TirNativeType/native/list";
 import { TirValueT } from "../types/TirNativeType/native/value";
 import { TirDataOptT } from "../types/TirNativeType/native/Optional/data";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
+import { isSopOptionalLike } from "../types/utils/canAssignTo";
 import { TirStringT } from "../types/TirNativeType/native/string";
 import { TirVoidT } from "../types/TirNativeType/native/void";
 import { hoisted_constr1_empty } from "../../../IR/toUPLC/common_hoisted";
@@ -155,8 +156,10 @@ export function _inlineToData(
         );
     }
 
-    if( from_t instanceof TirSopOptT )
+    if( from_t instanceof TirSopOptT || isSopOptionalLike( from_t ) )
     {
+        // (a view of the optional narrowed to some of its constructors is the
+        // same value at run time, so it converts the same way)
         // SoP optional convention: the `Some` payload is ALREADY raw data
         // (consumers decode on extraction — see `TirCaseExpr._sopStructToIR`),
         // so converting the optional itself to data just re-tags the payload,

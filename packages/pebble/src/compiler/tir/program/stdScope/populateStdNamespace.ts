@@ -8,6 +8,7 @@ import { IRFunc } from "../../../../IR/IRNodes/IRFunc";
 import { IRNative } from "../../../../IR/IRNodes/IRNative";
 import { IRNativeTag } from "../../../../IR/IRNodes/IRNative/IRNativeTag";
 import { IRVar } from "../../../../IR/IRNodes/IRVar";
+import { reverseListIR } from "../../expressions/reverseList";
 import type { IRTerm } from "../../../../IR/IRTerm";
 import { TypeParamConstraint } from "../TypedProgram";
 import { AstScope, NamespaceSymbol } from "../../../AstCompiler/scope/AstScope";
@@ -791,29 +792,10 @@ export function populateStdNamespace( program: TypedProgram ): void
         listNs
     );
     // reverse<T>( xs: List<T> ): List<T> -- foldl (flip mkCons) nil xs
+    // (the method `xs.reverse()` is the same term: see `reverseList.ts`)
     defineGenericBuiltin( listNsScope, "reverse", 1,
         ( [ T ] ) => new TirFuncT([ new TirListT( T ) ], new TirListT( T )),
-        ( [ T ] ) => {
-            const xs = Symbol("list_reverse_xs");
-            const acc = Symbol("list_reverse_acc");
-            const x = Symbol("list_reverse_x");
-            return new IRFunc(
-                [ xs ],
-                _ir_apps(
-                    new IRNative( IRNativeTag._foldl ),
-                    new IRFunc(
-                        [ acc, x ],
-                        _ir_apps(
-                            new IRNative( IRNativeTag.mkCons ),
-                            new IRVar( x ),
-                            new IRVar( acc )
-                        )
-                    ),
-                    IRConst.listOf( T )([]),
-                    new IRVar( xs )
-                )
-            );
-        },
+        ( [ T ] ) => reverseListIR( T ),
         listNs
     );
     // count<T>( pred: (T) => bool, xs: List<T> ): int -- length( filter( pred, xs ) )

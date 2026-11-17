@@ -2715,8 +2715,16 @@ export class Parser extends DiagnosticEmitter
                         tn.range(), ":"
                     );
 
+                    // The else branch runs as far as an expression can — but not past the
+                    // end of a `case` arm it is the body of. There the next arm's `is`
+                    // separates arms (see `_caseArmIsLowPrec`) and binds looser than `?:`,
+                    // so a branch read down to the comma took it for an `x is Pattern`
+                    // test of its own last operand, and the arm after it was lost
+                    // ("Statement expected", reported lines below).
                     const ifFalse = this.parseExpr(
-                        precedence > Precedence.Comma ? Precedence.Comma + 1 : Precedence.Comma
+                        this._caseArmIsLowPrec && precedence > Precedence.CaseExpr
+                            ? Precedence.CaseExpr + 1
+                            : precedence > Precedence.Comma ? Precedence.Comma + 1 : Precedence.Comma
                     );
                     if( !ifFalse ) return undefined;
 

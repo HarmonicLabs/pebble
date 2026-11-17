@@ -15,6 +15,16 @@ import { getDataFuncSignature } from "./getDataFuncSignature";
 import { referenceSymbol } from "../../utils/symbols";
 
 
+/** `Optional<…>`, as the parser gives it: the native form, or the reserved name with its argument */
+function isOptionalTypeExpr( typeExpr: AstTypeExpr ): boolean
+{
+    return typeExpr instanceof AstNativeOptionalType || (
+        typeExpr instanceof AstNamedTypeExpr
+        && typeExpr.path.length === 0
+        && typeExpr.name.text === "Optional"
+    );
+}
+
 export function _compileSopEncodedConcreteType(
     ctx: AstCompilationCtx,
     typeExpr: AstTypeExpr
@@ -121,10 +131,23 @@ export function _compileSopEncodedConcreteType(
                 DiagnosticCode.Generic_type_0_requires_1_type_argument_s,
                 typeExpr.name.range, typeExpr.name.text, arity.toString()
             );
+            // `List<T>` and `LinearMap<K, V>` reach this branch too (written with a
+            // name, they parse as named generics). Their elements are low-level UPLC
+            // values, never constructor terms: an `Optional` among their type
+            // arguments is the DATA one, as in the `AstListType` / `AstLinearMapType`
+            // branches above. Compiled as SoP, a `List<Optional<int>>` got an element
+            // type no list can hold: the first literal or `prepend` crashed the back
+            // end. (Every other argument resolves as it did: a struct to its data
+            // encoding, and a type with none — a BLS12-381 element — to itself.)
+            const holdsValues =
+                genericKey === TirListT.toTirTypeKey()
+                || genericKey === TirLinearMapT.toTirTypeKey();
             const compiledArgs: import("../../../tir/types/TirType").TirType[] = [];
             for( const aExpr of typeExpr.tyArgs )
             {
-                const a = _compileSopEncodedConcreteType( ctx, aExpr );
+                const a = holdsValues && isOptionalTypeExpr( aExpr )
+                    ? _compileDataEncodedConcreteType( ctx, aExpr )
+                    : _compileSopEncodedConcreteType( ctx, aExpr );
                 if( !a ) return undefined;
                 compiledArgs.push( a );
             }

@@ -298,8 +298,9 @@ export class SourceTypeMap
 
     private stringMembers(): MemberInfo[]
     {
+        // a string is not its bytes: one method gives them, the rest is asked of those
+        // (as `getPropAccessReturnType` has it)
         return [
-            ...this.bytesMembers(),
             { name: "encodeUtf8", type: new TirFuncT([], bytes_t), kind: "method" },
         ];
     }

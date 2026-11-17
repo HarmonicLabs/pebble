@@ -3,7 +3,7 @@ import { ITirExpr } from "./ITirExpr";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { IRNative } from "../../../IR/IRNodes/IRNative";
 import type { IRTerm } from "../../../IR/IRTerm";
-import { bool_t, bytes_t, data_t, int_t, void_t } from "../program/stdScope/stdScope";
+import { bool_t, bytes_t, string_t, data_t, int_t, void_t } from "../program/stdScope/stdScope";
 import { TirType } from "../types/TirType";
 import { ToIRTermCtx } from "./ToIRTermCtx";
 import { TirUnConstrDataResultT, TirPairDataT, TirIntT, TirBytesT, TirDataT, TirBoolT, TirSopOptT, TirBlsG1T, TirBlsG2T, TirMlResultT } from "../types/TirNativeType";
@@ -198,6 +198,20 @@ export class TirNativeFunc
                 // bytes
                 bytes_t
             ], bytes_t)
+        );
+    }
+    /** `string -> bytes`: the UTF-8 bytes of a string */
+    static get encodeUtf8(): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag.encodeUtf8,
+            new TirFuncT([ string_t ], bytes_t)
+        );
+    }
+    /** `bytes -> string`: the string those UTF-8 bytes spell; fails if they spell none */
+    static get decodeUtf8(): TirNativeFunc {
+        return new TirNativeFunc(
+            IRNativeTag.decodeUtf8,
+            new TirFuncT([ bytes_t ], string_t)
         );
     }
     static get lengthOfByteString(): TirNativeFunc {

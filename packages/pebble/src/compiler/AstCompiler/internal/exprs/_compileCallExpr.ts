@@ -5,8 +5,7 @@ import { TirCallExpr } from "../../../tir/expressions/TirCallExpr";
 import { TirExpr } from "../../../tir/expressions/TirExpr";
 import { TirFuncT } from "../../../tir/types/TirNativeType/native/function";
 import { TirType } from "../../../tir/types/TirType";
-import { canAssignTo, isOptionalEncodingBridge } from "../../../tir/types/utils/canAssignTo";
-import { TirTypeConversionExpr } from "../../../tir/expressions/TirTypeConversionExpr";
+import { fitToType } from "../../utils/fitToType";
 import { inferTypeArgs } from "../../../tir/types/utils/inferTypeArgs";
 import { substituteTypeParams } from "../../../tir/types/utils/substituteTypeParams";
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
@@ -218,23 +217,15 @@ export function _compileCallExpr(
 
             for( let i = 0; i < tirArgs.length && i < funcType.argTypes.length; i++ )
             {
-                if( !canAssignTo( tirArgs[i].type, funcType.argTypes[i] ) )
-                {
-                    // bridge the two incompatible `Optional` encodings with a
-                    // real conversion instead of erroring
-                    if( isOptionalEncodingBridge( tirArgs[i].type, funcType.argTypes[i] ) ) {
-                        tirArgs[i] = new TirTypeConversionExpr(
-                            tirArgs[i], funcType.argTypes[i], expr.args[i].range
-                        );
-                        continue;
-                    }
-                    return ctx.error(
-                        DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-                        expr.args[i].range,
-                        tirArgs[i].type.toString(),
-                        funcType.argTypes[i].toString()
-                    );
-                }
+                // the argument as a value of the parameter's type
+                const fitted = fitToType( tirArgs[i], funcType.argTypes[i] );
+                if( !fitted ) return ctx.error(
+                    DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+                    expr.args[i].range,
+                    tirArgs[i].type.toString(),
+                    funcType.argTypes[i].toString()
+                );
+                tirArgs[i] = fitted;
             }
 
             return new TirCallExpr(
@@ -293,21 +284,13 @@ export function _compileCallExpr(
     {
         const arg = args[i];
         if( !arg ) return undefined;
-        if( !canAssignTo( arg.type, funcType.argTypes[i] ) )
-        {
-            // the two `Optional` encodings are incompatible but bridgeable;
-            // insert a real encoding conversion instead of erroring
-            if( isOptionalEncodingBridge( arg.type, funcType.argTypes[i] ) ) {
-                args[i] = new TirTypeConversionExpr(
-                    arg, funcType.argTypes[i], expr.args[i].range
-                );
-                continue;
-            }
-            return ctx.error(
-                DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-                expr.args[i].range, arg.type.toString(), funcType.argTypes[i].toString()
-            );
-        }
+        // the argument as a value of the parameter's type
+        const fitted = fitToType( arg, funcType.argTypes[i] );
+        if( !fitted ) return ctx.error(
+            DiagnosticCode.Type_0_is_not_assignable_to_type_1,
+            expr.args[i].range, arg.type.toString(), funcType.argTypes[i].toString()
+        );
+        args[i] = fitted;
     }
 
     return new TirCallExpr(

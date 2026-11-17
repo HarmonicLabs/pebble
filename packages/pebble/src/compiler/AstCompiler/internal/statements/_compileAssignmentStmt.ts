@@ -9,6 +9,7 @@ import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAcces
 import { TirAssignmentStmt } from "../../../tir/statements/TirAssignmentStmt";
 import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo } from "../../../tir/types/utils/canAssignTo";
+import { fitToType } from "../../utils/fitToType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileExpr } from "../exprs/_compileExpr";
 import { addRightOperandType } from "../exprs/binary/_compileAddExpr";
@@ -111,11 +112,13 @@ export function _compileExplicitAssignmentStmt(
     let expr: TirExpr | undefined = undefined;
     if( stmt instanceof SimpleAssignmentStmt )
     {
-        expr = _compileExpr( ctx, stmt.assignedExpr, varType );
-        if( !expr ) return undefined;
-        if( !canAssignTo( expr.type, varType ) ) return ctx.error(
+        const assigned = _compileExpr( ctx, stmt.assignedExpr, varType );
+        if( !assigned ) return undefined;
+        // the value as one of the variable's type: the variable keeps its type
+        expr = fitToType( assigned, varType );
+        if( !expr ) return ctx.error(
             DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-            stmt.range, expr.type.toString(), varType.toString()
+            stmt.range, assigned.type.toString(), varType.toString()
         );
     }
     else if( stmt instanceof AddAssignmentStmt )

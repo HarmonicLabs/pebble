@@ -10,6 +10,9 @@ import type { IRTerm } from "../../../IR/IRTerm";
 import { TirFuncT } from "../types/TirNativeType";
 import { TirBoolT } from "../types/TirNativeType/native/bool";
 import { TirListT } from "../types/TirNativeType/native/list";
+import { TirLinearMapEntryT } from "../types/TirNativeType/native/linearMapEntry";
+import { TirPairDataT } from "../types/TirNativeType/TirNativeType";
+import { getUnaliased } from "../types/utils/getUnaliased";
 import { TirSopOptT } from "../types/TirNativeType/native/Optional/sop";
 import { TirType } from "../types/TirType";
 import { TirInlineClosedIR } from "./TirInlineClosedIR";
@@ -46,6 +49,16 @@ export function findSopOptionalType( elems_t: TirType ): TirFuncT
  */
 function elementsAreData( elems_t: TirType ): boolean
 {
+    // The entries of a map are pairs of data. A pair has no data form of its own,
+    // and the consumers of an `Optional<entry>` take the `Some` payload as the
+    // pair it is (`_inlineFromData`: "LinearMapEntry is Pair<Data,Data> at runtime
+    // — no conversion needed"). So the entry found is the payload, as it is.
+    const unaliased = getUnaliased( elems_t );
+    if(
+        unaliased instanceof TirPairDataT
+        || unaliased instanceof TirLinearMapEntryT
+    ) return true;
+
     const toData = _toDataUplcFunc( elems_t );
     return toData instanceof IRNative && toData.tag === IRNativeTag._id;
 }

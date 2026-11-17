@@ -865,6 +865,39 @@ hoisted_exponentiateInteger.hash;
 
 // already external: hoiseted_foldl
 
+// bytes -> int, big-endian: `byteStringToInteger True`
+export const hoisted_bytesToIntBE = new IRHoisted(
+    _ir_apps(
+        IRNative.byteStringToInteger,
+        IRConst.bool( true )
+    )
+);
+hoisted_bytesToIntBE.hash;
+
+// equality of two pairs of data (the entries of a map): both halves are equal
+export const hoisted_equalPairData = new IRHoisted(
+    (() => {
+        const a = Symbol("pairA");
+        const b = Symbol("pairB");
+        return new IRFunc(
+            [ a, b ],
+            _ir_and(
+                _ir_apps(
+                    IRNative.equalsData,
+                    _ir_apps( IRNative.fstPair, new IRVar( a ) ),
+                    _ir_apps( IRNative.fstPair, new IRVar( b ) )
+                ),
+                _ir_apps(
+                    IRNative.equalsData,
+                    _ir_apps( IRNative.sndPair, new IRVar( a ) ),
+                    _ir_apps( IRNative.sndPair, new IRVar( b ) )
+                )
+            )
+        );
+    })()
+);
+hoisted_equalPairData.hash;
+
 export function nativeToIR( native: IRNative ): IRTerm
 {
     // positive natives are translated to uplc builtins (no need to hoist)
@@ -904,9 +937,9 @@ export function nativeToIR( native: IRNative ): IRTerm
         case IRNativeTag._mkMapList: return hoisted_mkMapList.clone();
         case IRNativeTag._increment: return hoisted_addOne.clone();
         case IRNativeTag._decrement: return hoisted_subOne.clone();
-        // case IRNativeTag._bytesToIntBE: ;
+        case IRNativeTag._bytesToIntBE: return hoisted_bytesToIntBE.clone();
         case IRNativeTag._equalBoolean: return hoisted_equalBoolean.clone();
-        // case IRNativeTag._equalPairData: ;
+        case IRNativeTag._equalPairData: return hoisted_equalPairData.clone();
         case IRNativeTag._mkEqualsList: return hoisted_mkEqualsList.clone();
         case IRNativeTag._negateInt: return hoisted_negateInteger.clone();
         case IRNativeTag._lookupLinearMap: return hoisted_lookupLinearMap.clone();

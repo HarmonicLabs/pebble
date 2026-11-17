@@ -19,6 +19,7 @@ import { TirAssertAndContinueExpr } from "../../tir/expressions/TirAssertAndCont
 import { TirCallExpr } from "../../tir/expressions/TirCallExpr";
 import { TirCaseExpr, TirCaseMatcher, TirWildcardCaseMatcher } from "../../tir/expressions/TirCaseExpr";
 import { tirFindSopOptional } from "../../tir/expressions/findSopOptional";
+import { tirReverseList } from "../../tir/expressions/reverseList";
 import { TirIsExpr } from "../../tir/expressions/TirIsExpr";
 import { TirElemAccessExpr } from "../../tir/expressions/TirElemAccessExpr";
 import { TirExpr } from "../../tir/expressions/TirExpr";
@@ -43,7 +44,7 @@ import { TirUnaryMinus } from "../../tir/expressions/unary/TirUnaryMinus";
 import { TirUnaryPlus } from "../../tir/expressions/unary/TirUnaryPlus";
 import { isTirUnaryPrefixExpr } from "../../tir/expressions/unary/TirUnaryPrefixExpr";
 import { TirUnaryTilde } from "../../tir/expressions/unary/TirUnaryTilde";
-import { bool_t, bytes_t, data_t, int_t, valueMapAmountOfName, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
+import { bool_t, bytes_t, string_t, data_t, int_t, valueMapAmountOfName, valueAmountOfName } from "../../tir/program/stdScope/stdScope";
 import { IRNativeTag } from "../../../IR/IRNodes/IRNative/IRNativeTag";
 import { currentCompilationCtx } from "../../../IR/CompilationCtx";
 import { TirBlockStmt } from "../../tir/statements/TirBlockStmt";
@@ -896,8 +897,30 @@ function expressifyMethodCall(
         if( result ) return result;
     }
 
-    if( objectType instanceof TirBytesT || objectType instanceof TirStringT ) {
+    if( objectType instanceof TirStringT ) {
         const exprRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+        // the one method of a string: its UTF-8 bytes
+        if( methodName === "encodeUtf8" ) {
+            return new TirCallExpr(
+                TirNativeFunc.encodeUtf8,
+                [ objectExpr ],
+                bytes_t,
+                exprRange
+            );
+        }
+    }
+
+    if( objectType instanceof TirBytesT ) {
+        const exprRange = SourceRange.join( methodIdentifierProp.range, methodCall.range.atEnd() );
+
+        if( methodName === "decodeUtf8" ) {
+            return new TirCallExpr(
+                TirNativeFunc.decodeUtf8,
+                [ objectExpr ],
+                string_t,
+                exprRange
+            );
+        }
 
         if( methodName === "length" ) {
             return new TirCallExpr(
@@ -1109,6 +1132,18 @@ function expressifyListMethodCall(
             exprRange
         );
     }
+    if( methodName === "reverse" ) {
+        if( methodCall.args.length !== 0 ) throw new Error(
+            `Method 'reverse' of type 'list' takes 0 arguments, ${methodCall.args.length} provided`
+        );
+        // the type of the call is the receiver's: a list for a list, a map for a map
+        return new TirCallExpr(
+            tirReverseList( elemsType ),
+            [ objectExpr ],
+            methodCall.type,
+            exprRange
+        );
+    }
     if( methodName === "isEmpty" ) {
         if( methodCall.args.length !== 0 ) throw new Error(
             `Method 'isEmpty' of type 'list' takes 0 arguments, ${methodCall.args.length} provided`
@@ -1210,13 +1245,8 @@ function expressifyListMethodCall(
         );
     }
 
-    // TODO
-    /*
-    {
-        show: new TirFuncT( [], bytes_t ),
-        reverse: new TirFuncT( [], new TirListT( elemsType ) ),
-    };
-    */
+    // `show` is not a list method of its own: the generic `.show()` of the caller takes it
+    return undefined;
 }
 
 

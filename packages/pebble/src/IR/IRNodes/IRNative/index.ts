@@ -41,6 +41,8 @@ import { IRHoisted } from "../IRHoisted";
 import { IRFunc } from "../IRFunc";
 import { IRVar } from "../IRVar";
 import { IRConst } from "../IRConst";
+import { IRCase } from "../IRCase";
+import { sopOptionalHoldsData } from "../../../compiler/tir/types/utils/canAssignTo";
 
 /**
  * we might not need all the hashes
@@ -312,6 +314,10 @@ export class IRNative
         if( type instanceof TirVoidT ) return getEqVoid();
         // Native Value: equality via bidirectional valueContains
         if( type instanceof TirValueT ) return IRNative._valueEq;
+        // SoP optional: the `Some` payload is the value's data encoding (the SoP
+        // optional convention), so two of them compare by constructor, then by payload
+        // (also when it is seen through a narrowing: it is the same value)
+        if( sopOptionalHoldsData( type ) ) return getEqSopOpt();
         if(
             type instanceof TirBlsG1T
             || type instanceof TirBlsG2T
@@ -359,6 +365,54 @@ function getEqUnConstr(): IRHoisted
         )
     );
     return _eqUnConstr.clone();
+}
+
+const eqSopOpt_a = Symbol("a");
+const eqSopOpt_b = Symbol("b");
+const eqSopOpt_x = Symbol("x");
+const eqSopOpt_y = Symbol("y");
+const eqSopOpt_unused = Symbol("_");
+let _eqSopOpt: IRHoisted | undefined = undefined;
+/**
+ * `\a b -> case a [ \x -> case b [ \y -> equalsData x y, false ], case b [ \_ -> false, true ] ]`
+ *
+ * one term for every `Optional<T>`: whatever `T` is, the payload is data
+ */
+function getEqSopOpt(): IRHoisted
+{
+    if( _eqSopOpt instanceof IRHoisted ) return _eqSopOpt.clone();
+    _eqSopOpt = new IRHoisted(
+        new IRFunc([ eqSopOpt_a, eqSopOpt_b ],
+            new IRCase(
+                new IRVar( eqSopOpt_a ), [
+                    // a is Some{ x }
+                    new IRFunc([ eqSopOpt_x ],
+                        new IRCase(
+                            new IRVar( eqSopOpt_b ), [
+                                new IRFunc([ eqSopOpt_y ],
+                                    _ir_apps(
+                                        IRNative.equalsData,
+                                        new IRVar( eqSopOpt_x ),
+                                        new IRVar( eqSopOpt_y )
+                                    )
+                                ),
+                                IRConst.bool( false )
+                            ]
+                        )
+                    ),
+                    // a is None{}
+                    new IRCase(
+                        new IRVar( eqSopOpt_b ), [
+                            new IRFunc([ eqSopOpt_unused ], IRConst.bool( false ) ),
+                            IRConst.bool( true )
+                        ]
+                    )
+                ]
+            )
+        ),
+        { forceHoist: false, name: "equalsSopOptional" }
+    );
+    return _eqSopOpt.clone();
 }
 
 const eqVoid_a = Symbol("a");

@@ -3,6 +3,7 @@ import { DiagnosticCode } from "../../../../diagnostics/diagnosticMessages.gener
 import { TirTernaryExpr } from "../../../tir/expressions/TirTernaryExpr";
 import { TirType } from "../../../tir/types/TirType";
 import { canAssignTo } from "../../../tir/types/utils/canAssignTo";
+import { fitToType } from "../../utils/fitToType";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { applyNarrowingsToScope, extractIsNarrowings } from "../../utils/extractIsNarrowings";
 import { _compileExpr } from "./_compileExpr";
@@ -31,12 +32,14 @@ export function _compileTernaryExpr(
 
     const elseCtx = ctx.newBranchChildScope();
     applyNarrowingsToScope( elseCtx.scope, extractIsNarrowings( cond, false ) );
-    const elseExpr = _compileExpr( elseCtx, expr.ifFalse, returnType );
-    if( !elseExpr ) return undefined;
+    const compiledElse = _compileExpr( elseCtx, expr.ifFalse, returnType );
+    if( !compiledElse ) return undefined;
 
-    if( !canAssignTo( elseExpr.type, returnType ) ) return ctx.error(
+    // both arms are one type: the first's
+    const elseExpr = fitToType( compiledElse, returnType );
+    if( !elseExpr ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-        expr.ifFalse.range, elseExpr.type.toString(), returnType.toString()
+        expr.ifFalse.range, compiledElse.type.toString(), returnType.toString()
     );
 
     return new TirTernaryExpr(

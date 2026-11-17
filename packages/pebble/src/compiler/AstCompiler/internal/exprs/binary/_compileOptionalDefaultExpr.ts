@@ -10,7 +10,7 @@ import { TirNamedDeconstructVarDecl } from "../../../../tir/statements/TirVarDec
 import { TirSimpleVarDecl } from "../../../../tir/statements/TirVarDecl/TirSimpleVarDecl";
 import { TirSopOptT } from "../../../../tir/types/TirNativeType/native/Optional/sop";
 import { TirType } from "../../../../tir/types/TirType";
-import { canAssignTo } from "../../../../tir/types/utils/canAssignTo";
+import { canAssignTo, isOptionalEncodingBridge } from "../../../../tir/types/utils/canAssignTo";
 import { getOptTypeArg } from "../../../../tir/types/utils/getOptTypeArg";
 import { AstCompilationCtx } from "../../../AstCompilationCtx";
 import { _compileExpr } from "../_compileExpr";
@@ -42,7 +42,12 @@ export function _compileOptionalDefaultExpr(
     if( !right ) return undefined;
 
     const isUnwrappedReturn = canAssignTo( right.type, unwrappedType );
-    if( !isUnwrappedReturn && !canAssignTo( right.type, optType ) ) return ctx.error(
+    // an optional default may come in either encoding: it is decoded below
+    if(
+        !isUnwrappedReturn
+        && !canAssignTo( right.type, optType )
+        && !isOptionalEncodingBridge( right.type, optType )
+    ) return ctx.error(
         DiagnosticCode.Type_0_is_not_assignable_to_type_1,
         expr.right.range, right.type.toString(), unwrappedType.toString()
     );

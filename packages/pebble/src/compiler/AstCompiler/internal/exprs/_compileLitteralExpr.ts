@@ -42,6 +42,7 @@ import { TirDataStructType, TirSoPStructType, TirStructType } from "../../../tir
 import { TirType, isTirType } from "../../../tir/types/TirType";
 import { TirTypeParam } from "../../../tir/types/TirTypeParam";
 import { canAssignTo, isStructOrStructAlias, getStructType, canAssignToOptional, canAssignToList } from "../../../tir/types/utils/canAssignTo";
+import { fitToType } from "../../utils/fitToType";
 import { getLinearMapTypeArgs, getListTypeArg } from "../../../tir/types/utils/getListTypeArg";
 import { TirLinearMapT } from "../../../tir/types/TirNativeType/native/linearMap";
 import { TirVariableAccessExpr } from "../../../tir/expressions/TirVariableAccessExpr";
@@ -501,13 +502,15 @@ export function __commonCompileStructFieldValues(
                 expr.range, fieldDef.name, constructorDef.name, structType
             );
         }
-        const initExpr = _compileExpr( ctx, expr.values[initAstExprIdx], fieldDef.type );
-        if( !initExpr ) return undefined;
-        if( !canAssignTo( initExpr.type, fieldDef.type ) )
+        const compiledInit = _compileExpr( ctx, expr.values[initAstExprIdx], fieldDef.type );
+        if( !compiledInit ) return undefined;
+        // the value as one of the field's type
+        const initExpr = fitToType( compiledInit, fieldDef.type );
+        if( !initExpr )
         {
             return ctx.error(
                 DiagnosticCode.Type_0_is_not_assignable_to_type_1,
-                expr.values[initAstExprIdx].range, initExpr.type, fieldDef.type
+                expr.values[initAstExprIdx].range, compiledInit.type, fieldDef.type
             );
         }
         fieldValues[i] = initExpr;
@@ -555,15 +558,18 @@ export function _compileLitteralArrayExpr(
         );
     }
 
-    const fstCompiledExpr = _compileExpr( ctx, expr.elems[0], elemsType );
+    let fstCompiledExpr = _compileExpr( ctx, expr.elems[0], elemsType );
     if( !fstCompiledExpr ) return undefined;
     
     if( !elemsType ) elemsType = fstCompiledExpr.type;
-    else if( !canAssignTo( fstCompiledExpr.type, elemsType ) ) {
-        return ctx.error(
+    else {
+        // every element is a value of the list's element type
+        const fitted = fitToType( fstCompiledExpr, elemsType );
+        if( !fitted ) return ctx.error(
             DiagnosticCode.Type_0_is_not_assignable_to_type_1,
             expr.elems[0].range, fstCompiledExpr.type, elemsType
         );
+        fstCompiledExpr = fitted;
     }
 
     if( !listType  ) listType  = new TirListT( elemsType! ); 
@@ -572,14 +578,15 @@ export function _compileLitteralArrayExpr(
     const compiledRestElems = restElems.map( elem => {
         const compiled = _compileExpr( ctx, elem, elemsType );
         if( !compiled ) return undefined;
-        if( !canAssignTo( compiled.type, elemsType! ) )
+        const fitted = fitToType( compiled, elemsType! );
+        if( !fitted )
         {
             return ctx.error(
                 DiagnosticCode.Type_0_is_not_assignable_to_type_1,
                 elem.range, compiled.type, elemsType
             );
         }
-        return compiled;
+        return fitted;
     });
     if( compiledRestElems.some( x => !isTirExpr( x )) ) return undefined;
 

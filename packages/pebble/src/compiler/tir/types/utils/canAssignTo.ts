@@ -73,6 +73,59 @@ export function canAssignToList( type: TirType ): boolean
 }
 
 /**
+ * An `Optional` seen through a narrowing (`o is Some`, the arm of a `case` or
+ * a `match`) is a plain struct type holding some of the optional's
+ * constructors (`narrowTo`). It is still that optional at run time, in the
+ * encoding it had.
+ *
+ * @returns for such a view: which encoding it is, and the payload type its
+ * `Some` holds (`undefined` when the view has no `Some`: a `None` is a `None`
+ * of any payload). `undefined` for every other type, the two optional types
+ * themselves included.
+ */
+export function narrowedOptionalView( type: TirType ): { sop: boolean, payload: TirType | undefined } | undefined
+{
+    type = getUnaliased( type );
+    if( type instanceof TirSopOptT || type instanceof TirDataOptT ) return undefined;
+    if(!( type instanceof TirSoPStructType || type instanceof TirDataStructType )) return undefined;
+    // the name is reserved and only the standard `Optional` has no file
+    if( type.name !== "Optional" || type.fileUid !== "" || !type.isNarrowed() ) return undefined;
+    const some = type.constructors.find( c => c.name === "Some" );
+    return {
+        sop: type instanceof TirSoPStructType,
+        payload: some?.fields[0]?.type
+    };
+}
+
+/** an `Optional` in either encoding, or a narrowed view of one */
+function optionalShape( type: TirType ): { sop: boolean, payload: TirType | undefined } | undefined
+{
+    type = getUnaliased( type );
+    if( type instanceof TirSopOptT ) return { sop: true, payload: type.typeArg };
+    if( type instanceof TirDataOptT ) return { sop: false, payload: type.typeArg };
+    return narrowedOptionalView( type );
+}
+
+/** `true` for the SoP encoding of an `Optional`, narrowed or not */
+export function isSopOptionalLike( type: TirType ): boolean
+{
+    return optionalShape( type )?.sop === true;
+}
+
+/**
+ * `true` if `a` and `b` are one `Optional` in its two encodings, whichever of
+ * them is narrowed: the operands of an `==` that need one of them converted.
+ */
+export function areOptionalsOfTwoEncodings( a: TirType, b: TirType ): boolean
+{
+    const sa = optionalShape( a );
+    const sb = optionalShape( b );
+    if( !sa || !sb || sa.sop === sb.sop ) return false;
+    if( !sa.payload || !sb.payload ) return true;
+    return canAssignTo( sa.payload, sb.payload ) || canAssignTo( sb.payload, sa.payload );
+}
+
+/**
  * The two `Optional` representations (data-encoded `TirDataOptT` and
  * SoP-encoded `TirSopOptT`) are **incompatible at runtime** and therefore not
  * directly assignable. They can however be bridged by a real encoding
@@ -88,10 +141,20 @@ export function isOptionalEncodingBridge( from: TirType, to: TirType ): boolean
     from = getUnaliased( from );
     to   = getUnaliased( to );
 
-    const fromIsData = from instanceof TirDataOptT;
-    const fromIsSop  = from instanceof TirSopOptT;
     const toIsData   = to instanceof TirDataOptT;
     const toIsSop    = to instanceof TirSopOptT;
+
+    // a narrowed view of an optional (`o is Some`) converts like the optional it is
+    const view = narrowedOptionalView( from );
+    if( view )
+    {
+        if( !(toIsData || toIsSop) || view.sop === toIsSop ) return false;
+        return view.payload === undefined
+            || canAssignTo( view.payload, (to as TirDataOptT | TirSopOptT).typeArg );
+    }
+
+    const fromIsData = from instanceof TirDataOptT;
+    const fromIsSop  = from instanceof TirSopOptT;
 
     if( !(fromIsData || fromIsSop) || !(toIsData || toIsSop) ) return false;
     // only bridge *across* encodings; same-encoding cases are handled by the
@@ -118,6 +181,9 @@ export function canAssignTo( a: TirType, b: TirType ): boolean
  * `case`/`match` expression (audit BUGs 29/34): fold left, widening the
  * accumulator to whichever side the other assigns to; incompatible pair →
  * `undefined`.
+ *
+ * The two encodings of one `Optional` join to the first of them: the arms of
+ * the other encoding are then converted to it (`fitToType`).
  */
 export function joinTypes( types: TirType[] ): TirType | undefined
 {
@@ -128,9 +194,51 @@ export function joinTypes( types: TirType[] ): TirType | undefined
         const t = types[i];
         if( canAssignTo( t, acc ) ) continue;      // t fits acc
         if( canAssignTo( acc, t ) ) { acc = t; continue; } // acc fits t -> widen
+        if( isOptionalEncodingBridge( t, acc ) ) continue; // t converts to acc
+        if( isOptionalEncodingBridge( acc, t ) ) { acc = t; continue; } // acc converts to t
+        // two views of one struct, each narrowed to other constructors
+        // (`case v is A{} => v is B{} => v`): the view that holds both
+        const union = unionOfViews( acc, t );
+        if( union ) { acc = union; continue; }
         return undefined;                          // incompatible
     }
     return acc;
+}
+
+function unionOfViews( a: TirType, b: TirType ): TirType | undefined
+{
+    a = getUnaliased( a );
+    b = getUnaliased( b );
+    const bothData = a instanceof TirDataStructType && b instanceof TirDataStructType;
+    const bothSop = a instanceof TirSoPStructType && b instanceof TirSoPStructType;
+    if( !bothData && !bothSop ) return undefined;
+    const x = a as TirDataStructType | TirSoPStructType;
+    const y = b as TirDataStructType | TirSoPStructType;
+    // one struct (the test `canAssignStruct` makes), seen through two narrowings
+    if( x.name !== y.name || x.fileUid !== y.fileUid ) return undefined;
+    if( !x.isNarrowed() || !y.isNarrowed() ) return undefined;
+    return ( x as any ).unionWith( y );
+}
+
+/**
+ * `true` for the SoP representation of an `Optional<T>` whose `T` has a data encoding:
+ * the `Some` payload is that encoding already (the SoP optional convention), so the
+ * optional converts to data by tagging it, and two of them compare by their payloads.
+ */
+export function sopOptionalHoldsData( type: TirType ): boolean
+{
+    type = getUnaliased( type );
+    if( type instanceof TirSopOptT ) return payloadIsData( type.typeArg );
+    // a narrowed view of a SoP optional (`o is Some`) is one all the same
+    const view = narrowedOptionalView( type );
+    if( !view || !view.sop ) return false;
+    // only `None`: nothing to encode
+    return view.payload === undefined || payloadIsData( view.payload );
+}
+function payloadIsData( payload: TirType ): boolean
+{
+    payload = getUnaliased( payload );
+    return optionalShape( payload )?.sop ? sopOptionalHoldsData( payload ) : payload.hasDataEncoding();
 }
 
 export function getCanAssign( a: TirType, b: TirType ): CanAssign
@@ -206,6 +314,20 @@ function uncheckedGetCanAssign(
         return a instanceof TirPairDataT ? CanAssign.Yes : CanAssign.No;
     }
 
+    if( b instanceof TirSopOptT || b instanceof TirDataOptT )
+    {
+        // a narrowed view of an optional (`o is Some`) is that optional: as it is
+        // in its own encoding, with the conversion in the other
+        const view = narrowedOptionalView( a );
+        if( view )
+        {
+            if(
+                view.payload !== undefined
+                && uncheckedGetCanAssign( view.payload, b.typeArg, symbols ) !== CanAssign.Yes
+            ) return CanAssign.No;
+            return view.sop === ( b instanceof TirSopOptT ) ? CanAssign.Yes : CanAssign.RequiresExplicitCast;
+        }
+    }
     if( b instanceof TirSopOptT )
     {
         if( a instanceof TirSopOptT ) return uncheckedGetCanAssign( a.typeArg, b.typeArg, symbols );
@@ -231,8 +353,12 @@ function uncheckedGetCanAssign(
     }
     if( b instanceof TirDataOptT )
     {
-        if( a instanceof TirSopOptT ) return uncheckedGetCanAssign( a.typeArg, b.typeArg, symbols );
-        if( a instanceof TirDataOptT ) return canAssignTo( a.typeArg, b.typeArg ) ? CanAssign.RequiresExplicitCast : CanAssign.No;
+        // the mirror image of the SoP case above: the same encoding is assignable as its
+        // payload is, the other encoding is not the same value at run time and needs the
+        // conversion (`isOptionalEncodingBridge`, `fitToType`). These two lines used to be
+        // a copy of the two above, which made a SoP optional pass for a data one unconverted.
+        if( a instanceof TirDataOptT ) return uncheckedGetCanAssign( a.typeArg, b.typeArg, symbols );
+        if( a instanceof TirSopOptT ) return canAssignTo( a.typeArg, b.typeArg ) ? CanAssign.RequiresExplicitCast : CanAssign.No;
         if( a instanceof TirDataT ) return CanAssign.RequiresExplicitCast;
 
         return CanAssign.No;

@@ -1814,3 +1814,810 @@ describe("BUG 64 — where the pass puts the `case`", () => {
         expect( isListCase( branches[1], xs ) ).toBe( false );
     });
 });
+
+// ==========================================================================
+//  BUGs 65-69 — found adding the data-L2 mode to the same kernel
+// ==========================================================================
+//
+// An `Optional<T>` has two encodings: read out of a datum it is data
+// (`Constr 0 [x]`), made in a function it is a constructor term. They are one
+// type to whoever writes the program. `OPT` gives the cases a value of each.
+
+const OPT = `
+struct Holder { Holder { maybe: Optional<int> } }
+// a data-encoded Some{ n }, as a datum holds it
+function held( n: int ): data {
+    const some: Optional<int> = Some{ value: n };
+    return Holder.Holder{ maybe: some }.toData();
+}
+function heldNone(): data {
+    const none: Optional<int> = undefined;
+    return Holder.Holder{ maybe: none }.toData();
+}
+function valueOf( o: Optional<int> ): int {
+    return case o is Some{ value } => value is None{} => 0 - 1;
+}
+`;
+
+/** `main( n )` of `OPT + body`, evaluated */
+async function optInt( body: string, n: bigint ): Promise<bigint> {
+    return evalInt1( await compileFn( OPT + body ), n );
+}
+
+// --------------------------------------------------------------------------
+// BUG 65 — the two encodings of `Optional<T>` convert wherever a value flows
+// --------------------------------------------------------------------------
+describe("BUG 65 — an `Optional` of either encoding fits a slot of the other", () => {
+
+    test("a data optional is returned from a function declared `Optional<int>`", async () => {
+        expect( await optInt(`
+function f( n: int ): Optional<int> { const Holder{ maybe } = held( n ) as Holder; return maybe; }
+export function main( n: int ): int { return valueOf( f( n ) ); }`, 5n ) ).toBe( 5n );
+    });
+
+    test("...initialises an annotated constant", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const x: Optional<int> = maybe;
+    return valueOf( x );
+}`, 5n ) ).toBe( 5n );
+    });
+
+    test("...is assigned to a variable of the other encoding, and the other way round", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    let x: Optional<int> = undefined;
+    x = maybe;
+    // a variable that IS the data one takes a made one
+    let y = maybe;
+    const made: Optional<int> = Some{ value: n + 2 };
+    y = made;
+    return valueOf( x ) * 100 + valueOf( y );
+}`, 5n ) ).toBe( 507n );
+    });
+
+    test("the arms of `?:` may be one of each, in either order", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const made: Optional<int> = Some{ value: 7 };
+    const a = n > 0 ? maybe : made;
+    const b = n > 0 ? made : maybe;
+    const c = n < 0 ? made : maybe;
+    return valueOf( a ) * 10000 + valueOf( b ) * 100 + valueOf( c );
+}`, 5n ) ).toBe( 50705n );
+    });
+
+    test("the arms of a `case`, with and without a type to aim at", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const made: Optional<int> = Some{ value: 7 };
+    const none: Optional<int> = undefined;
+    const hinted: Optional<int> = case none is Some{} => made is None{} => maybe;
+    const joined = case made is Some{} => maybe is None{} => made;
+    const wild: Optional<int> = case none is Some{} => made else maybe;
+    return valueOf( hinted ) * 10000 + valueOf( joined ) * 100 + valueOf( wild );
+}`, 5n ) ).toBe( 50505n );
+    });
+
+    test("a struct field takes either (control: it did before)", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const Holder{ maybe: again } = Holder.Holder{ maybe: maybe }.toData() as Holder;
+    return valueOf( again );
+}`, 5n ) ).toBe( 5n );
+    });
+
+    test("`==` between one of each, in either order (was: `equalsData :: not data` at run time)", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const same: Optional<int> = Some{ value: n };
+    const other: Optional<int> = Some{ value: n + 1 };
+    const none: Optional<int> = undefined;
+    let score = 0;
+    if( maybe == same ) score = score + 1;
+    if( same == maybe ) score = score + 10;
+    if( maybe != other ) score = score + 100;
+    if( other != maybe ) score = score + 1000;
+    if( maybe != none ) score = score + 10000;
+    return score;
+}`, 5n ) ).toBe( 11111n );
+    });
+
+    test("a data `None` equals a made one", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = heldNone() as Holder;
+    const none: Optional<int> = undefined;
+    return ( maybe == none ? 1 : 0 ) + ( none == maybe ? 10 : 0 ) + n;
+}`, 0n ) ).toBe( 11n );
+    });
+
+    test("control: what is not an optional of the same payload is still refused", async () => {
+        const diags = await diagnosticsOf( OPT + `
+export function main( n: int ): int {
+    const made: Optional<bytes> = Some{ value: #aa };
+    const x: Optional<int> = made;
+    return valueOf( x ) + n;
+}` );
+        expect( diags.some( d => d.includes( "2322" ) ) ).toBe( true );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 66 — `==` has a term, or a diagnostic, for every type
+// --------------------------------------------------------------------------
+describe("BUG 66 — `==` on an `Optional` made in a function", () => {
+
+    test("two made optionals compare by constructor, then by payload", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const a: Optional<int> = Some{ value: n };
+    const b: Optional<int> = Some{ value: n };
+    const c: Optional<int> = Some{ value: n + 1 };
+    const none: Optional<int> = undefined;
+    const also: Optional<int> = undefined;
+    let score = 0;
+    if( a == b ) score = score + 1;
+    if( a != c ) score = score + 10;
+    if( none == also ) score = score + 100;
+    if( a != none ) score = score + 1000;
+    if( none != a ) score = score + 10000;
+    if( a != undefined ) score = score + 100000;
+    return score;
+}`, 5n ) ).toBe( 111111n );
+    });
+
+    test("as parameters of a function", async () => {
+        expect( await optInt(`
+function same( a: Optional<int>, b: Optional<int> ): boolean { return a == b; }
+export function main( n: int ): int {
+    const Holder{ maybe: x } = held( n ) as Holder;
+    const Holder{ maybe: y } = held( n ) as Holder;
+    const Holder{ maybe: z } = heldNone() as Holder;
+    return ( same( x, y ) ? 1 : 0 ) + ( same( x, z ) ? 10 : 0 ) + ( same( z, z ) ? 100 : 0 );
+}`, 5n ) ).toBe( 101n );
+    });
+
+    test("what `find` and `lookup` return", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const xs: List<int> = [ 1, 2, 3 ];
+    const three: Optional<int> = Some{ value: 3 };
+    const all = std.builtins.unMapData( std.value.zero.insert( #aa, #01, 5 ).toData() );
+    const nothing: Optional<data> = undefined;
+    let score = n;
+    if( xs.find( x => x == 3 ) == three ) score = score + 1;
+    if( xs.find( x => x == 9 ) != three ) score = score + 10;
+    if( all.lookup( (#bb).toData() ) == nothing ) score = score + 100;
+    if( all.lookup( (#aa).toData() ) != nothing ) score = score + 1000;
+    return score;
+}`, 0n ) ).toBe( 1111n );
+    });
+
+    test("a struct or bytes payload", async () => {
+        expect( await optInt(`
+struct P { P { a: int, b: bytes } }
+export function main( n: int ): int {
+    const p: Optional<P> = Some{ value: P.P{ a: n, b: #aa } };
+    const q: Optional<P> = Some{ value: P.P{ a: n, b: #aa } };
+    const r: Optional<P> = Some{ value: P.P{ a: n + 1, b: #aa } };
+    const s: Optional<bytes> = Some{ value: #aa };
+    const t: Optional<bytes> = Some{ value: #aa };
+    return ( p == q ? 1 : 0 ) + ( p != r ? 10 : 0 ) + ( s == t ? 100 : 0 );
+}`, 5n ) ).toBe( 111n );
+    });
+
+    test("a type with no equality is reported, not left to the back end", async () => {
+        const diags = await diagnosticsOf(`
+function inc( n: int ): int { return n + 1; }
+export function main( n: int ): int { return inc == inc ? n : 0; }` );
+        expect( diags.some( d => d.includes( "2365" ) && d.includes( "'=='" ) ) ).toBe( true );
+        const neq = await diagnosticsOf(`
+function inc( n: int ): int { return n + 1; }
+export function main( n: int ): int { return inc != inc ? n : 0; }` );
+        expect( neq.some( d => d.includes( "2365" ) && d.includes( "'!='" ) ) ).toBe( true );
+    });
+
+    test("control: the equalities there were", async () => {
+        expect( await optInt(`
+struct P { P { a: int, b: bytes } }
+export function main( n: int ): int {
+    const xs: List<int> = [ 1, 2 ];
+    const ys: List<int> = [ 1, 2 ];
+    let score = 0;
+    if( n == 5 ) score = score + 1;
+    if( #aa == #aa ) score = score + 10;
+    if( xs == ys ) score = score + 100;
+    if( P.P{ a: 1, b: #aa } == P.P{ a: 1, b: #aa } ) score = score + 1000;
+    if( std.value.zero == std.value.zero ) score = score + 10000;
+    return score;
+}`, 5n ) ).toBe( 11111n );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 67 — `List<Optional<T>>` written as an annotation holds data optionals
+// --------------------------------------------------------------------------
+describe("BUG 67 — a list of optionals declared in a function", () => {
+
+    test("a literal of made optionals (was: `invalid constant`)", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const xs: List<Optional<int>> = [ s, s ];
+    const ys: List<Optional<int>> = [ Some{ value: n + 1 }, undefined ];
+    return valueOf( xs.head() ) * 100 + valueOf( ys.head() ) * 10 + ys.length();
+}`, 5n ) ).toBe( 562n );
+    });
+
+    test("elements that are computed, and `prepend` (was: `cannot be represented as uplc const`)", async () => {
+        expect( await optInt(`
+function mk( n: int ): Optional<int> { return Some{ value: n }; }
+export function main( n: int ): int {
+    const xs: List<Optional<int>> = [ mk( n ), mk( n + 1 ) ];
+    const none: List<Optional<int>> = [];
+    const ys = none.prepend( mk( n + 2 ) );
+    return valueOf( xs.head() ) * 100 + valueOf( xs.tail().head() ) * 10 + valueOf( ys.head() );
+}`, 1n ) ).toBe( 123n );
+    });
+
+    test("a list out of a datum is passed to a function that takes one", async () => {
+        expect( await optInt(`
+struct Many { Many { items: List<Optional<int>> } }
+function first( xs: List<Optional<int>> ): int { return valueOf( xs.head() ); }
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const none: List<Optional<int>> = [];
+    const Many{ items } = Many.Many{ items: none.prepend( s ) }.toData() as Many;
+    return first( items );
+}`, 7n ) ).toBe( 7n );
+    });
+
+    test("one of each encoding in one literal", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const s: Optional<int> = Some{ value: n + 1 };
+    const xs: List<Optional<int>> = [ maybe, s ];
+    return valueOf( xs.head() ) * 10 + valueOf( xs.tail().head() );
+}`, 5n ) ).toBe( 56n );
+    });
+
+    test("control: a list of BLS12-381 points is still a list of points", async () => {
+        // (its element type has no data encoding: it must not be resolved as data)
+        const uplc = await compileFn(`
+const GEN = #97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb;
+export function main( n: int ): int {
+    using { G1, g1Uncompress, g1ScalarMul, g1Equal } = std.crypto.bls12_381;
+    const g = g1Uncompress( GEN );
+    let points: List<G1> = [];
+    for( let i = 1; i <= n; i = i + 1 ) { points = points.prepend( g1ScalarMul( i, g ) ); }
+    return g1Equal( points.head(), g1ScalarMul( n, g ) ) ? points.length() : 0 - 1;
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 3n );
+    });
+
+    test("control: a list of ints, and of data optionals as they come", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const a = n;
+    const xs: List<int> = [ a, a ];
+    const Holder{ maybe } = held( n ) as Holder;
+    const ys = [ maybe, maybe ];
+    return xs.head() * 10 + valueOf( ys.head() );
+}`, 5n ) ).toBe( 55n );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 68 — the `else` arm of a `case` expression is an arm like the others
+// --------------------------------------------------------------------------
+describe("BUG 68 — the `else` arm of a `case` is type-checked", () => {
+
+    test("an `else` of another type is refused, with a type to aim at", async () => {
+        const diags = await diagnosticsOf( OPT + `
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const m: int = case s is Some{ value } => value else #aabb;
+    return m;
+}` );
+        expect( diags.some( d => d.includes( "2322" ) && d.includes( "'bytes'" ) && d.includes( "'int'" ) ) ).toBe( true );
+    });
+
+    test("...and without one", async () => {
+        const diags = await diagnosticsOf( OPT + `
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const m = case s is Some{ value } => value else #aabb;
+    return n;
+}` );
+        expect( diags.some( d => d.includes( "2322" ) && d.includes( "'bytes'" ) && d.includes( "'int'" ) ) ).toBe( true );
+    });
+
+    test("control: an `else` of the arms' type compiles and is taken", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const none: Optional<int> = undefined;
+    return case none is Some{ value } => value else n + 1;
+}`, 5n ) ).toBe( 6n );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 69 — a narrowed `Optional` is still an `Optional`; narrowed views join
+// --------------------------------------------------------------------------
+describe("BUG 69 — a variable narrowed by `is` or a `case` arm keeps its type", () => {
+
+    test("a narrowed optional is passed to a function", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const inArm = case s is Some{} => valueOf( s ) is None{} => 0;
+    let inIf = 0;
+    if( s is Some ) { inIf = valueOf( s ); }
+    const inTernary = s is Some ? valueOf( s ) : 0;
+    return inArm * 10000 + inIf * 100 + inTernary;
+}`, 7n ) ).toBe( 70707n );
+    });
+
+    test("...when it is a data optional too", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const Holder{ maybe } = held( n ) as Holder;
+    const inArm = case maybe is Some{} => valueOf( maybe ) is None{} => 0;
+    let inIf = 0;
+    if( maybe is Some ) { inIf = valueOf( maybe ); }
+    return inArm * 100 + inIf;
+}`, 7n ) ).toBe( 707n );
+    });
+
+    test("...has `toData`, and compares", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const u: Optional<int> = Some{ value: n };
+    const Holder{ maybe } = held( n ) as Holder;
+    let score = 0;
+    match s {
+        when Some{}: {
+            if( s.toData() == maybe.toData() ) score = score + 1;
+            if( s == u ) score = score + 10;
+            if( u == s ) score = score + 100;
+            if( s == maybe ) score = score + 1000;
+        }
+        when None{}: { score = 0 - 1; }
+    }
+    return score;
+}`, 7n ) ).toBe( 1111n );
+    });
+
+    test("two arms that each return the scrutinee join to its type", async () => {
+        expect( await optInt(`
+struct AB { A { x: int } B { y: int } }
+function tagOf( v: AB ): int { return case v is A{} => 0 is B{} => 1; }
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const again = case s is Some{} => s is None{} => s;
+    const Holder{ maybe } = held( n + 1 ) as Holder;
+    const fromDatum = case maybe is Some{} => maybe is None{} => maybe;
+    const v = AB.B{ y: n };
+    const w = case v is A{} => v is B{} => v;
+    return valueOf( again ) * 100 + valueOf( fromDatum ) * 10 + tagOf( w );
+}`, 5n ) ).toBe( 561n );
+    });
+
+    test("an arm that returns the narrowed scrutinee and one that returns another optional", async () => {
+        expect( await optInt(`
+export function main( n: int ): int {
+    const s: Optional<int> = Some{ value: n };
+    const u: Optional<int> = Some{ value: n + 1 };
+    const Holder{ maybe } = held( n + 2 ) as Holder;
+    const none: Optional<int> = undefined;
+    const a = case s is Some{} => s is None{} => u;
+    const b = case none is Some{} => none is None{} => u;
+    const c = case maybe is Some{} => maybe is None{} => u;
+    return valueOf( a ) * 100 + valueOf( b ) * 10 + valueOf( c );
+}`, 1n ) ).toBe( 123n );
+    });
+
+    test("control: narrowing still narrows — the other constructor is not reachable", async () => {
+        const diags = await diagnosticsOf( OPT + `
+struct AB { A { x: int } B { y: int } }
+export function main( n: int ): int {
+    const v = AB.A{ x: n };
+    let w = AB.A{ x: 1 };
+    // a value narrowed to A does not take a whole AB
+    if( w is A ) { const onlyA = w; const whole: AB = v; return case onlyA is A{ x } => x; }
+    return n;
+}` );
+        expect( diags.filter( d => d.startsWith( "ERROR" ) ) ).toEqual( [] );
+    });
+});
+
+// --------------------------------------------------------------------------
+// BUG 70 — warning 6134 knows a module's constant from a number that may be 0
+// --------------------------------------------------------------------------
+describe("BUG 70 — dividing by a module constant other than 0 cannot fail", () => {
+
+    const warned = ( diags: string[] ) => diags.filter( d => d.includes( "6134" ) );
+
+    test("`n % R`, with `const R` at the top of the file, draws no warning", async () => {
+        const diags = await diagnosticsOf(`
+const R = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+function reduced( n: int ): int { return n % R; }
+export function main( n: int ): int {
+    const direct = n % R;
+    const through = reduced( n + 1 );
+    if( n > 100 ) return 0;
+    return direct + through;
+}` );
+        expect( warned( diags ) ).toEqual( [] );
+        expect( diags.filter( d => d.startsWith( "ERROR" ) ) ).toEqual( [] );
+    });
+
+    test("...nor through a constant defined by another, or imported", async () => {
+        const diags = await diagnosticsOf(`
+import { ORDER } from "./field.pebble";
+const R = ORDER;
+export function main( n: int ): int {
+    const m = n / R;
+    if( n > 100 ) return 0;
+    return m;
+}`, { "field.pebble": `export const ORDER = ( 13 );\n` } );
+        expect( warned( diags ) ).toEqual( [] );
+        expect( diags.filter( d => d.startsWith( "ERROR" ) ) ).toEqual( [] );
+    });
+
+    test("control: a constant that IS 0, a parameter and a local still warn", async () => {
+        const zero = await diagnosticsOf(`
+const Z = 0;
+export function main( n: int ): int {
+    const m = n % Z;
+    if( n > 100 ) return 0;
+    return m;
+}` );
+        expect( warned( zero ).length ).toBe( 1 );
+
+        const param = await diagnosticsOf(`
+function pick( n: int, d: int ): int {
+    const m = n % d;
+    if( n > 100 ) return 0;
+    return m;
+}
+export function main( n: int ): int { return pick( n, 7 ); }` );
+        expect( warned( param ).length ).toBe( 1 );
+
+        // a local of the same name as a module constant is not that constant
+        const local = await diagnosticsOf(`
+const R = 13;
+function pick( n: int, k: int ): int {
+    const R = k - k;
+    const m = n % R;
+    if( n > 100 ) return 0;
+    return m;
+}
+export function main( n: int ): int { return pick( n, 7 ); }` );
+        expect( warned( local ).length ).toBe( 1 );
+    });
+
+    test("control: it still evaluates", async () => {
+        const uplc = await compileFn(`
+const R = 13;
+export function main( n: int ): int {
+    const m = n % R;
+    if( n > 100 ) return 0;
+    return m;
+}` );
+        expect( evalInt1( uplc, 30n ) ).toBe( 4n );
+        expect( evalInt1( uplc, 200n ) ).toBe( 0n );
+    });
+});
+
+// BUGs 71-75 — found bringing the Jacquard kernel up to the data-L2 mode of the
+// current specification, and probing every method the checker offers on a list,
+// a map and a byte string for a backend behind it (PEBBLE_BUGS.md).
+
+const twoEntries = `
+function mk( n: int ): LinearMap<bytes, int> {
+    const m: LinearMap<bytes, int> = {};
+    return m.prepend( #bb, 2 ).prepend( #aa, n );
+}`;
+
+describe("BUG 71: reverse() on a list and on a map", () => {
+
+    test("a list of integers, last first", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const xs: List<int> = [ n, 2, 3 ];
+    const r = xs.reverse();
+    return r.head() * 100 + r.tail().head() * 10 + r.tail().tail().head();
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 327n );
+        expect( evalInt1( uplc, 9n ) ).toBe( 329n );
+    });
+
+    test("an empty list, a list of bytes, a list built in a loop", async () => {
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int {
+    const xs: List<int> = [];
+    return xs.reverse().length() + n;
+}`), 5n ) ).toBe( 5n );
+
+        expect( evalBytes1( await compileFn(`
+export function main( n: int ): bytes {
+    const xs: List<bytes> = [ #aa, #bbcc, #dd ];
+    return xs.reverse().head();
+}`), 0n ) ).toBe( "dd" );
+
+        // the idiom the method is for: prepend in a loop, then put the order back
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int {
+    let acc: List<int> = [];
+    for( let i = 1; i <= n; i = i + 1 ) { acc = acc.prepend( i * i ); }
+    const squares = acc.reverse();
+    return squares.head() * 1000 + squares.tail().head() * 100 + acc.head();
+}`), 4n ) ).toBe( 1000n + 400n + 16n );
+    });
+
+    test("a map: the entries last first, still a map", async () => {
+        const uplc = await compileFn(`${twoEntries}
+export function main( n: int ): int {
+    const r = mk( n ).reverse();
+    const found = case r.lookup( #aa ) is Some{ value } => value is None{} => 0 - 1;
+    return r.head().value * 100 + found;
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 207n );
+    });
+
+    test("the method and the function of the std namespace give the same list", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const xs: List<int> = [ n, 2, 3 ];
+    return std.list.reverse( xs ) == xs.reverse() ? 1 : 0;
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 1n );
+    });
+});
+
+describe("BUG 72: bytes to integer", () => {
+
+    test("b.toInt(), b as int and std.bytes.toInt( b ) are the big-endian integer", async () => {
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { const b = #0100; return b.toInt() + n; }`), 1n ) ).toBe( 257n );
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { const b = #0100; return ( b as int ) + n; }`), 1n ) ).toBe( 257n );
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { return std.bytes.toInt( #ffff ) + n; }`), 1n ) ).toBe( 65536n );
+        // no bytes, no value; leading zeros add nothing
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { const e = #; return e.toInt() + #000007.toInt() + n; }`), 0n ) ).toBe( 7n );
+    });
+
+    test("there and back: an integer as bytes, and those bytes as an integer", async () => {
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { return ( n as bytes ).toInt(); }`), 123456789n ) ).toBe( 123456789n );
+    });
+});
+
+describe("BUG 73: two entries of a map are equal or not", () => {
+
+    test("== on entries compares key and value", async () => {
+        const uplc = await compileFn(`${twoEntries}
+export function main( n: int ): int {
+    const m = mk( n );
+    const same = m.head() == m.head() ? 1 : 0;
+    const other = m.head() == m.tail().head() ? 1 : 0;
+    // the same key with another value is another entry
+    const sameKey = m.head() == mk( n + 1 ).head() ? 1 : 0;
+    return same * 100 + other * 10 + sameKey;
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 100n );
+    });
+
+    test("includes() on a map takes an entry", async () => {
+        const uplc = await compileFn(`${twoEntries}
+export function main( n: int ): int {
+    const m = mk( n );
+    const whole = m.includes( m.head() ) ? 1 : 0;
+    const rest = m.tail().includes( m.head() ) ? 1 : 0;
+    return whole * 10 + rest;
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 10n );
+    });
+});
+
+describe("BUG 74: find() on a map", () => {
+
+    test("the entry found, its key and its value; none when there is none", async () => {
+        const uplc = await compileFn(`${twoEntries}
+export function main( n: int ): int {
+    const m = mk( n );
+    const byValue = case m.find( e => e.value == 2 ) is Some{ value } => value.key.length() * 10 + value.value is None{} => 0 - 1;
+    const byKey = case m.find( e => e.key == #aa ) is Some{ value } => value.value is None{} => 0 - 1;
+    const none = case m.find( e => e.value == 99 ) is Some{ value } => value.value is None{} => 0 - 1;
+    return byValue * 10000 + byKey * 100 + ( none + 1 );
+}`);
+        // byValue = 1 * 10 + 2 = 12; byKey = n; none + 1 = 0
+        expect( evalInt1( uplc, 7n ) ).toBe( 120000n + 700n );
+    });
+
+    test("control: find() on a list of integers, as before", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const xs: List<int> = [ 1, n, 3 ];
+    return case xs.find( x => x > 1 ) is Some{ value } => value is None{} => 0;
+}`);
+        expect( evalInt1( uplc, 7n ) ).toBe( 7n );
+    });
+});
+
+describe("BUG 75: a string and its bytes", () => {
+
+    test("bytes.decodeUtf8() gives the string, string.encodeUtf8() its bytes", async () => {
+        expect( evalBytes1( await compileFn(`
+export function main( n: int ): bytes { const b = #616263; return b.decodeUtf8().encodeUtf8(); }`), 0n ) ).toBe( "616263" );
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int {
+    const b = #c3a8;                       // one character, two bytes
+    const s = b.decodeUtf8();
+    trace s;
+    return s.encodeUtf8().length() + n;
+}`), 0n ) ).toBe( 2n );
+    });
+
+    test("bytes that are no UTF-8 fail where they are decoded", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int { const b = #ff; return b.decodeUtf8().encodeUtf8().length() + n; }`);
+        expect( () => evalInt1( uplc, 0n ) ).toThrow();
+    });
+
+    test("a string has no method of bytes: what compiled to a run-time failure is refused", async () => {
+        // (the builtins behind `length`, `slice`, ... take a byte string, and fail on a string)
+        const length = await diagnosticsOf(`
+export function main( n: int ): int { const s = std.builtins.decodeUtf8( #616263 ); return s.length() + n; }`);
+        expect( length.some( d => d.startsWith("ERROR 2339") && d.includes("'length'") && d.includes("'string'") ) ).toBe( true );
+        const slice = await diagnosticsOf(`
+export function main( n: int ): int { const s = std.builtins.decodeUtf8( #616263 ); return s.slice( 0, 1 ).length() + n; }`);
+        expect( slice.some( d => d.startsWith("ERROR 2339") && d.includes("'slice'") ) ).toBe( true );
+    });
+
+    test("control: a quoted literal is its UTF-8 bytes, with the methods of bytes", async () => {
+        expect( evalInt1( await compileFn(`
+export function main( n: int ): int { const s = "abc"; return s.length() + s.slice( 1, 2 ).length() + n; }`), 0n ) ).toBe( 5n );
+    });
+});
+
+// BUG 76 — found porting the other half of a Merkle Patricia library: a `case`
+// whose arms choose between two results with `?:`.
+
+describe("BUG 76: a conditional as the body of a case arm", () => {
+
+    const shape = `
+struct Shape {
+    Square { side: int }
+    Rect { w: int, h: int }
+    Dot {}
+}
+function mk( n: int ): Shape {
+    if( n == 0 ) return Shape.Dot{};
+    if( n < 10 ) return Shape.Square{ side: n };
+    return Shape.Rect{ w: n, h: 2 };
+}`;
+
+    test("an arm ends where the next one begins, also after `c ? a : b`", async () => {
+        const uplc = await compileFn(`${shape}
+export function main( n: int ): int {
+    const big = n > 5;
+    return case mk( n )
+        is Square{ side } => big ? side * side : side
+        is Rect{ w, h } => big ? w * h : w + h
+        is Dot{} => 0 - 1
+        ;
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 3n );
+        expect( evalInt1( uplc, 7n ) ).toBe( 49n );
+        expect( evalInt1( uplc, 12n ) ).toBe( 24n );
+        expect( evalInt1( uplc, 0n ) ).toBe( -1n );
+    });
+
+    test("a conditional in the last arm, in the else arm, and one inside another", async () => {
+        const uplc = await compileFn(`${shape}
+export function main( n: int ): int {
+    const big = n > 5;
+    const first = case mk( n )
+        is Dot{} => 0
+        else big ? 2 : 1
+        ;
+    const second = case mk( n )
+        is Square{ side } => side > 7 ? 30 : side > 6 ? 20 : 10
+        is Rect{ w } => w
+        is Dot{} => big ? 1 : 0
+        ;
+    return first * 100 + second;
+}`);
+        expect( evalInt1( uplc, 0n ) ).toBe( 0n );
+        expect( evalInt1( uplc, 3n ) ).toBe( 110n );
+        expect( evalInt1( uplc, 7n ) ).toBe( 220n );
+        expect( evalInt1( uplc, 8n ) ).toBe( 230n );
+        expect( evalInt1( uplc, 12n ) ).toBe( 212n );
+    });
+
+    test("control: in parentheses an `is` after the else branch is still a test of its operand", async () => {
+        const uplc = await compileFn(`
+export function main( n: int ): int {
+    const o: Optional<int> = n > 0 ? Some{ value: n } : undefined;
+    const p: Optional<int> = Some{ value: 9 };
+    const b = ( n > 5 ? p : o ) is Some;
+    return case o
+        is Some{ value } => ( b ? value : 0 - value )
+        is None{} => b ? 1 : 0
+        ;
+}`);
+        expect( evalInt1( uplc, 3n ) ).toBe( 3n );
+        expect( evalInt1( uplc, 0n ) ).toBe( 0n );
+        expect( evalInt1( uplc, 7n ) ).toBe( 7n );
+    });
+});
+
+// BUG 77 — found writing the chunk-opening check of Jacquard DA: the scalars of
+// a multi-scalar multiplication, written out as a list.
+
+describe("BUG 77: warning 6134 and a list written out for a builtin that needs all of it", () => {
+
+    const head = `
+const R = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+const GEN = #97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb;
+function checked( n: int ): int { assert n > 0; return n * 2; }
+`;
+    const warned = ( diags: string[] ) => diags.filter( d => d.startsWith("WARNING 6134") );
+
+    test("the scalars of a multi-scalar multiplication are computed: no warning, and a failure in one fails", async () => {
+        const src = `${head}
+export function main( n: int ): int {
+    using { g1Uncompress, g1MultiScalarMul, g1ScalarMul, g1Equal } = std.crypto.bls12_381;
+    const g = g1Uncompress( GEN );
+    const v = checked( n );
+    const sum = g1MultiScalarMul( [ 1, ( R - v ) % R ], [ g, g ] );
+    return g1Equal( sum, g1ScalarMul( 1 - v, g ) ) ? 1 : 0;
+}`;
+        expect( warned( await diagnosticsOf( src ) ) ).toEqual( [] );
+        const uplc = await compileFn( src );
+        expect( evalInt1( uplc, 3n ) ).toBe( 1n );
+        // `checked( 0 )` fails, and the script with it: the value was not skipped
+        expect( () => evalInt1( uplc, 0n ) ).toThrow();
+    });
+
+    test("...also among other reads, and for the points", async () => {
+        const src = `${head}
+function point( n: int ): bytes { assert n > 0; return GEN; }
+export function main( n: int ): int {
+    using { g1Uncompress, g1MultiScalarMul, g1Compress } = std.crypto.bls12_381;
+    const p = point( n );
+    if( n > 100 ) return 0;
+    const sum = g1MultiScalarMul( [ 1, 2 ], [ g1Uncompress( p ), g1Uncompress( GEN ) ] );
+    return g1Compress( sum ).length();
+}`;
+        expect( warned( await diagnosticsOf( src ) ).length ).toBe( 1 );      // `n > 100` returns without it: right
+        const always = src.replace( "    if( n > 100 ) return 0;\n", "" );
+        expect( warned( await diagnosticsOf( always ) ) ).toEqual( [] );
+        const alwaysUplc = await compileFn( always );
+        expect( () => evalInt1( alwaysUplc, 0n ) ).toThrow();
+    });
+
+    test("control: a list written out for something that takes it apart still warns, and is right to", async () => {
+        const src = `${head}
+export function main( n: int ): int {
+    const v = checked( n );
+    return [ 1, v ].head();
+}`;
+        expect( warned( await diagnosticsOf( src ) ).length ).toBe( 1 );
+        // the head is asked for and given: `checked( 0 )` never runs
+        expect( evalInt1( await compileFn( src ), 0n ) ).toBe( 1n );
+    });
+});
