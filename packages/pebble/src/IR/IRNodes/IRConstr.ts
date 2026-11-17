@@ -16,6 +16,7 @@ import { positiveIntAsBytes } from "../utils/positiveIntAsBytes";
 import { MutArrayLike } from "../utils/MutArrayLike";
 import { Constr, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRConstrMeta extends BaseIRMetadata {}
 
@@ -59,6 +60,7 @@ export class IRConstr
             // the return value is the value that will be set
             (newElem, oldElem) => {
                 newElem.parent = self;
+                self.markHashAsInvalid();
                 return newElem;
             }
         );
@@ -93,10 +95,7 @@ export class IRConstr
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return Array.from( this.fields );

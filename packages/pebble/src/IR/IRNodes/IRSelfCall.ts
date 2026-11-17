@@ -15,6 +15,7 @@ import { fromUtf8 } from "@harmoniclabs/uint8array-utils";
 import { hashVarSym } from "./utils/hashVarSym";
 import { UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRSelfCallMetadata extends BaseIRMetadata {}
 
@@ -61,10 +62,7 @@ export class IRSelfCall
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
     
     static get kind(): IRNodeKind.SelfCall { return IRNodeKind.SelfCall; }
     get kind(): IRNodeKind.SelfCall { return IRSelfCall.kind; }

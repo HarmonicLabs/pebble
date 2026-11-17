@@ -32,11 +32,17 @@ import type { UplcMarks } from "../sourceMap/uplcMarks";
 import { removeUnusedVarsAndReturnRoot } from "./subRoutines/removeUnusedVarsAndReturnRoot/removeUnusedVarsAndReturnRoot";
 import { IRRecursive } from "../IRNodes/IRRecursive";
 import { ensureProperlyForcedBuiltinsAndReturnRoot } from "./subRoutines/performUplcOptimizationsAndReturnRoot/ensureProperlyForcedBuiltinsAndReturnRoot";
+import { _debug_assertFreshHashes } from "../utils/assertFreshHashes";
 
 
 
 
 const __dbgClosed = !!process.env.PEBBLE_DBG_CLOSED;
+/**
+ * PEBBLE_DBG_HASHES=1 -> after every pass, no node remembers the hash of a term it no longer is
+ * (read at each compilation and not once for all: a test turns it on for what it compiles)
+ */
+let __dbgHashes = false;
 /** PEBBLE_DBG_STAGES=1 -> per-pass wall time + resulting tree size */
 const __dbgStages = !!process.env.PEBBLE_DBG_STAGES;
 let __stageT0 = 0;
@@ -82,6 +88,7 @@ function dbgClosed( term: IRTerm, stage: string ): void
             console.error( `[stage] ${String(now - __stageT0).padStart(7)}ms  size=${__treeSize(term)}  ${stage}` );
         __stageT0 = Date.now();
     }
+    if( __dbgHashes ) _debug_assertFreshHashes( term, stage );
     if( !__dbgClosed ) return;
     try { _debug_assertClosedIR( term ); }
     catch (e) {
@@ -104,6 +111,8 @@ export function compileIRToUPLC(
     // most of the time we are just compiling small
     // pre-execuded terms (hence constants)
     if( term instanceof IRConst ) return ToUplcCtx.root( marks ).convert( term );
+
+    __dbgHashes = !!process.env.PEBBLE_DBG_HASHES;
 
     ///////////////////////////////////////////////////////////////////////////////
     // ------------------------------------------------------------------------- //
@@ -268,6 +277,10 @@ export function compileIRToUPLC(
     // "getNRequiredForces ... input was: -<tag>"). Lower them here too;
     // `nativeToIR` introduces fresh IRHoisted wrappers, so the loop keeps
     // draining until natives, letted and hoisted are ALL gone.
+    // (What "the earlier sweeps never saw" was, for the most part, the other
+    // branches of a `case`: `iterTree` skipped them once it had replaced a
+    // term inside one — fixed there. The loop stays for the natives that the
+    // values placed here bring with them.)
     while(
         includesNode(
             term,

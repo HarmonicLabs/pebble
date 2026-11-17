@@ -43,6 +43,7 @@ import { IRVar } from "../IRVar";
 import { IRConst } from "../IRConst";
 import { IRCase } from "../IRCase";
 import { sopOptionalHoldsData } from "../../../compiler/tir/types/utils/canAssignTo";
+import { invalidateHashesFrom } from "../utils/invalidateHashes";
 
 /**
  * we might not need all the hashes
@@ -96,10 +97,7 @@ export class IRNative
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [];
@@ -135,6 +133,10 @@ export class IRNative
     {
         const cloned = new IRNative( this.tag );
         if( isObject( this._meta ) ) cloned._meta = { ...this._meta };
+        // as every node does: a copy remembers the hash its original remembers. A term that
+        // remembers its hash holds only terms that do (`invalidateHashesFrom` counts on it),
+        // and so must its copy
+        cloned._hash = this._hash;
         return cloned;
     }
     toJSON() { return this.toJson(); }

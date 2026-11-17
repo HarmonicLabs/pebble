@@ -16,6 +16,7 @@ import { currentCompilationCtx } from "../CompilationCtx";
 import { IRNodeKind } from "../IRNodeKind";
 import { prettyIR } from "../utils/showIR";
 import { UPLCTerm } from "@harmoniclabs/uplc";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 
 export type LettedSetEntry = {
@@ -166,10 +167,7 @@ export class IRLetted
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     private _value!: IRTerm
     get value(): IRTerm { return this._value; }
@@ -191,7 +189,8 @@ export class IRLetted
         // keep the parent reference in the old child, useful for compilation
         // _value.parent = undefined;
         this._value = newVal;
-        this._value.parent = this
+        this._value.parent = this;
+        this.markHashAsInvalid();
     }
 
     private _deps: LettedSetEntry[] | undefined;

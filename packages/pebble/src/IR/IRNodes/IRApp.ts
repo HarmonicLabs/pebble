@@ -15,6 +15,7 @@ import { IRNodeKind } from "../IRNodeKind";
 import { hashIrData, IRHash, irHashToBytes, isIRHash } from "../IRHash";
 import { Application, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRAppMeta extends BaseIRMetadata {
     __src__?: string | undefined
@@ -72,10 +73,7 @@ export class IRApp
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [
@@ -98,6 +96,7 @@ export class IRApp
         const replaced = this._fn;
         this._fn = newFn;
         this._fn.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new child takes the old one's place
         inheritRange( newFn, replaced );
     }
@@ -113,6 +112,7 @@ export class IRApp
         const replaced = this._arg;
         this._arg = newArg;
         this._arg.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new child takes the old one's place
         inheritRange( newArg, replaced );
     }

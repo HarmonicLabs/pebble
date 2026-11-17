@@ -245,15 +245,81 @@ export function isSafeToEagerlyEvaluate( term: IRTerm ): boolean {
 }
 
 /**
- * `true` if `term` performs hash-grade work somewhere — the only case where
- * floating a binding out of a closure is worth perturbing placement for.
+ * what runs when `head` is applied to `nArgs` arguments: the body of the function it is, if the
+ * arguments are all there (with fewer the result is a function still, and nothing ran), or
+ * `head` itself when it is not a function written out here
+ */
+function ranByApplying( head: IRTerm, nArgs: number ): IRTerm | undefined {
+    let h = unwrapValueLike( head );
+    while( true )
+    {
+        // a recursive function is the function it holds, which can call itself
+        while( h instanceof IRRecursive ) h = unwrapValueLike( h.body );
+        if( !( h instanceof IRFunc ) ) return h;
+        if( nArgs < h.params.length ) return undefined;
+        nArgs -= h.params.length;
+        h = unwrapValueLike( h.body );
+        // (the arguments left over are for what the body gives back)
+        if( nArgs === 0 ) return h;
+    }
+}
+
+/**
+ * `true` if EVALUATING `term` does hash-grade work — the only case where floating a binding
+ * out of a closure is worth perturbing placement for, and where a closed value is better
+ * bound in each branch that reads it than once above them all.
+ *
+ * Evaluating, not holding: a function does nothing where it is built, however much it does
+ * when called, and neither does a delayed term until it is forced. So the body of a function
+ * counts only where the function is applied (to all its parameters), and a delayed term only
+ * where it is forced. (This used to look for a hash anywhere in the term: every FUNCTION that
+ * hashes passed for expensive work, and — being closed — was bound again in each branch of
+ * each `case` it was called from, a copy of its body per branch.)
  */
 export function containsExpensiveWork( term: IRTerm ): boolean {
     const stack: IRTerm[] = [ term ];
     while( stack.length > 0 )
     {
         const t = unwrapValueLike( stack.pop()! );
-        if( t instanceof IRNative && EXPENSIVE_NATIVE_TAGS.has( t.tag ) ) return true;
+
+        // (a hash that is not applied does no work either, but whoever it is given to
+        // is going to apply it)
+        if( t instanceof IRNative ) {
+            if( EXPENSIVE_NATIVE_TAGS.has( t.tag ) ) return true;
+            continue;
+        }
+
+        // built here, not run here
+        if(
+            t instanceof IRFunc
+            || t instanceof IRRecursive
+            || t instanceof IRDelayed
+        ) continue;
+
+        if( t instanceof IRApp ) {
+            const { head, args } = spineHead( t );
+            const ran = ranByApplying( head, args.length );
+            if( ran !== undefined ) stack.push( ran );
+            stack.push( ...args );
+            continue;
+        }
+
+        if( t instanceof IRForced ) {
+            const forced = unwrapValueLike( t.forced );
+            stack.push( forced instanceof IRDelayed ? forced.delayed : forced );
+            continue;
+        }
+
+        if( t instanceof IRCase ) {
+            stack.push( t.constrTerm );
+            // the branch taken is applied to the fields of what the `case` is on
+            for( const branch of t.continuations ) {
+                const b = unwrapValueLike( branch );
+                stack.push( b instanceof IRFunc ? b.body : b );
+            }
+            continue;
+        }
+
         if( typeof (t as any).children === "function" ) stack.push( ...(t as any).children() );
     }
     return false;

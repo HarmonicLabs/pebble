@@ -16,6 +16,7 @@ import { isIRTerm } from "../utils/isIRTerm";
 import { hashIrData, IRHash, irHashToBytes, isIRHash } from "../IRHash";
 import { Case, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRCaseMeta extends BaseIRMetadata {}
 
@@ -56,6 +57,7 @@ export class IRCase
                 // keep the parent reference in the old child, useful for compilation
                 // oldElem.parent = undefined;
                 newElem.parent = self;
+                self.markHashAsInvalid();
                 return newElem;
             }
         );
@@ -91,10 +93,7 @@ export class IRCase
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [
@@ -114,6 +113,7 @@ export class IRCase
         const replaced = this._constrTerm;
         this._constrTerm = newConstrTerm;
         this._constrTerm.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new child takes the old one's place
         inheritRange( newConstrTerm, replaced );
     }

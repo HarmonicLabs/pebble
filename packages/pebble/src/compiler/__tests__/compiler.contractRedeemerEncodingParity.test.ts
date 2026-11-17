@@ -11,7 +11,13 @@ import { fromUtf8, toHex } from "@harmoniclabs/uint8array-utils";
 // constructor tags) before re-recording — tag changes are a hard error,
 // pure placement/optimization drift is fine.
 // History: recorded on 0.3.6 pre-merged-union; re-recorded on 0.3.7 after
-// the const-float placement change (wire format re-verified).
+// the const-float placement change (wire format re-verified); re-recorded on
+// 0.6.0 after BUGs 78-80 (a term's hash follows what the term holds, the tree
+// walk visits every branch: natives are shared in every method, so the three
+// scripts are 210, 166 and 180 bytes, from 216, 166 and 182). Wire format
+// re-verified by running the scripts recorded before against the new ones:
+// the same verdict on each of 5,040 contexts (21 redeemers of every shape,
+// 6 minted amounts, 5 numbers of inputs, the datums of the state).
 
 async function compileHex( src: string ): Promise<string> {
     const ioApi = createMemoryCompilerIoApi({

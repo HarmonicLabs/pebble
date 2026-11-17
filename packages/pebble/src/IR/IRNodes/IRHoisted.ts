@@ -26,6 +26,7 @@ import { UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
 import { IRNative } from "./IRNative";
 import { IRNativeTag, nativeTagToString } from "./IRNative/IRNativeTag";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 
 export type HoistedSetEntry = {
@@ -127,10 +128,7 @@ export class IRHoisted
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [ this.hoisted ];
@@ -145,6 +143,18 @@ export class IRHoisted
     get hoisted(): IRTerm { return this._hoisted; }
     set hoisted( newHoisted: IRTerm )
     {
+        // unwrap, as the constructor does: a hoisted term never holds a hoisted term.
+        // Otherwise a node and its copy differ — `clone` goes through the constructor, which
+        // unwraps — and the copy, which remembers the hash its original remembers, would
+        // remember the hash of a term it is not
+        while( newHoisted instanceof IRHoisted )
+        {
+            // what the wrapper said of the term, this node says from now on
+            if( newHoisted.meta.forceHoist === true ) this.meta.forceHoist = true;
+            if( this.meta.name === undefined ) this.meta.name = newHoisted.meta.name;
+            newHoisted = newHoisted.hoisted;
+        }
+
         if( !isClosedIRTerm( newHoisted ) )
         throw new BasePlutsError(
             "only closed terms can be hoisted"
@@ -157,7 +167,8 @@ export class IRHoisted
         // keep the parent reference in the old child, useful for compilation
         // _hoisted.parent = undefined;
         this._hoisted = newHoisted;
-        this._hoisted.parent = this
+        this._hoisted.parent = this;
+        this.markHashAsInvalid();
     }
     
     private _deps: HoistedSetEntry[] | undefined;

@@ -401,6 +401,26 @@ Written as the documentation has them, and refused or broken until now (PEBBLE_B
   `( r`. It is the name.
 - The parser printed token names to the console on three syntax errors (a contract member it
   does not know, `data` without `struct`, a `for` loop's updates), next to the diagnostic.
+- Script size: a function was compiled once per call, or once per branch of a `case` it was
+  called from. Four causes, each enough by itself:
+  - the passes that turn a test of a list into a `case` (and three more) gave each copy of
+    the term they rewrote variables of its own, so the copies of one function were no longer
+    recognized as one. A rewrite now takes its variables from what it rewrites;
+  - a term kept the hash it had before what it holds was replaced (the setters stopped
+    forgetting it when the hashes were put back, in October 2025). Terms that differed passed for
+    equal, and one of their values was bound for both; equal ones passed for different.
+    `PEBBLE_DBG_HASHES=1` checks after every pass that no hash is stale;
+  - the walk of the tree, after replacing a term, skipped the branches of a `case` it had
+    not visited yet: builtins were wrapped, and the compiler's own lowered, in one method of
+    a contract and not in the others (which is what the repeated sweeps of the backend were
+    working around);
+  - a function that hashes or serialises passed for expensive work, to be bound in each
+    branch that reads it and not once above them: a copy of its body per branch.
+
+  A Merkle Patricia Forestry proof check is 1,135 bytes called once and 1,180 called four
+  times (it was 3,471 and 12,705); a contract of five methods using it went from 22,089
+  bytes to 4,175. Scripts with no such function change by a few bytes either way: recompile
+  and compare hashes before relying on a script address.
 
 ### Editors: `check()`
 

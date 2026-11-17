@@ -107,6 +107,26 @@ export const hoisted_drop32 = new IRHoisted(
 );
 hoisted_drop32.hash;
 
+/**
+ * The parameter of the function that drops `n` elements, for an `n` with no template above.
+ *
+ * ONE variable for each `n`, as the templates have: the function is built again wherever
+ * `n` elements are dropped, and two of them with a variable each would be two terms that
+ * differ in the name of what they bind, bound once EACH instead of once (the hash of a term
+ * reads its variables by identity).
+ */
+const composedDropParams = new Map<number, symbol>();
+function composedDropParam( n: number ): symbol
+{
+    let lst = composedDropParams.get( n );
+    if( lst === undefined )
+    {
+        lst = Symbol("lst");
+        composedDropParams.set( n, lst );
+    }
+    return lst;
+}
+
 export function _compTimeDropN( bigN: bigint ): IRHoisted | IRNative
 {
     const n = Number( bigN );
@@ -137,7 +157,7 @@ export function _compTimeDropN( bigN: bigint ): IRHoisted | IRNative
     }
 
     // Build the composed drop function body by sequential application
-    const lst = Symbol("lst"); // symbol param for composed function
+    const lst = composedDropParam( n );
     let body: any = new IRVar( lst );
     for( const p of parts )
     {

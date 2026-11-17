@@ -18,6 +18,21 @@ import { prependTracePoints } from "../../sourceMap/irTraces";
 import type { IRTracePoint } from "../../IRNodes/BaseIRMetadata";
 import { _compTimeDropN } from "./_comptimeDropN";
 import { hoisted_isZero, hoisted_length, hoisted_not } from "./replaceNatives/nativeToIR";
+import { derivedSymbol } from "../../utils/derivedSymbol";
+
+/**
+ * The variables for the head and the tail of a list, where a test of the list (`site`) becomes
+ * a `case` on it.
+ *
+ * They are the ones of that test, not new ones: a function called twice is twice in the tree,
+ * and its two copies must be rewritten into the same term or they are no longer recognized as
+ * one function, and are compiled once each (see `derivedSymbol`).
+ */
+function headAndTailOf( site: IRTerm ): [ head: symbol, tail: symbol ]
+{
+    const hash = site.hash;
+    return [ derivedSymbol( "_h", hash ), derivedSymbol( "_t", hash ) ];
+}
 
 export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): IRTerm
 {
@@ -251,8 +266,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                         const listTerm = eqZeroArgArgs[0];
                         // if( list.length() === 0 ) thenArg else elseArg
                         //   →  case list of cons _h _t -> elseArg ; nil -> thenArg
-                        const dh = Symbol("_h");
-                        const dt = Symbol("_t");
+                        const [ dh, dt ] = headAndTailOf( current );
                         const newTerm = new IRCase(
                             listTerm,
                             [
@@ -276,8 +290,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                     const listTerm = condArgs[0];
                     // if( nullList(list) ) thenArg else elseArg
                     //   →  case list of cons _h _t -> elseArg ; nil -> thenArg
-                    const dh = Symbol("_h");
-                    const dt = Symbol("_t");
+                    const [ dh, dt ] = headAndTailOf( current );
                     const newTerm = new IRCase(
                         listTerm,
                         [
@@ -455,8 +468,7 @@ export function rewriteNativesAppliedToConstantsAndReturnRoot( term: IRTerm ): I
                 const listTerm = fstArg;
                 const caseNil  = restArgs[0];
                 const caseCons = restArgs[1];
-                const dh = Symbol("_h");
-                const dt = Symbol("_t");
+                const [ dh, dt ] = headAndTailOf( current );
                 const newTerm = new IRCase(
                     listTerm,
                     [

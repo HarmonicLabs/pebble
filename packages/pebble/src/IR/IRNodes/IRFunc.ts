@@ -16,6 +16,7 @@ import { hashIrData, IRHash, irHashToBytes, isIRHash } from "../IRHash";
 import { Lambda, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
 import { IRRecursive } from "./IRRecursive";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRFuncMetadata extends BaseIRMetadata {}
 
@@ -74,10 +75,7 @@ export class IRFunc
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [ this._body ];
@@ -103,6 +101,7 @@ export class IRFunc
         const replaced = this._body;
         this._body = newBody;
         this._body.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new body takes the old one's place
         inheritRange( newBody, replaced );
     }
@@ -130,7 +129,13 @@ export class IRFunc
     {
         const cloned = new IRFunc(
             this.params, // .slice() in constructor
-            this._body.clone()
+            this._body.clone(),
+            // as every node does: a copy remembers the hash its original remembers. A term
+            // that remembers its hash holds only terms that do (`invalidateHashesFrom`
+            // counts on it: it stops at the first node that remembers nothing), and a
+            // function that forgot it under a copy that had not would hide from that copy
+            // every change made inside the function
+            this._hash
         );
         Object.assign( cloned.meta, this.meta );
         return cloned;

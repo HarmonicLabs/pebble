@@ -17,6 +17,7 @@ import { positiveIntAsBytes } from "../utils/positiveIntAsBytes";
 import { mapArrayLike } from "./utils/mapArrayLike";
 import { Delay, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRDelayedMetadata extends BaseIRMetadata {}
 
@@ -60,10 +61,7 @@ export class IRDelayed
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [ this.delayed ];
@@ -89,6 +87,7 @@ export class IRDelayed
         const replaced = this._delayed;
         this._delayed = newDelayed;
         this._delayed.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new child takes the old one's place
         inheritRange( newDelayed, replaced );
     }

@@ -16,6 +16,7 @@ import { hashVarSym } from "./utils/hashVarSym";
 import { UPLCTerm, UPLCVar } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
 import { debugCreationStack } from "../../utils/debugCreationStack";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRVarMetadata extends BaseIRMetadata {}
 
@@ -79,10 +80,7 @@ export class IRVar
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
     
     static get kind(): IRNodeKind.Var { return IRNodeKind.Var; }
     get kind(): IRNodeKind.Var { return IRVar.kind; }

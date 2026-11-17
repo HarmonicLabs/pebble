@@ -84,6 +84,8 @@ function _removeUnusedVars( term: IRTerm, ctx: RemoveUnusedVarsCtx ): IRTerm
 
     // remove vars here
     filterParamsInplace( func.params, removedParams );
+    // (the hash of a function says how many parameters it has)
+    func.markHashAsInvalid();
 
     for( const funcArg of keptArgs ) {
         // arguments passed have the same context of the function called

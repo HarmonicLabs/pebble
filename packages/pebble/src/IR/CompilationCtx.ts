@@ -25,6 +25,11 @@ export class CompilationCtx
     readonly hoistedHashToSymbol: Map<IRHash, WeakRef<Symbol>> = new Map();
     /** letted-term hash -> the stable binder symbol used to name it. */
     readonly lettedHashToSymbol: Map<IRHash, WeakRef<Symbol>> = new Map();
+    /**
+     * what a rewrite derives a new variable from -> that variable (see `derivedSymbol`):
+     * two copies of one term are rewritten into two copies of one term.
+     */
+    readonly derivedSymbols: Map<string, symbol> = new Map();
     /** element-type name -> cached `mapToType` TIR helper (clones only). */
     readonly mapToTypeCache: Map<string, any> = new Map();
     /** debug information being collected for a debugger; `undefined` (the default) collects none */

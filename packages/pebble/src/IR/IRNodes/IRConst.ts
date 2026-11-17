@@ -36,6 +36,7 @@ import { TirVoidT } from "../../compiler/tir/types/TirNativeType/native/void";
 import { IIRTerm, IRTerm } from "../IRTerm";
 import { hashIrData, IRHash, isIRHash } from "../IRHash";
 import { UPLCFlatUtils } from "../../utils/UPLCFlatUtils";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRConstPair {
     fst: IRConstValue;
@@ -102,10 +103,7 @@ export class IRConst
         return this._hash;
     }
     isHashPresent(): boolean { return true; }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
 
 
     children(): IRTerm[] {

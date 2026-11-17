@@ -57,6 +57,7 @@ import { IRRecursive } from "../../IRNodes/IRRecursive";
 import { IRTerm } from "../../IRTerm";
 import { IRVar } from "../../IRNodes/IRVar";
 import { _modifyChildFromTo } from "../_internal/_modifyChildFromTo";
+import { derivedSymbol } from "../../utils/derivedSymbol";
 
 function unwrap( t: IRTerm ): IRTerm
 {
@@ -108,14 +109,18 @@ function tryWrap( fn: IRFunc ): void
         }
         if( listSym === undefined || target === undefined ) return;
 
+        // the head and the tail of L in THIS term: the variables are derived from the two, so
+        // that the copies of one function (it is in the tree once per call) are wrapped into
+        // copies of one function, and still recognized as such (see `derivedSymbol`)
         const desc = listSym.description ?? "L";
-        const hSym = Symbol( "h_" + desc );
-        const tSym = Symbol( "t_" + desc );
+        const targetHash = target.hash;
+        const hSym = derivedSymbol( "h_" + desc, listSym, targetHash );
+        const tSym = derivedSymbol( "t_" + desc, listSym, targetHash );
 
         // Substitute head(L)/tail(L) inside the target (won't descend
-        // into nested scopes that re-bind L, h, or t — but we just minted
-        // h/t so they don't collide with anything). Every use of L is
-        // inside it: it holds them all.
+        // into nested scopes that re-bind L, h, or t — no term holds the
+        // variables derived from itself). Every use of L is inside it: it
+        // holds them all.
         substituteHeadTailInBody( target, listSym, hSym, tSym );
 
         // Wrap.

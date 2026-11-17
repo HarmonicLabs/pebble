@@ -12,6 +12,7 @@ import { concatUint8Arr } from "../utils/concatUint8Arr";
 import { IRParentTerm, isIRParentTerm } from "../utils/isIRParentTerm";
 import { isIRTerm } from "../utils/isIRTerm";
 import { BaseIRMetadata } from "./BaseIRMetadata";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRRecursiveMetadata extends BaseIRMetadata {}
 
@@ -71,10 +72,7 @@ export class IRRecursive
         return this._hash;
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
-    markHashAsInvalid(): void {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    markHashAsInvalid(): void { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [ this._body ];
@@ -100,6 +98,7 @@ export class IRRecursive
         const replaced = this._body;
         this._body = newBody;
         this._body.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new body takes the old one's place
         inheritRange( newBody, replaced );
     }

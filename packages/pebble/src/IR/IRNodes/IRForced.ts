@@ -15,6 +15,7 @@ import { shallowEqualIRTermHash } from "../utils/equalIRTerm";
 import { IRNodeKind } from "../IRNodeKind";
 import { Force, UPLCTerm } from "@harmoniclabs/uplc";
 import { ToUplcCtx } from "../toUPLC/ctx/ToUplcCtx";
+import { invalidateHashesFrom } from "./utils/invalidateHashes";
 
 export interface IRForcedMetadata extends BaseIRMetadata {}
 
@@ -58,10 +59,7 @@ export class IRForced
     }
     isHashPresent(): boolean { return isIRHash( this._hash ); }
     markHashAsInvalid(): void
-    {
-        this._hash = undefined;
-        this.parent?.markHashAsInvalid();
-    }
+    { invalidateHashesFrom( this ); }
 
     children(): IRTerm[] {
         return [ this._forced ];
@@ -83,6 +81,7 @@ export class IRForced
         const replaced = this._forced;
         this._forced = newForced;
         this._forced.parent = this;
+        this.markHashAsInvalid();
         // sourcemaps: the new child takes the old one's place
         inheritRange( newForced, replaced );
     }

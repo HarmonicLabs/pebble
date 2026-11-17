@@ -10,6 +10,21 @@ import { IRRecursive } from "../../IRNodes/IRRecursive";
 import { IRTerm } from "../../IRTerm";
 import { sanifyTree } from "../subRoutines/sanifyTree";
 
+/**
+ * Visits every term of `_term`, a term before the terms it holds.
+ *
+ * `fn` may replace the term it is given in its parent, and must then return `true`: the
+ * parent holds other terms than the ones this walk was about to visit, so those are
+ * forgotten and the parent is visited again, with what it holds now.
+ *
+ * ONLY those: the terms still to visit that the PARENT holds. Whatever else is waiting
+ * belongs to a term further up — the other branches of a `case` the replaced term is deep
+ * inside of, the other fields of a `constr` — and is still to be visited. (This used to
+ * forget every waiting term marked as "a later child of its parent", whoever the parent: a
+ * term replaced anywhere inside the last branch of a `case` made the walk skip all the
+ * other branches, so that a pass replacing something everywhere did it in one branch of
+ * the program and left the rest as it was.)
+ */
 export function iterTree(
     _term: IRTerm,
     fn: ( elem: IRTerm, dbn: number ) => (boolean | undefined | void),
@@ -20,11 +35,14 @@ export function iterTree(
 {
     const has_shouldSkipNode = typeof shouldSkipNode === "function";
     const has_shouldExit = typeof shouldExit === "function";
-    const stack: { term: IRTerm, dbn: number, shouldPopIfParentIsModified?: boolean }[] = [{ term: _term, dbn: 0 }];
+    /** `heldBy`: the term that was holding this one when it was added (none for the root) */
+    const stack: { term: IRTerm, dbn: number, heldBy?: IRTerm }[] = [{ term: _term, dbn: 0 }];
+    /** the depth each term that holds others was visited at: where to visit it again from */
+    const dbnOf = new Map<IRTerm, number>();
 
     while( stack.length > 0 )
     {
-        const { term: t, dbn } = stack.pop() as { term: IRTerm, dbn: number };
+        const { term: t, dbn } = stack.pop()!;
 
         if( has_shouldSkipNode && shouldSkipNode( t, dbn ) ) continue;
 
@@ -37,21 +55,20 @@ export function iterTree(
 
         if( modifiedParent && termParent !== undefined )
         {
-            while( stack.length > 0 && stack[ stack.length - 1 ].shouldPopIfParentIsModified )
-            {
-                // there is an extra node 
-                stack.pop();
-            }
+            // what the parent was holding and is still waiting: not what it holds any more
+            while( stack.length > 0 && stack[ stack.length - 1 ].heldBy === termParent ) stack.pop();
             // restart from the parent
-            stack.push({ term: termParent, dbn: dbn - negDbn });
+            stack.push({ term: termParent, dbn: dbnOf.get( termParent ) ?? dbn - negDbn, heldBy: termParent.parent });
             continue;
         }
-        
+
+        dbnOf.set( t, dbn );
+
         if( t instanceof IRApp )
         {
             stack.push(
-                { term: t.fn, dbn  },
-                { term: t.arg, dbn, shouldPopIfParentIsModified: true }
+                { term: t.fn, dbn, heldBy: t },
+                { term: t.arg, dbn, heldBy: t }
             );
             continue;
         }
@@ -59,9 +76,9 @@ export function iterTree(
         if( t instanceof IRCase )
         {
             stack.push(
-                { term: t.constrTerm, dbn },
-                ...Array.from( t.continuations ).map( cont => 
-                    ({ term: cont, dbn, shouldPopIfParentIsModified: true })
+                { term: t.constrTerm, dbn, heldBy: t },
+                ...Array.from( t.continuations ).map( cont =>
+                    ({ term: cont, dbn, heldBy: t as IRTerm })
                 )
             );
             continue;
@@ -69,8 +86,8 @@ export function iterTree(
         if( t instanceof IRConstr )
         {
             stack.push(
-                ...Array.from( t.fields ).map(( f, i ) => 
-                    ({ term: f, dbn, shouldPopIfParentIsModified: i !== 0 })
+                ...Array.from( t.fields ).map( f =>
+                    ({ term: f, dbn, heldBy: t as IRTerm })
                 )
             );
             continue;
@@ -78,25 +95,25 @@ export function iterTree(
 
         if( t instanceof IRDelayed )
         {
-            stack.push({ term: t.delayed, dbn })
+            stack.push({ term: t.delayed, dbn, heldBy: t })
             continue;
         }
 
         if( t instanceof IRForced )
         {
-            stack.push({ term: t.forced, dbn });
+            stack.push({ term: t.forced, dbn, heldBy: t });
             continue;
         }
 
         if( t instanceof IRFunc )
         {
-            stack.push({ term: t.body, dbn: dbn + t.arity });
+            stack.push({ term: t.body, dbn: dbn + t.arity, heldBy: t });
             continue;
         }
 
         if( t instanceof IRRecursive )
         {
-            stack.push({ term: t.body, dbn: dbn + t.arity });
+            stack.push({ term: t.body, dbn: dbn + t.arity, heldBy: t });
             continue;
         }
 
@@ -104,7 +121,7 @@ export function iterTree(
         {
             // 0 because hoisted are closed
             // for hoisted we keep track of the depth inside the term
-            stack.push({ term: t.hoisted, dbn: 0 });
+            stack.push({ term: t.hoisted, dbn: 0, heldBy: t });
             continue;
         }
 
@@ -113,11 +130,11 @@ export function iterTree(
             // same stuff as the hoisted terms
             // the only difference is that depth is then incremented
             // once the letted term reaches its final position
-            stack.push({ term: t.value, dbn });
+            stack.push({ term: t.value, dbn, heldBy: t });
             continue;
         }
 
-        stack.push(...t.children().map( c => ({ term: c, dbn }) ) );
+        stack.push(...t.children().map( c => ({ term: c, dbn, heldBy: t as IRTerm }) ) );
     }
     sanifyTree( _term );
 }
