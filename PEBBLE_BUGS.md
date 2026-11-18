@@ -2360,6 +2360,138 @@ again the scripts recorded before were run against the new ones on 5,040
 contexts — 21 redeemers of every shape, 6 minted amounts, 5 numbers of
 inputs, the datums of the state — and gave the same verdict on each.
 
+## BUGs 82–84 — found writing the step scripts of the Jacquard reference ledger (2026-11-17)
+
+> **Resolved.** All three fixed at the root, with 13 tests in
+> `compiler.jacquardBugs.0_6_0.steps.test.ts`. Full suite green (1403 passed).
+> **Not committed yet** when this was written.
+
+The step scripts re-execute one transition of an L2's ledger on L1: a state
+threaded through a few dozen functions, a cache of the keys opened so far, and
+values read off whatever data somebody put in a transaction. They are the first
+code here that keeps its working state in runtime structs.
+
+| # | Severity | One-liner | Status |
+|---|---|---|---|
+| 82 | MEDIUM | `List<T>` with `T` a runtime struct is accepted, and the back end fails on the first literal: "SoP struct cannot be represented as uplc constants", no source location | FIXED 2026-11-17 |
+| 83 | MEDIUM | `xs as List<T>` between two lists: accepted by the checker, "Cannot convert from List<data> to List<Asset>" in the back end | FIXED 2026-11-17 |
+| 84 | HIGH | a runtime struct with a single-constructor runtime struct in a field: any read of it fails with "simple var decl without init expr" | FIXED 2026-11-17 |
+
+### BUG 82 — MEDIUM: a `List` of runtime structs — FIXED (2026-11-17)
+
+> **FIXED.** A UPLC list holds constants: integers, byte strings, data. A
+> runtime struct is a constructor term, and no list holds one. The type
+> compiler resolved the element type of a `List` written with a name
+> (`List<Entry>`) as it does any other type argument, so a runtime struct
+> came out as itself and the type was accepted — in a variable's annotation
+> and in a signature. The first literal of such a list (`[]`) then asked the
+> element type for its constant type and the back end threw, with nothing to
+> say where. It is error 30213 now, at the type argument, and names the two
+> ways out: declare the struct a `data struct`, or keep the values in a
+> recursive runtime struct (`Nil {} / Cons { head, tail }`), which is a list
+> of constructor terms and compiles to `case` (a control builds and sums one).
+> The same for the values of a `LinearMap`.
+>
+> Three cases of `compiler.testStmt.property.skip.test.ts` used
+> `List<runtime struct>` as their example of a parameter type with no
+> fuzzer. They take a function now, which nothing samples either.
+
+```pebble
+runtime struct Entry { key: bytes, value: int }
+const none: List<Entry> = [];        // backend error: SoP struct cannot be represented as uplc constants.
+```
+
+### BUG 83 — MEDIUM: a cast between two lists — FIXED (2026-11-17)
+
+> **FIXED.** `canCastTo` takes `List<A> as List<B>` whenever `A` casts to `B`,
+> and `TirTypeConversionExpr.toIR` had no case for a list at all: every such
+> cast failed in the back end with "Cannot convert from List<data> to
+> List<Asset>". A list holds its elements as data when they are data, a data
+> struct or an optional out of one, and as the plain value otherwise. Between
+> two lists of the first kind the cast is now the identity — which makes
+> `std.builtins.unListData( d ) as List<Asset>` the way to give the elements
+> of a list read off some data their type — and between a list of data and a
+> list of plain values each element is decoded or encoded (`_mkMapList`). The
+> checker no longer takes what the back end has no way to do: a list of
+> integers as a list of byte strings is error "cannot be converted" where it
+> is written.
+
+```pebble
+const assets = std.builtins.unListData( value ) as List<Asset>;   // backend error: Cannot convert from List<data> to List<Asset>
+```
+
+### BUG 84 — HIGH: a runtime struct in a field of a runtime struct — FIXED (2026-11-17)
+
+> **FIXED.** A variable of a single-constructor runtime struct is taken apart
+> once, by a `case` whose pattern binds every field; a field that is itself a
+> single-constructor runtime struct is taken apart again inside
+> (`getNestedDestructsInSingleSopDestructPattern`). The helper that builds
+> those patterns, `getConstrDestructPattern`, was given what the nested
+> pattern takes apart — the field — and put it as the initializer of EVERY
+> field of the pattern, leaving the pattern itself with none. The outer
+> pattern passes no initializer, so it was unaffected; the nested one, the
+> only caller that passes one, never worked: `expressify` refused the
+> declaration with "simple var decl without init expr", for any function
+> that so much as read another field of the outer struct. The initializer
+> now goes where it belongs. A recursive runtime struct in a field (several
+> constructors, taken apart by `case`) was never affected, and a control
+> keeps it so.
+
+```pebble
+runtime struct Fx { acc: bytes, count: int }
+runtime struct Work { ok: boolean, leaves: int, fx: Fx }
+const w = Work{ ok: true, leaves: n, fx: Fx{ acc: #aa, count: 2 } };
+return w.leaves;        // backend error: simple var decl without init expr
+```
+
+## BUG 85 — found adding programmable tokens to the Jacquard kernel (2026-11-17)
+
+### BUG 85 — LOW: the parameter of `x => ...` cannot be captured by a lambda inside — FIXED (2026-11-17)
+
+> **FIXED.** A parameter is `const` unless it is written `let`
+> (`parseParameters`). The parser built the parameter of the bare form,
+> `x => ...`, on another path, with no flag at all — and whatever is not
+> `const` is a mutable `let` to the capture check. So
+> `xs.every( t => ys.some( i => i == t ) )` was refused with error 30207,
+> "Lambdas can only capture 'const' bindings; 't' is a mutable 'let'", while
+> the same line with `( t ) =>` compiled. The bare parameter is flagged
+> `const` now, as the form has no way to say otherwise; assigning to it is an
+> error, as for any other `const`. Three tests in
+> `compiler.jacquardBugs.0_6_0.steps.test.ts`. **Not committed yet** when
+> this was written.
+
+```pebble
+// refused: 't' is a mutable 'let'
+prog_tokens.every( t => tx.refInputs.some( i => i.resolved.value.amountOf( registry, t.policy ) == 1 ) )
+```
+
+### Not the compiler: `serialiseData` of a map, off chain and on a node (2026-11-17)
+
+Found when the Jacquard kernel was first run against a real node, and fixed
+before anything of it relied on the difference.
+
+A script that hashes `serialiseData( d )` hashes the ledger's own encoding of
+`d` (`PlutusCore.Data.encodeData`): a list, and a constructor's fields, as an
+array of indefinite length; a **map as a map of definite length**. The
+machine in `@harmoniclabs/plutus-machine` gave the builtin `dataToCbor` of
+`@harmoniclabs/plutus-data`, which writes a non-empty map with an indefinite
+length (`bf .. ff`): the same data to any CBOR reader, other bytes to a hash.
+So a script that hashes data with a map in it — a `Value`, an AssocMap in a
+datum — computed, in `pebble test`, in buildooor's evaluation and in the
+emulators built on it, a hash that no node computes. Data without a map
+serialised alike; the Jacquard formats hold none, by rule, for an older
+reason.
+
+The builtin now has an encoder of its own, written to the ledger's
+(`src/BnCEK/impl/serialiseData.ts`: definite maps, indefinite non-empty lists,
+64-byte chunks for long byte strings and big integers, the three constructor
+tag ranges), with tests of every case and of the builtin as a script sees it
+(`src/BnCEK/impl/__tests__/CEK.serialiseData.test.ts`, 7 tests; full suite
+1589 passed). `dataToCbor` itself is unchanged: it is what datums built off
+chain are written with, and whether its default should follow is a separate
+decision. **Not committed yet** when this was written; the copy of the
+machine installed under buildooor was patched with the same change.
+
 ### Not the compiler: an integer constant above 2^31, and the script that reaches L1 (2026-11-16)
 
 Found right after BUGs 78–81, and first taken for a fifth one: the registry's
@@ -2390,3 +2522,229 @@ The same stale install had `@harmoniclabs/cbor` 2.0.1, which encodes an
 integer above 2^64 correctly but dumps it to the console with a warning every
 time (its constructor discarded the big-number form it had just derived);
 2.0.2 fixed it, and buildooor now requires that too.
+
+### Not the compiler: three things a node does that the builder did not (2026-11-18)
+
+Found when the Jacquard node first ran against a real cardano-node (a local
+devnet): every one of them is invisible to `pebble test` and to an in-memory
+ledger built on buildooor, because both sides of the comparison were the
+builder's own.
+
+**Required signers are a set.** The ledger keeps a transaction's required
+signers as `Set (KeyHash 'Witness)` and gives a script
+`txInfoSignatories = Set.toList ...`: ascending by key hash, each once,
+whatever order the body lists them in. buildooor wrote them in the caller's
+order and evaluated scripts with that order. A script that looks its key up
+with `includes` pays for where the key is in the list, so when the caller
+listed the key first and it sorts last, the budget buildooor put in the
+redeemer was a few thousand steps short of what the node needed: the
+transaction was refused on chain ("overspent by 29,055 steps and 1 memory
+unit"), with nothing wrong in the script. `TxBuilder` now writes them sorted
+and `getTxInfos` shows them sorted whatever a body has
+(`src/__tests__/TxBuilder.build.signers_and_empties.test.ts`).
+
+**No empty fields.** `mints: []` was written as a mint of nothing (`09 00`) and
+`withdrawals: []` as an empty map (`05 a0`). Conway's body has neither — each
+is a non-empty map — and a node refuses the first as not well formed and reads
+the second as a transaction of an earlier era. Empty mints, certificates,
+withdrawals and required signers are left out of the body (same test).
+
+**`verifyEd25519Signature` answers.** With a key of 32 bytes and a signature of
+64 the builtin never fails: it is libsodium's verification, and a signature
+whose first half is no point of the curve is `False`
+(`PlutusCore.Crypto.Ed25519.verifyEd25519Signature_V2`). The machine's answer
+comes from `@harmoniclabs/crypto`, and buildooor had 0.3.0 installed, which
+throws there ("point isn't on curve"): the machine failed a script a node runs
+to the end, and off-chain code that mirrors a script crashed on bytes anyone
+can put on L1 (a forced transaction's signature). 0.3.2 has the node's
+answers. It is not published yet: buildooor's checkout requires `^0.3.2` and
+the installed copies — under buildooor and under both of this repository's
+`node_modules` — are the crypto checkout's build
+(`buildooor/src/__tests__/crypto.ed25519.node_semantics.test.ts`: the function
+and the builtin). One more stale install, like uplc 2.0.6 above.
+
+All **uncommitted** in the buildooor checkout when this was written.
+
+## BUG 86 — found running the Jacquard validity verifier on a real node (2026-11-18)
+
+### BUG 86 — CRITICAL: `bls12_381_G1/G2_compress`, `_uncompress` and `_hashToGroup` under each other's numbers — FIXED (2026-11-18)
+
+A builtin goes on chain as a seven-bit number. Plutus declares the BLS
+builtins of each group in the order add, neg, scalarMul, equal, hashToGroup,
+compress, uncompress, and **encodes** them in another:
+
+| | G1 | G2 |
+| --- | --- | --- |
+| `compress` | 58 | 65 |
+| `uncompress` | 59 | 66 |
+| `hashToGroup` | 60 | 67 |
+
+(`encodeBuiltin` in `plutus-core/plutus-core/src/PlutusCore/Default/Builtins.hs`;
+the conformance suite's two reference machines have the same table.)
+`IRNativeTag` here and `UPLCBuiltinTag` in `@harmoniclabs/uplc` both had the
+declaration order — hashToGroup 58, compress 59, uncompress 60, and 65, 66,
+67 — and a non-negative `IRNativeTag` is handed to `Builtin` as it is
+(`IRNative.toUPLC`). So a script whose source says `g1Uncompress( p )` was
+written with tag 60, which a node reads as `bls12_381_G1_hashToGroup`: a
+builtin of two arguments, given one. What the node then says is not about the
+builtin at all:
+
+```
+Could not unlift a value: Not a constant
+Caused by: bls12_381_millerLoop (bls12_381_G1_hashToGroup #a133e8…) (bls12_381_G2_hashToGroup #8bcca9…)
+```
+
+`compress` (59) ran as `uncompress` on a node, and `hashToGroup` (58) as
+`compress`.
+
+**Nothing off chain can see it.** The machine of `@harmoniclabs/plutus-machine`
+dispatches on the same enum, the textual conformance suite names builtins and
+never numbers them, and `pebble test`, an emulator built on buildooor and the
+cost measurements all agree with each other and with the source. Every test
+of every script that verifies a Groth16 proof, a KZG opening or a BLS
+signature passed; the first transaction to run one on a cardano-node was
+refused ("the transaction failed unexpectedly").
+
+**Fix.** The six numbers, in both enums (`IRNativeTag.ts` here;
+`UPLCBuiltinTag.ts` in the uplc checkout, 2.0.8). Nothing else depended on
+them: every use is by name, and the machine looks the enum up at run time.
+All 101 tags were then held against the reference machine's table; these six
+were the only ones off.
+
+**Tests.** `src/IR/IRNodes/IRNative/__tests__/IRNativeTag.flatTags.test.ts`
+(the two enums agree by name on every builtin; the six numbers; the bytes the
+compiler writes for `g1Uncompress` and `g2HashToGroup`), and in uplc
+`src/UPLCTerms/Builtin/__tests__/UPLC.Builtin.plutusTags.test.ts` (every
+builtin against Plutus' table, encoded and decoded).
+
+**What it means for scripts compiled before.** A script that uses one of the
+six and was compiled with an earlier build is another script on chain than
+its source: recompile, and expect a new script hash. uplc 2.0.8 is not
+published: the installed copies under this repository, buildooor and
+plutus-machine are the uplc checkout's build, and their `package.json` ask for
+`^2.0.8` — **uncommitted** in all four checkouts when this was written.
+
+## BUG 87, 88 — found answering a data-availability challenge on a real node (2026-11-18)
+
+### BUG 87 — HIGH (not the compiler: `@harmoniclabs/plutus-machine`): `divideInteger` and `modInteger` cost a constant where a node, from protocol version 11, charges a quadratic — FIXED (2026-11-18)
+
+Until protocol version 10 the four division builtins cost a **constant** when
+the first argument has fewer 64-bit words than the second
+(`const_above_diagonal`: dividing a number by a larger one is trivial), and a
+quadratic in the two sizes otherwise. From **version 11** Plutus V3 runs the
+builtins' "variant E", whose cost model gives `divideInteger` and `modInteger`
+another shape, `above_and_below_diagonal`: the quadratic of the **larger** size
+and the smaller one, always, the constant unused. `quotientInteger` and
+`remainderInteger` keep the constant. (V1 and V2 scripts change the same way,
+"variant D".) The NUMBERS of the cost model do not say which shape applies —
+the protocol parameters carry the same eight numbers for the builtin either
+way — the protocol version does:
+
+| | version 9, 10 | version 11, 12 |
+| --- | --- | --- |
+| `x mod m`, `x` of 1 word, `m` of 4 | 85,848 | 141,224 |
+| `x mod m`, `x` of 8 words, `m` of 4 | 186,119 | 186,119 |
+
+(`plutus-ledger-api` `MachineParameters.hs` for which variant a language runs
+at which version; `plutus-core/cost-model/data/builtinCostModelC.json` and
+`…E.json` for the two shapes; `CostingFun/Core.hs`,
+`ModelTwoArgumentsAboveAndBelowDiagonal`, for what the new one computes.)
+
+The machine had the old shape at every version. So a script that reduces a
+small number modulo a large one — a field element that happens to be zero,
+modulo the 255-bit order of BLS12-381's scalar field — was costed 55,376 steps
+short for each such `mod`, and the transaction that declared the result was
+refused by a node: "The machine terminated part way through evaluation due to
+overspending the budget".
+
+**How it was found.** Jacquard DA answers a challenge on a chunk of a blob by
+evaluating the chunk's polynomial on L1, by Horner's rule, modulo that order:
+64 times `( v * x + c ) % R`. For a chunk with data every numerator has eight
+words; for a chunk that is all zeros (every fourth chunk of a small blob) each
+is 0. The devnet's node took the answers for chunks with data and refused the
+ones for all-zero chunks — which an honest operator could then not have
+answered at all, and would have been slashed for. What the ledger itself
+computes for the same signed transactions
+(`cardano-cli conway transaction calculate-plutus-script-cost online`):
+
+| answer for | the builder declared | the ledger computes |
+| --- | ---: | ---: |
+| a chunk with data | 2,498,962,969 | 2,498,962,969 |
+| an all-zero chunk | 2,491,781,370 | 2,495,380,810 |
+
+The difference, 3,599,440, is 65 × 55,376: the 64 steps of Horner's rule and
+one more `mod` of a zero product. After the fix the builder declares
+2,495,380,810.
+
+**Why no test here could see it.** The Plutus conformance suite the machine is
+held to (`plutus_conformance_2026`, 724 budgets) has the budgets of version
+10's shapes, and no case in which the first argument of a division is the
+smaller. The two reference machines kept beside it (`plutuz`, `uplc-turbo`,
+January 2026) have the old shape too, and agreed with this machine to the unit
+on the failing program. Only a ledger at version 11 says otherwise.
+
+**Fix.** `plutus-machine`: `Quadratic2InMaxMin` (`costFunctions.ts`);
+`costModelV3ToBuiltinCosts` and its V1, V2 and V4 siblings take the protocol
+version (major) and give `divideInteger` and `modInteger` the new shape from
+11 on; `new Machine( costs, budget, { majorProtocolVersion } )`, with
+`LATEST_PROTOCOL_VERSION` (11) when it is not said. `buildooor`: the
+`TxBuilder` passes the version its protocol parameters name
+(`protocolVersion`), so a builder for a network still at version 10 keeps the
+constant.
+
+**Tests.** `plutus-machine/src/__tests__/divisionCosts.pv11.test.ts` (the
+ledger's 141,224; both shapes at versions 9 to 12; quotient and remainder
+unchanged; memory unchanged). The conformance test and the Aiken cross-check
+now say which version their budgets are of (10). On a node: Jacquard DA's
+`challenge` track answers an all-zero chunk
+(`da-poc/live/tracks/challenge.ts`), and `da-poc/scripts/probe-answers.ts`
+prints the builder's budget beside the node's verdict for any chunk.
+
+**Not addressed.** A V1 or V2 cost model has the division parameters of its
+own shape (`multiplied_sizes`); the machine costs V1/V2 division with V3's
+default quadratic at every version, as before. And version 11 also bounds
+integers (±2^262143) and byte strings (65,536 bytes) in the builtins that
+take them, and measures a string by its bytes in `appendString`,
+`equalsString` and `encodeUtf8`: the machine does neither.
+
+**What it means for measurements made before.** Any cost measured with the
+machine for a script that divides or reduces a number by a larger one was too
+low for a network at version 11; everything else is unchanged. plutus-machine
+3.1.0 is not published: the copies under buildooor and this repository are the
+checkout's build — **uncommitted** when this was written.
+
+### BUG 88 — LOW (not the compiler: `@harmoniclabs/uplc`, `@harmoniclabs/plutus-data`): the text of a program does not read back as the program — FIXED (2026-11-18)
+
+Three things, found while trying to run the failing script of BUG 87 through
+another machine from its printed text:
+
+- **`showUPLC` and `prettyUPLC` gave two binders the same name.** The alphabet
+  binders are named from had `J` twice, so the binders at depth 35 and at depth
+  50 were both `J`; a variable under both that meant the outer one was read
+  back as the inner one. Any real validator has more than fifty nested
+  binders: printed and parsed again it was another program (the challenge
+  script failed with an explicit error 22 million steps before its end).
+  Beyond depth 2,600 the scheme ran out of letters altogether (`undefined…`).
+- **Constants were not written as Plutus writes them**: the type of booleans
+  as `boolean`, and a data constant without its parentheses
+  (`(con data Constr 1 [])`). This package's parser reads both spellings; the
+  Plutus tools and the reference machines read neither.
+- **`DataMap.toString` wrote the key twice**, `(key,key)`
+  (`@harmoniclabs/plutus-data`): a script context printed for a reader showed
+  the lovelace of every output as a copy of the empty policy id, and a data
+  constant with a map read back as another value. The test that covers it
+  (`Data.toString.test.ts`, "some ctx") had been silenced with ten others by a
+  `describe.only` left in the file.
+
+**Fix.** uplc: every letter once, and a name of its own for every depth (one
+letter, then two, then three); `bool`; a data constant in parentheses, bare
+inside a list or a pair as the syntax has it. plutus-data: `(key,value)`, and
+the `.only` removed.
+
+**Tests.** `uplc/src/UPLCTerm/__tests__/UPLC.Term.showUPLC.roundtrip.test.ts`
+(3,000 distinct names; a term of sixty and of two hundred binders reads back
+to the same bytes, through `showUPLC` and through `prettyUPLC`; the constants'
+spelling; a data constant with maps and lists reads back);
+`plutus-data/src/__tests__/Data.toString.test.ts` (27 tests run where 16 did).
+Three assertions in plutus-machine's `evalAsync.test.ts` spelled the old
+`(con boolean …)` and were updated.

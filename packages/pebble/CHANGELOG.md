@@ -40,6 +40,16 @@ source, because the machine read the same table (`PEBBLE_BUGS.md`, BUG 86).
   other contract is unchanged, byte for byte.
 - Needs `@harmoniclabs/uplc` 2.0.8.
 
+### Costs of division are the network's protocol version's
+
+`pebble test` and every budget measured with the bundled machine cost `/` and `%`
+(`divideInteger`, `modInteger`) as a node at protocol version 11 does: the quadratic of the larger
+and the smaller size, with no constant for a first argument of fewer words. A script that reduces
+a small number modulo a large one costs 55,376 steps more per call than it was reported to; a
+transaction that declared the old figure is refused by such a node as over its budget.
+Everything else costs what it did. (`PEBBLE_BUGS.md`, BUG 87; the fix is in
+`@harmoniclabs/plutus-machine`.)
+
 ### Language
 
 Written as the documentation has them, and refused or broken until now (PEBBLE_BUGS 49-64):
