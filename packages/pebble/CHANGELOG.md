@@ -26,6 +26,20 @@ other way round.
   unchanged, byte for byte.
 - `pebble test` fuzzers and the debugger use the same encoding.
 
+### ⚠ BREAKING: `g1Compress`, `g1Uncompress`, `g1HashToGroup` (and the G2 ones) are the builtins they say
+
+Each was compiled to another's number: on a node `uncompress` ran `hashToGroup`,
+`compress` ran `uncompress`, and `hashToGroup` ran `compress`. Plutus encodes
+them compress 58, uncompress 59, hashToGroup 60 (65, 66, 67 for G2); the
+compiler, and `@harmoniclabs/uplc` before 2.0.8, had them in the order Plutus
+declares them. `pebble test` and every off-chain evaluation agreed with the
+source, because the machine read the same table (`PEBBLE_BUGS.md`, BUG 86).
+
+- **What changes for an existing contract**: one that uses any of the six has a
+  new hash, and for the first time does on a node what its source says. Every
+  other contract is unchanged, byte for byte.
+- Needs `@harmoniclabs/uplc` 2.0.8.
+
 ### Language
 
 Written as the documentation has them, and refused or broken until now (PEBBLE_BUGS 49-64):
