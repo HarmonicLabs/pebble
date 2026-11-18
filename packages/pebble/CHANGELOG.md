@@ -461,11 +461,14 @@ Written as the documentation has them, and refused or broken until now (PEBBLE_B
   bytes to 4,175. Scripts with no such function change by a few bytes either way: recompile
   and compare hashes before relying on a script address.
 
-### PEBBLE_BUGS 49 to 81, one line each
+### PEBBLE_BUGS 49 to 88, one line each
 
 The repro, the root cause and the fix of each are in `PEBBLE_BUGS.md`, and the tests in
-`compiler.jacquardBugs.0_6_0.test.ts` (49 to 77) and `compiler.jacquardBugs.0_6_0.sharing.test.ts`
-(78 to 81). The sections above describe the same fixes by what they change for a program.
+`compiler.jacquardBugs.0_6_0.test.ts` (49 to 77), `compiler.jacquardBugs.0_6_0.sharing.test.ts`
+(78 to 81), `compiler.jacquardBugs.0_6_0.steps.test.ts` (82 to 85) and
+`IRNativeTag.flatTags.test.ts` (86). 87 and 88 are not the compiler's: they are fixed and tested
+in the packages named. The sections above describe the same fixes by what they change for a
+program.
 
 - **49**: the `else` arm of a `case` expression could not read a variable or call a function.
 - **50**: `Some{}`, binding no field, failed in the backend as a `case` pattern.
@@ -500,6 +503,13 @@ The repro, the root cause and the fix of each are in `PEBBLE_BUGS.md`, and the t
 - **79**: a term kept the hash it had before what it holds was replaced.
 - **80**: after replacing a term, the walk of the tree skipped the `case` branches not yet visited.
 - **81**: a function that hashes passed for expensive work and was bound in every branch calling it.
+- **82**: `List<T>` with `T` a runtime struct was accepted and failed in the backend: error 30213.
+- **83**: a cast between two lists, `xs as List<T>`, was accepted and failed in the backend.
+- **84**: a runtime struct in a field of a runtime struct: reading the outer failed in the backend.
+- **85**: the parameter of `x => ...` was not `const`: a lambda inside it could not capture it.
+- **86**: BLS `compress`, `uncompress` and `hashToGroup` had each other's numbers (breaking, above).
+- **87**: not the compiler (plutus-machine): `/` and `%` by a larger number were costed too low.
+- **88**: not the compiler (uplc, plutus-data): a program's printed text did not read back as it.
 
 ### Editors: `check()`
 
