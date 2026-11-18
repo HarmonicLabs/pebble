@@ -11,6 +11,7 @@ import { TirDataOptT } from "../../../tir/types/TirNativeType/native/Optional/da
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
 import { TirType } from "../../../tir/types/TirType";
 import { TirSoPStructType } from "../../../tir/types/TirStructType";
+import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { getDataFuncSignature } from "./getDataFuncSignature";
 import { referenceSymbol } from "../../utils/symbols";
@@ -127,6 +128,15 @@ export function _compileDataEncodedConcreteType(
             {
                 const a = _compileDataEncodedConcreteType( ctx, aExpr, optionalsAsSop );
                 if( !a ) return undefined;
+                // a `List` or a `LinearMap` holds UPLC values, in a signature too:
+                // a runtime struct, which a parameter may be, is not one
+                if(
+                    ( genericKey === TirListT.toTirTypeKey() || genericKey === TirLinearMapT.toTirTypeKey() )
+                    && getUnaliased( a ) instanceof TirSoPStructType
+                ) return ctx.error(
+                    DiagnosticCode.A_0_holds_plain_values_and_1_is_a_runtime_struct_which_has_no_data_encoding_Declare_it_as_a_data_struct_or_keep_such_values_in_a_recursive_runtime_struct,
+                    aExpr.range, typeExpr.name.text, a.toString()
+                );
                 compiledArgs.push( a );
             }
             const applied = ctx.program.getAppliedGeneric(

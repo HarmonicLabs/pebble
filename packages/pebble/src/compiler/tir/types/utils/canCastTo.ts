@@ -99,7 +99,21 @@ export function canCastTo( a: TirType, b: TirType ): boolean
     }
     if( b instanceof TirListT )
     {
-        if( a instanceof TirListT ) return canCastTo( a.typeArg, b.typeArg );
+        if( a instanceof TirListT )
+        {
+            // element by element, where there is a way to do it: both lists
+            // hold data (the identity), both hold the same plain value, or one
+            // holds data and the other what that data decodes to. A list of
+            // integers is not turned into one of byte strings.
+            let from: TirType = a.typeArg;
+            let to: TirType = b.typeArg;
+            while( from instanceof TirAliasType ) from = from.aliased;
+            while( to instanceof TirAliasType ) to = to.aliased;
+            const heldAsData = ( t: TirType ) =>
+                t instanceof TirDataT || t instanceof TirDataOptT || t instanceof TirDataStructType;
+            if( !heldAsData( from ) && !heldAsData( to ) && from.toTirTypeKey() !== to.toTirTypeKey() ) return false;
+            return canCastTo( from, to );
+        }
         if( a instanceof TirDataT ) return canCastToData( b.typeArg );
         return false;
     }

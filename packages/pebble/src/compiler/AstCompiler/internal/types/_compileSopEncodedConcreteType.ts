@@ -9,6 +9,8 @@ import { TirLinearMapT } from "../../../tir/types/TirNativeType/native/linearMap
 import { TirListT } from "../../../tir/types/TirNativeType/native/list";
 import { TirSopOptT } from "../../../tir/types/TirNativeType/native/Optional/sop";
 import { TirType } from "../../../tir/types/TirType";
+import { TirSoPStructType } from "../../../tir/types/TirStructType";
+import { getUnaliased } from "../../../tir/types/utils/getUnaliased";
 import { AstCompilationCtx } from "../../AstCompilationCtx";
 import { _compileDataEncodedConcreteType } from "./_compileDataEncodedConcreteType";
 import { getDataFuncSignature } from "./getDataFuncSignature";
@@ -149,6 +151,14 @@ export function _compileSopEncodedConcreteType(
                     ? _compileDataEncodedConcreteType( ctx, aExpr )
                     : _compileSopEncodedConcreteType( ctx, aExpr );
                 if( !a ) return undefined;
+                // ...and never a runtime struct either: it is a constructor term,
+                // which no UPLC list holds. Accepted here, the first literal of
+                // the list failed in the back end ("SoP struct cannot be
+                // represented as uplc constants"), with no place to point at.
+                if( holdsValues && getUnaliased( a ) instanceof TirSoPStructType ) return ctx.error(
+                    DiagnosticCode.A_0_holds_plain_values_and_1_is_a_runtime_struct_which_has_no_data_encoding_Declare_it_as_a_data_struct_or_keep_such_values_in_a_recursive_runtime_struct,
+                    aExpr.range, typeExpr.name.text, a.toString()
+                );
                 compiledArgs.push( a );
             }
             const applied = ctx.program.getAppliedGeneric(

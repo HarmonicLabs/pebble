@@ -308,6 +308,7 @@ export enum DiagnosticCode {
     Mutually_recursive_declarations_are_not_supported_0_is_used_directly_or_indirectly_in_its_own_definition = 30210,
     A_map_literal_is_not_assignable_to_0 = 30211,
     A_bare_identifier_cannot_be_the_key_of_a_map_literal_Write_0_value_to_use_the_value_of_the_variable_as_the_key = 30212,
+    A_0_holds_plain_values_and_1_is_a_runtime_struct_which_has_no_data_encoding_Declare_it_as_a_data_struct_or_keep_such_values_in_a_recursive_runtime_struct = 30213,
     Dev_was_too_lazy_to_add_a_prooper_error_message_Something_went_wrong = 42069
 }
 
@@ -620,6 +621,7 @@ export function diagnosticCodeToString(code: DiagnosticCode): string {
         case 30210: return "Mutually recursive declarations are not supported: '{0}' is used, directly or indirectly, in its own definition.";
         case 30211: return "A map literal is not assignable to {0}.";
         case 30212: return "A bare identifier cannot be the key of a map literal. Write '({0}): value' to use the value of the variable as the key.";
+        case 30213: return "A {0} holds plain values, and '{1}' is a runtime struct, which has no data encoding. Declare it as a 'data struct', or keep such values in a recursive runtime struct.";
         case 42069: return "Dev was too lazy to add a prooper error message. Something went wrong";
         default: return "";
     }

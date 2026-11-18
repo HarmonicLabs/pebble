@@ -16,8 +16,11 @@ import { TirType } from "../types/TirType";
 import { getUnaliased } from "../types/utils/getUnaliased";
 import { ITirExpr } from "./ITirExpr";
 import { TirExpr } from "./TirExpr";
-import { _inlineFromData } from "./TirFromDataExpr";
-import { _inlineToData } from "./TirToDataExpr";
+import { _fromDataUplcFunc, _inlineFromData } from "./TirFromDataExpr";
+import { _inlineToData, _toDataUplcFunc, isTirDataEncodedType } from "./TirToDataExpr";
+import { TirListT } from "../types/TirNativeType/native/list";
+import { getListTypeArg } from "../types/utils/getListTypeArg";
+import { IRConst } from "../../../IR/IRNodes/IRConst";
 import { ToIRTermCtx } from "./ToIRTermCtx";
 
 export class TirTypeConversionExpr
@@ -120,6 +123,40 @@ export class TirTypeConversionExpr
         {
             if( from_t instanceof TirBytesT ) return _ir_apps(
                 IRNative.decodeUtf8,
+                exprIR
+            );
+            throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);
+        }
+
+        // `List<A> as List<B>` (PEBBLE_BUGS 83). A list holds its elements as
+        // data when they are data, a data struct or an optional out of one,
+        // and as the plain UPLC value otherwise (`List<int>` is `list
+        // integer`). Between two lists of the first kind the cast is the
+        // identity — this is how the elements of a list read off some data
+        // are given their type: `std.builtins.unListData( d ) as List<Asset>`
+        // — and between a list of data and a list of plain values each
+        // element is decoded, or encoded. The checker accepted all of them
+        // (and any pair of element types that cast to each other); the back
+        // end knew none, and failed with "Cannot convert from List<data> to
+        // List<Asset>" at no place in the source.
+        if( to_t instanceof TirListT && from_t instanceof TirListT )
+        {
+            const fromElem = getUnaliased( getListTypeArg( from_t )! );
+            const toElem = getUnaliased( getListTypeArg( to_t )! );
+            const fromData = isTirDataEncodedType( fromElem );
+            const toData = isTirDataEncodedType( toElem );
+            if( fromData && toData ) return exprIR;
+            if( fromElem.toTirTypeKey() === toElem.toTirTypeKey() ) return exprIR;
+            if( fromData ) return _ir_apps(
+                IRNative._mkMapList,
+                IRConst.listOf( toElem )([]),
+                _fromDataUplcFunc( toElem ),
+                exprIR
+            );
+            if( toData ) return _ir_apps(
+                IRNative._mkMapList,
+                IRConst.listOf( toElem )([]),
+                _toDataUplcFunc( fromElem ),
                 exprIR
             );
             throw new Error(`Cannot convert from ${from_t.toString()} to ${to_t.toString()}`);

@@ -90,10 +90,25 @@ Written as the documentation has them, and refused or broken until now (PEBBLE_B
   "Statement expected", reported some lines below (PEBBLE_BUGS 76).
 - **Warning 6134 no longer fires on a scalar or a point written out in the list of a
   multi-scalar multiplication** (PEBBLE_BUGS 77): the builtin uses every element.
+- **A `List` of runtime structs is refused where it is written** (error 30213, PEBBLE_BUGS
+  82): no UPLC list holds a constructor term. It was accepted and failed in the back end
+  on its first literal. Declare the struct a `data struct`, or keep the values in a
+  recursive runtime struct.
+- **A cast between two lists** (PEBBLE_BUGS 83): `std.builtins.unListData( d ) as
+  List<Asset>` gives the elements of a list read off some data their type; a list of data
+  cast to a list of integers decodes each element. Both were accepted and failed in the
+  back end. A list of integers as a list of byte strings is refused by the checker.
+- **A runtime struct in a field of a runtime struct** (PEBBLE_BUGS 84): reading any field
+  of the outer one failed with "simple var decl without init expr".
 - **A `string` has one method, `encodeUtf8()`**, which could not be written before. It was
   offered the methods of `bytes` instead (`length`, `slice`, …): those compiled to byte-string
   builtins applied to a string and failed when the script ran. They are now error 2339; ask
   them of `s.encodeUtf8()`. A quoted literal is `bytes`, as before.
+
+- **The parameter of `x => ...` is `const`** (PEBBLE_BUGS 85), like every other parameter
+  that does not say `let`: a lambda inside it can capture it. It was flagged as nothing,
+  which the capture check reads as a mutable `let` (error 30207), while `( x ) => ...`
+  compiled.
 
 ### REPL
 

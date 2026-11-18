@@ -30,12 +30,12 @@ async function runTestSuite(
 
 describe("test feature — unsupported fuzzers are skipped, not crashed", () => {
 
-    test("a list of runtime (SoP) structs has no built-in fuzzer and is skipped", async () => {
+    // (These used a `List` of runtime structs as the type with no fuzzer. That
+    // type is refused where it is written since PEBBLE_BUGS 82: no UPLC list
+    // holds a constructor term. A function is the type nothing samples now.)
+    test("a function has no built-in fuzzer and is skipped", async () => {
         const { compiler, results } = await runTestSuite(`
-runtime struct Point {
-    Point { x: int, y: int }
-}
-test needs_a_fuzzer( ps: List<Point> ) {
+test needs_a_fuzzer( ps: ( x: int ) => int ) {
     assert true else "x";
 }`);
         // the program itself is well-typed — skipping is a runner decision,
@@ -69,10 +69,7 @@ test bad_via( a: int via ( x: bytes ) => 0 ) {
     test("if any one parameter is unsupported the whole property test is skipped", async () => {
         // first param has a built-in fuzzer, second does not
         const { results } = await runTestSuite(`
-runtime struct Wrap {
-    Wrap { v: int }
-}
-test mixed_support( n: int, w: List<Wrap> ) {
+test mixed_support( n: int, w: ( x: int ) => int ) {
     assert n == n else "x";
 }`);
         const r = results[0];
@@ -83,13 +80,10 @@ test mixed_support( n: int, w: List<Wrap> ) {
 
     test("a skipped test does not prevent sibling tests from running", async () => {
         const { results } = await runTestSuite(`
-runtime struct Wrap {
-    Wrap { v: int }
-}
 test unit_ok() {
     assert 1 + 1 == 2 else "x";
 }
-test prop_skipped( w: List<Wrap> ) {
+test prop_skipped( w: ( x: int ) => int ) {
     assert true else "x";
 }
 test prop_ok( n: int ) {

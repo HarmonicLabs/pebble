@@ -320,6 +320,7 @@
   "Mutually recursive declarations are not supported: '{0}' is used, directly or indirectly, in its own definition.": 30210,
   "A map literal is not assignable to {0}.": 30211,
   "A bare identifier cannot be the key of a map literal. Write '({0}): value' to use the value of the variable as the key.": 30212,
+  "A {0} holds plain values, and '{1}' is a runtime struct, which has no data encoding. Declare it as a 'data struct', or keep such values in a recursive runtime struct.": 30213,
 
   "Dev was too lazy to add a prooper error message. Something went wrong": 42069
 }

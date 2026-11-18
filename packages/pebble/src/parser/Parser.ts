@@ -3197,7 +3197,10 @@ export class Parser extends DiagnosticEmitter
                     return this.parseCommonFuncExpr(
                         Identifier.anonymous(tn.range(startPos)),
                         [
-                            SimpleVarDecl.onlyIdentifier( identifier, CommonFlags.None )
+                            // a parameter is `const` unless it says `let`, and a
+                            // bare one cannot say it: flagged as anything else, an
+                            // inner lambda could not capture it (error 30207)
+                            SimpleVarDecl.onlyIdentifier( identifier, CommonFlags.Const )
                         ],
                         ArrowKind.Single,
                         startPos

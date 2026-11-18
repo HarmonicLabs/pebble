@@ -1056,19 +1056,26 @@ function getConstrDestructPattern(
             new TirSimpleVarDecl(
                 uniqueName,
                 field.type,
-                initExpr,
+                // a field of a pattern is bound by the pattern: it has no
+                // initializer of its own
+                undefined,
                 false, // not a constant (reassigned if deconstruction statement already exists later)
                 range
             )
         );
     }
 
+    // `initExpr` is what the PATTERN takes apart (PEBBLE_BUGS 84). It was
+    // given to every field instead, and the declaration left without one: the
+    // nested destructure of a single-constructor runtime struct held in a
+    // field of another — the only caller that passes an initializer — failed
+    // with "simple var decl without init expr" for any read of the outer one.
     return new TirNamedDeconstructVarDecl(
         constr.name,
         deconstructedFields,
         undefined,
         type,
-        undefined,
+        initExpr,
         false, // not a constant
         range
     );
