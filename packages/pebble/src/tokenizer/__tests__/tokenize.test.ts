@@ -74,7 +74,8 @@ describe("tokenize", () => {
             }
         };
         walk( examples );
-        expect( files.length ).toBeGreaterThan( 10 );
+        // the nine example sources in the repository (a checkout may have more, untracked)
+        expect( files.length ).toBeGreaterThanOrEqual( 9 );
         const gap = /^(\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*$/;
         for( const file of files )
         {

@@ -2562,6 +2562,7 @@ the installed copies — under buildooor and under both of this repository's
 `node_modules` — are the crypto checkout's build
 (`buildooor/src/__tests__/crypto.ed25519.node_semantics.test.ts`: the function
 and the builtin). One more stale install, like uplc 2.0.6 above.
+*(Since 2026-11-20 `@harmoniclabs/crypto` 0.3.2 is published, and buildooor 0.3.0 requires it.)*
 
 All **uncommitted** in the buildooor checkout when this was written.
 
@@ -2712,6 +2713,7 @@ machine for a script that divides or reduces a number by a larger one was too
 low for a network at version 11; everything else is unchanged. plutus-machine
 3.1.0 is not published: the copies under buildooor and this repository are the
 checkout's build — **uncommitted** when this was written.
+*(Since 2026-11-20 plutus-machine 3.1.0 is published, and Pebble 0.6.0 and buildooor 0.3.0 require it.)*
 
 ### BUG 88 — LOW (not the compiler: `@harmoniclabs/uplc`, `@harmoniclabs/plutus-data`): the text of a program does not read back as the program — FIXED (2026-11-18)
 
