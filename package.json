@@ -36,6 +36,6 @@
   },
   "funding": "https://github.com/sponsors/HarmonicLabs",
   "dependencies": {
-    "@harmoniclabs/pebble-cli": "^0.3.3"
+    "@harmoniclabs/pebble-cli": "^0.6.0"
   }
 }
